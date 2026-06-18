@@ -1,21 +1,359 @@
-# Architecture
+# Robo Wake-Up — Architecture Document
 
-> Describe the high-level architecture of this project.
+## 1. Overview
 
-## Overview
+**Robo Wake-Up** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
 
-<!-- Diagram or prose overview of the system. -->
+---
 
-## Components
+## 2. Actual Stack (as built)
 
-| Component | Responsibility | Technology |
-|-----------|----------------|------------|
-|           |                |            |
+### Desktop UI — `apps/desktop/`
+| Layer | Choice |
+|---|---|
+| Framework | React 18 |
+| Build tool | Vite 5 |
+| Language | TypeScript 5 (strict, `moduleResolution: "Bundler"`) |
+| Styling | Tailwind CSS v3 + Framer Motion v11 |
+| Icons | lucide-react |
+| Dev port | 5173 |
 
-## Data Flow
+### Orchestrator — `apps/orchestrator/`
+| Layer | Choice |
+|---|---|
+| Language | Python 3.13 |
+| Web framework | FastAPI 0.115 |
+| Server | uvicorn with standard extras |
+| Config | pydantic-settings (reads `.env`) |
+| HTTP client | httpx (for TTS/STT/agent API calls) |
+| Dev port | 8787 |
 
-<!-- How does data move through the system? -->
+### Voice Providers
+| Direction | Browser (default) | Server (opt-in) |
+|---|---|---|
+| TTS | Web Speech Synthesis API | OpenAI TTS (`tts-1` / `tts-1-hd`) or ElevenLabs |
+| STT | Web Speech Recognition API | OpenAI Whisper (`whisper-1`) |
 
-## Key Design Decisions
+### Monorepo layout
+```
+personal-agent/
+├── apps/
+│   ├── desktop/          React + Vite frontend
+│   └── orchestrator/     Python FastAPI backend
+├── docs/                 Architecture, API contracts, setup
+├── packages/             Shared packages (reserved)
+├── start.py              Cross-platform dev launcher
+├── start.sh              macOS / Linux convenience wrapper
+└── start.bat             Windows convenience wrapper
+```
 
-<!-- Document non-obvious decisions and their rationale. -->
+---
+
+## 3. High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Browser (React + Vite)                 │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  UI Components  │  Runtime Hooks                     │   │
+│  │  - RobotAvatar  │  - useOrchestratorRuntime          │   │
+│  │  - AgentBootList│  - useVoice (browser STT/TTS)      │   │
+│  │  - SettingsPanel│  - useAudioPlayer (server audio)   │   │
+│  │  - Transcript   │  - useVoiceProviderConfig          │   │
+│  │  - QuickStats   │  - useAgentConfig / useLLMConfig   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│                     │ WebSocket ws://localhost:8787/ws       │
+└─────────────────────┼───────────────────────────────────────┘
+                      │
+┌─────────────────────▼───────────────────────────────────────┐
+│                 Python Orchestrator (FastAPI)                │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  WS endpoint /ws │ IntentRouter │ AgentManager       │   │
+│  ├──────────────────────────────────────────────────────┤   │
+│  │  TTSProvider (OpenAI / ElevenLabs / Browser)         │   │
+│  │  STTProvider (OpenAI Whisper / Browser)              │   │
+│  │  LLMService   (OpenAI / Anthropic / Gemini / Ollama) │   │
+│  └──────────────────────────────────────────────────────┘   │
+│    │      │      │       │       │       │       │           │
+│  ┌─▼─┐ ┌─▼─┐ ┌──▼─┐ ┌──▼─┐ ┌──▼─┐ ┌──▼─┐ ┌───▼──┐       │
+│  │Wth│ │Sys│ │ GH │ │Cal │ │Stk │ │News│ │Gen AI│       │
+│  └───┘ └───┘ └────┘ └────┘ └────┘ └────┘ └──────┘       │
+└─────────────────────────────────────────────────────────────┘
+       │         │          │          │          │
+  ┌────▼───┐ ┌───▼──┐ ┌────▼───┐ ┌───▼──┐ ┌────▼───┐
+  │Weather │ │GitHub│ │Yahoo   │ │News  │ │LLM API │
+  │API     │ │API   │ │Finance │ │API   │ │        │
+  └────────┘ └──────┘ └────────┘ └──────┘ └────────┘
+```
+
+---
+
+## 4. WebSocket Protocol
+
+All UI ↔ orchestrator communication goes through a single persistent WebSocket at `ws://localhost:8787/ws`.
+
+### UI → Orchestrator Commands
+
+| Command | Key Payload Fields | Description |
+|---|---|---|
+| `start_session` | `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` | Wake + boot sequence |
+| `send_text_command` | `text` | Route a text command |
+| `audio_chunk` | `data_b64`, `format`, `is_final` | Stream audio for server STT |
+| `farewell_session` | `phrase` | Speak a goodbye, then enter sleep mode |
+| `stop_session` | — | Enter sleep mode immediately (no farewell) |
+| `retry_agent` | `agent` | Retry a failed agent |
+
+### Orchestrator → UI Events
+
+| Event | Key Payload Fields | Description |
+|---|---|---|
+| `connected` | `version`, `tts_provider`, `stt_provider` | WS opened; reports .env defaults |
+| `session_config` | `tts_provider`, `stt_provider` | Sent at boot start; reports actual session providers |
+| `phase_changed` | `phase` | Phase state machine transition |
+| `boot_status` | `message`, `agent_id?`, `audio_b64?`, `audio_format?` | Boot narration line |
+| `agent_status_changed` | `agent`, `status` | Agent lifecycle update |
+| `transcript_final` | `speaker`, `text` | Confirmed transcript (user or system) |
+| `route_selected` | `agent`, `confidence`, `reason` | Intent routing decision |
+| `assistant_speaking` | `text`, `audio_b64?`, `audio_format?` | Agent response |
+| `assistant_done` | — | Response complete |
+| `error` | `message` | Error notification |
+
+### Phase State Machine
+```
+standby ──wake──▶ wake_detected ──▶ booting ──▶ ready ◀──────┐
+                                                  │           │
+                                              listening       │
+                                                  │           │
+                                              thinking        │
+                                                  │           │
+                                             responding ──────┘
+                                                  │
+ready / booting ──sleep phrase──▶ responding (farewell TTS) ──▶ sleep
+ready / booting ──Sleep button──▶ sleep
+sleep ──wake──▶ wake_detected
+```
+
+### Session Greeting and Farewell
+
+**Wake-up greeting** — sent during the boot sequence as the first `boot_status` line. Varies by time of day (Good morning / afternoon / evening) with a randomised suffix.
+
+**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", etc.):
+1. UI sends `farewell_session { phrase }` to the orchestrator
+2. Orchestrator picks a contextual goodbye based on the phrase (`good night` → night-themed line; `bye/goodbye` → farewell-themed line)
+3. Farewell is synthesised via the session TTS provider and sent as `assistant_speaking`
+4. Orchestrator sends `phase_changed: sleep` after the farewell event
+5. Frontend defers the sleep transition until the farewell audio finishes playing, then runs cleanup (agents → offline, transcript updated, UI enters sleep mode)
+
+**Sleep button** — skips the farewell and enters sleep immediately via `stop_session`.
+
+### Audio Delivery
+When a server TTS provider is active, `boot_status` and `assistant_speaking` events include:
+- `audio_b64` — base64-encoded MP3 audio bytes
+- `audio_format` — `"mp3"`
+
+The UI plays these via `HTMLAudioElement`; falls back to browser `SpeechSynthesis` when absent.
+
+---
+
+## 5. Voice Provider Architecture
+
+### Priority Order (per session)
+1. **Settings → Providers tab** in UI — stored in `robo-voice-providers` (localStorage), sent in `start_session`
+2. **`.env` file** — server-side fallback when UI sends `"browser"` or empty values
+
+### Available Providers
+**TTS:**
+- `browser` — Web Speech Synthesis (no key, quality varies by OS)
+- `openai` — `tts-1` or `tts-1-hd`; voices: alloy · echo · fable · onyx · nova · shimmer
+- `elevenlabs` — ultra-realistic; configurable voice ID
+
+**STT:**
+- `browser` — Web Speech Recognition (Chrome / Safari)
+- `openai` — Whisper `whisper-1`; accepts webm, mp4, ogg, wav, mp3
+
+---
+
+## 6. Agent Architecture
+
+Each agent implements `handle(AgentRequest) → AgentResponse`.
+
+### Agent Table
+| Agent ID | Label | Status | Data Source |
+|---|---|---|---|
+| `system` | System | ✅ Real | `platform` module + system time |
+| `weather` | Weather | ✅ Real | OpenWeatherMap / WeatherAPI via `agent_config.weather` |
+| `calendar` | Google Calendar | ✅ Real | Google Calendar API v3 via OAuth `access_token` |
+| `email` | Google Email | ✅ Real | Gmail API via OAuth `access_token` |
+| `github` | GitHub | ✅ Real | GitHub REST API via Personal Access Token |
+| `stock` | Stock Market | ✅ Real | Yahoo Finance via `yfinance` — no API key required |
+| `news` | News | ✅ Real | NewsAPI.org via `agent_config.news.api_key` |
+| `general` | General AI | ✅ Real | LLM service — OpenAI / Anthropic / Gemini / Ollama |
+
+### Intent Router
+
+Two-tier strategy implemented in `app/services/router.py`:
+
+**Tier 1 — LLM classifier** (when `llm_config` has a key or provider=ollama):
+
+A lightweight call (`temperature=0.0`, `max_tokens=80`) sends the user's query plus a dynamically built list of enabled agents to the configured LLM. The LLM returns a single JSON line:
+```json
+{"agent": "calendar", "reason": "user asking about upcoming events"}
+```
+If the call fails or returns an unknown agent name, falls back to tier 2 silently.
+
+**Tier 2 — Keyword fallback** (always active):
+```
+weather / temperature / rain / forecast / humidity / wind  →  WeatherAgent
+calendar / meeting / schedule / appointment / event        →  CalendarAgent  (before datetime)
+email / inbox / unread / mail / sender / message           →  EmailAgent
+"what time" / "current time" / "what day" / date / clock  →  SystemAgent
+system / cpu / battery / memory / ram / health / os        →  SystemAgent
+stock / nifty / sensex / s&p / rsi / moving average…      →  StockAgent
+github / repo / pr / issue / workflow / commit             →  GitHubAgent
+news / headline / breaking news / current events           →  NewsAgent
+(everything else)                                          →  GeneralAgent
+```
+
+Contraction normalisation (`whats` / `what's` → `what is`) is applied before phrase matching to handle voice-to-text variations.
+
+---
+
+## 7. Credential & Security Design
+
+| Rule | Detail |
+|---|---|
+| No secrets in source | API keys never appear in `.ts`, `.py`, or any tracked file |
+| Frontend storage | `localStorage` only (`robo-*` keys) — sandboxed to origin, cannot be git-committed |
+| Credential flow | localStorage → WebSocket `start_session` payload → orchestrator → external API |
+| Orchestrator persistence | Session credentials are used and discarded; not stored server-side |
+| `.env` file | Server-level defaults only (TTS/STT provider + key); UI settings override per session |
+| External calls | Only the orchestrator calls external APIs; browser calls TTS providers only for "Test TTS" in settings |
+
+---
+
+## 8. Development Phases
+
+### Phase 1 — Simulated UX ✅ COMPLETE
+- Futuristic 3-column React dashboard
+- Mock boot sequence, wake detection, intent routing
+- All 5 agent stubs, system health panel
+- Settings panel: Profile | Voice | AI | Agents
+- LLM hook (Anthropic / OpenAI / Gemini / Ollama)
+- Security-safe credential storage via localStorage hooks
+
+### Phase 2 — Real Local Orchestrator ✅ COMPLETE
+- Python FastAPI WebSocket orchestrator at `:8787`
+- `useOrchestratorRuntime` hook: WS mode + local offline fallback
+- Boot sequence via WS events, TTS serial queue, auto-reconnect
+- `SystemAgent` with real OS/CPU/Python data
+- WS connection badge + system health panel in UI
+- `start.py` cross-platform dev launcher (auto-setup, streams output, opens browser)
+
+### Phase 3 — Real Voice Stack ✅ COMPLETE
+- `TTSProvider` / `STTProvider` abstractions with OpenAI and ElevenLabs implementations
+- Per-session provider selection from UI (overrides `.env`)
+- Server audio: `audio_b64` in WS events → played via `HTMLAudioElement`
+- Server STT: `MediaRecorder` → `audio_chunk` WS → Whisper → `transcript_final`
+- Settings → Providers tab: full TTS/STT provider configuration from UI
+- `useAudioPlayer` hook, `isPlayingServerAudio` state, `orchestratorCaps` tracking
+
+### Phase 4 — Real Integrations ✅ COMPLETE
+All agent stubs replaced with real external API calls. Credentials flow from UI localStorage → `start_session` → `AgentManager.configure_session()` → individual agent `handle()`.
+
+**New files:**
+- `app/services/llm.py` — `LLMService` supporting OpenAI, Anthropic, Gemini, Ollama (OpenAI-compat)
+- All 5 agent files rewritten with real httpx API calls
+
+**WS protocol (implemented):**
+`start_session` carries:
+```json
+{
+  "llm_config":   { "provider": "openai", "api_key": "sk-...", "model": "gpt-4o", "base_url": "" },
+  "agent_config": {
+    "weather": { "provider": "openweathermap", "api_key": "...", "default_city": "Mumbai" },
+    "github":  { "personal_access_token": "ghp_..." },
+    "google":  { "access_token": "ya29...", "refresh_token": "..." }
+  }
+}
+```
+
+**Credential injection flow:**
+1. `ws.py` extracts `llm_config` + `agent_config` from `start_session` payload
+2. Calls `agent_manager.configure_session(llm_config, agent_config)`
+3. `AgentManager.handle()` enriches each `AgentRequest.context` with the correct per-agent credentials
+4. Agents read credentials from `request.context['agent_config']` and `request.context['llm_config']`
+
+**Graceful degradation:** Each agent returns a helpful message if its credential is not configured rather than raising an error.
+
+### Phase 5 — Hardening ✅ COMPLETE
+
+**openWakeWord (always-on wake detection)**
+- `app/services/wake_word.py` — `WakeWordService` thread using `sounddevice` + `openwakeword`
+- Controlled by `WAKE_WORD_ENABLED`, `WAKE_WORD_MODEL`, `WAKE_WORD_SENSITIVITY` in `.env`
+- Broadcasts `wake_word_detected {model}` WS event to all clients; frontend triggers `triggerWakeWord()`
+- Browser continuous-listening disabled automatically when server reports `wake_word_enabled: true`
+- Optional: install `sounddevice openwakeword numpy` + `portaudio` (macOS)
+
+**Diagnostics — real-time metrics**
+- `app/services/metrics.py` — `MetricsService` in-memory store (sessions, commands, agent timing, TTS/STT counts)
+- `ws.py` instruments every command, agent call, and TTS/STT call
+- `metrics_update` WS event broadcast every 5 s to all connected clients
+- UI: "Performance" card in right sidebar shows uptime, commands, sessions, per-agent avg ms
+
+**Tauri native desktop wrapper**
+- `apps/desktop/src-tauri/` — complete Tauri v2 scaffold
+  - `Cargo.toml` — tauri 2, plugin-store 2, plugin-shell 2, plugin-notification 2
+  - `src/lib.rs` — system tray with show/hide + quit, click-to-toggle window
+  - `src/main.rs`, `build.rs`, `capabilities/default.json`
+- `apps/desktop/src/lib/secureStore.ts` — dual-mode storage abstraction
+  - In Tauri: uses `@tauri-apps/plugin-store` (encrypted `.robo-config.dat` in app-data)
+  - In browser: transparent localStorage pass-through
+  - `hydrateFromTauriStore()` called in `main.tsx` before React mounts
+- `apps/desktop/package.json` — added `@tauri-apps/api`, `@tauri-apps/plugin-store`, `@tauri-apps/cli`
+- `apps/desktop/vite.config.ts` — Tauri-compatible HMR, platform-aware build targets
+
+**Building the native app:**
+```bash
+# Requires Rust toolchain: https://rustup.rs
+cd apps/desktop
+npm install
+npm run tauri:dev    # dev mode with native window
+npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bundle/
+```
+
+### Phase 6 — New Agents + LLM Routing ✅ COMPLETE
+
+**Stock Market agent** (`app/agents/stock.py`)
+- Yahoo Finance via `yfinance` — no API key required
+- Current price, day change %, RSI(14), SMA(20/50), support/resistance, 52-week range
+- Indian market support: Nifty, Sensex, BankNifty, any NSE ticker (`.NS` suffix auto-added)
+- Boot confirmation: live Nifty 50 + Sensex (or S&P 500 + Dow Jones for US)
+- Config: `STOCK_DEFAULT_MARKET` (`.env`) or Settings → Agents → Stock Market Agent
+
+**News agent** (`app/agents/news.py`)
+- NewsAPI.org free developer plan (100 req/day, works from localhost)
+- Generic queries → `/top-headlines` by country; topic queries → `/everything`
+- Boot confirmation: top 2 headlines for the configured country
+- Config: country dropdown + optional State/City in Settings → Agents → News Agent
+
+**Agent roster fix**
+- Added `stock` and `news` to `AGENT_CATALOGUE` (`useOrchestratorRuntime.ts`) and `AGENT_META` (`AgentBootList.tsx`)
+- Agents missing from either registry were silently dropped from the boot list
+
+**LLM-based intent routing** (`app/services/router.py`)
+- `IntentRouter.configure_session(llm_config, enabled_agents)` — called at session start
+- `IntentRouter.route(text)` is now `async`
+- Primary path: LLM classifier (`temperature=0.0`, `max_tokens=80`) — handles paraphrase and voice variations
+- Fallback path: keyword matching — covers all cases when LLM is unavailable or fails
+- `LLMService.complete()` gains a `temperature` parameter (default `0.7`; routing passes `0.0`)
+- `start_session` payload now includes `news: { api_key, country, state, city }`
+
+**Session farewell** (`app/api/ws.py` + `useOrchestratorRuntime.ts`)
+- Sleep phrases ("Bye Robo", "Good night", "Go to sleep") trigger `farewell_session { phrase }` instead of `stop_session`
+- Orchestrator picks a contextual goodbye from `FAREWELL_LINES` via `_pick_farewell(phrase)`:
+  - "good night" → night-themed line ("Goodnight! Rest well.", "Goodnight! Sweet dreams.")
+  - "bye/goodbye" → farewell-themed line ("Goodbye! Have a wonderful day.", "Farewell!…")
+  - generic → random from the full list
+- Farewell is spoken via the session TTS provider before sleep
+- Frontend defers `phase_changed: sleep` via `pendingPhaseRef` until `drainTTSQueue` finishes, then calls `doSleep()` — guarantees the audio plays fully before the UI transitions
+- Sleep button still sends `stop_session` (immediate, no farewell)

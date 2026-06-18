@@ -1,54 +1,27 @@
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.idea/
-.vscode/
-*.swp
-*.swo
-*.sublime-workspace
-
-# Environment / secrets
+# ── Secrets — never commit these ──────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
-*.pem
-*.key
-secrets/
+apps/orchestrator/.env
 
-# Logs
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Build artifacts
-dist/
-build/
-out/
-*.egg-info/
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
 .mypy_cache/
 .ruff_cache/
 
-# Dependencies
+# ── Node / frontend ───────────────────────────────────────────────────────────
 node_modules/
-.pnp
-vendor/
-.venv/
-venv/
+apps/desktop/dist/
+apps/desktop/.vite/
 
-# Coverage
-coverage/
-.coverage
-htmlcov/
-
-# Misc
-.cache/
-.tmp/
-tmp/
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/settings.json
+*.swp

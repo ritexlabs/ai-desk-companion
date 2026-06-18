@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Replace the steps in this job with your language-specific commands.
+  # Examples:
+  #   Node.js  — npm ci && npm run lint && npm run type-check && npm test
+  #   Python   — pip install -r requirements.txt && ruff check . && pytest
+  #   Go       — go vet ./... && go test ./...
+  # ------------------------------------------------------------------
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up environment
+        # TODO: replace with your language setup step
+        # e.g. actions/setup-node@v4, actions/setup-python@v5, actions/setup-go@v5
+        run: echo "Add your environment setup here"
+
+      - name: Install dependencies
+        run: echo "Add your install command here"
+
+      - name: Lint
+        run: echo "Add your lint command here"
+
+      - name: Test
+        run: echo "Add your test command here"
+
+      - name: Build
+        run: echo "Add your build command here"

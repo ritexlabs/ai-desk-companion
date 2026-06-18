@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Safety net: block pushes that contain project-specific content in AI instruction files.
+# This runs automatically after `./scripts/setup.sh` sets core.hooksPath.
+
+PROTECTED_FILES=(
+  "CLAUDE.md"
+  "GEMINI.md"
+  ".gemini/styleguide.md"
+)
+
+# Markers that indicate a file has been filled in beyond the generic template.
+# Adjust these strings if your template placeholder text changes.
+SENSITIVE_PATTERNS=(
+  "singhipst"
+  "ritexlabs"
+  "DATABASE_URL"
+  "SECRET"
+  "PASSWORD"
+  "TOKEN"
+  "API_KEY"
+  "private"
+  "internal"
+)
+
+ABORT=0
+
+for f in "${PROTECTED_FILES[@]}"; do
+  if ! git ls-files --error-unmatch "$f" &>/dev/null 2>&1; then
+    continue  # file not tracked, skip
+  fi
+
+  # Check staged/committed version of the file (not working tree)
+  CONTENT=$(git show "HEAD:$f" 2>/dev/null || true)
+  if [ -z "$CONTENT" ]; then
+    continue
+  fi
+
+  for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+    if echo "$CONTENT" | grep -qi "$pattern"; then
+      echo "PUSH BLOCKED: '$f' appears to contain sensitive or project-specific content (matched: '$pattern')."
+      echo "  Run: git update-index --skip-worktree $f"
+      echo "  Then reset the committed version: git checkout HEAD -- $f"
+      ABORT=1
+      break
+    fi
+  done
+done
+
+if [ "$ABORT" -eq 1 ]; then
+  echo ""
+  echo "Push aborted to prevent leaking AI instruction file content."
+  echo "Run ./scripts/setup.sh to protect these files going forward."
+  exit 1
+fi
+
+exit 0

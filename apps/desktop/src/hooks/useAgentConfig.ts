@@ -87,7 +87,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     enabled: true,
   },
   weather: {
-    enabled: true,
+    enabled: false,
     provider: 'openweathermap',
     apiKey: '',
     defaultCity: '',
@@ -95,8 +95,8 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     info: '',
   },
   google: {
-    calendarEnabled: true,
-    emailEnabled: true,
+    calendarEnabled: false,
+    emailEnabled: false,
     clientId: '',
     clientSecret: '',
     accessToken: '',
@@ -108,20 +108,20 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     info: '',
   },
   github: {
-    enabled: true,
+    enabled: false,
     personalAccessToken: '',
     username: '',
     status: 'idle',
     info: '',
   },
   stock: {
-    enabled: false,  // opt-in: user must explicitly enable
+    enabled: false,
     defaultMarket: 'IN',
     status: 'connected',
     info: 'Yahoo Finance (free, no key required)',
   },
   news: {
-    enabled: false,  // opt-in: requires GNews API key
+    enabled: false,
     apiKey: '',
     country: 'in',
     state: '',

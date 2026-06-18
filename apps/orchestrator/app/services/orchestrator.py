@@ -54,8 +54,7 @@ def _make_system_prompt(name: str) -> str:
         'you MUST call the appropriate tool — never answer from your own knowledge. '
         'Only answer directly for pure general knowledge (maths, definitions, history). '
         'Replies: 1–3 sentences, no markdown, no bullet points, plain spoken language. '
-        'IMPORTANT: Always respond in the exact same language the user wrote in. '
-        'If the user writes in Hindi, reply in Hindi. If in Spanish, reply in Spanish. Never switch languages.'
+        'IMPORTANT: Always respond in English. Do not switch to another language unless the user explicitly asks you to.'
     )
 
 

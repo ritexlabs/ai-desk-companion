@@ -81,6 +81,7 @@ export function useOrchestratorRuntime(
   llmConfig?: LLMConfig,
   voiceProviderConfig?: VoiceProviderConfig,
   agentConfig?: AgentConfig,
+  refreshGoogleToken?: () => Promise<void>,
 ) {
   const wakeWord    = appConfig?.wakeWord    ?? 'Robo';
   const callingName = appConfig?.callingName ?? 'Master';
@@ -446,7 +447,7 @@ export function useOrchestratorRuntime(
     // More reliable than continuous=true which silently ends and creates blind spots.
     (async () => {
       while (alive) {
-        const text = await listenOnce(3000);
+        const text = await listenOnce(6000);
         if (!alive) break;
         if (text && wakeWordPattern.test(text)) {
           // Extract any inline command after the wake-phrase, e.g. "Hey Robo, what's the time?" → "what's the time?"
@@ -495,31 +496,100 @@ export function useOrchestratorRuntime(
   /* ── Server STT: record audio and send to orchestrator ─────────── */
   const recordAndTranscribeViaServer = useCallback((): Promise<string> => {
     return new Promise((resolve) => {
-      // Resolve will be called by handleWsEvent when transcript_final arrives
       pendingTranscriptRef.current = resolve;
 
       navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-        // Prefer webm; Safari will fall back to mp4
         const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
         const fmt      = mimeType.includes('webm') ? 'webm' : 'mp4';
-
         const recorder = new MediaRecorder(stream, { mimeType });
         const chunks: Blob[] = [];
+
+        let hasSpeech  = false;
+        let stopped    = false;
+        let silenceId: ReturnType<typeof setTimeout> | null = null;
+        let noSpeechId: ReturnType<typeof setTimeout> | null = null;
+        let hardId: ReturnType<typeof setTimeout>     | null = null;
+        let vadRec: any = null;
+
+        const stopAll = () => {
+          if (stopped) return;
+          stopped = true;
+          if (silenceId)  clearTimeout(silenceId);
+          if (noSpeechId) clearTimeout(noSpeechId);
+          if (hardId)     clearTimeout(hardId);
+          try { vadRec?.abort(); } catch {}
+          if (recorder.state === 'recording') recorder.stop();
+        };
 
         recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
 
         recorder.onstop = async () => {
           stream.getTracks().forEach((t) => t.stop());
-          const blob   = new Blob(chunks, { type: mimeType });
-          const b64    = await blobToBase64(blob);
+          if (!hasSpeech) {
+            // Nothing spoken — skip the server round-trip
+            pendingTranscriptRef.current = null;
+            resolve('');
+            return;
+          }
+          const blob = new Blob(chunks, { type: mimeType });
+          const b64  = await blobToBase64(blob);
           wsSend('audio_chunk', { data_b64: b64, format: fmt, is_final: true });
+          // resolve() is called when 'transcript_final' arrives in handleWsEvent
         };
 
-        recorder.start();
-        // Auto-stop after 8 seconds (same timeout as browser listenOnce)
-        setTimeout(() => {
-          if (recorder.state === 'recording') recorder.stop();
-        }, 8000);
+        // Use browser SpeechRecognition as a pure VAD (voice-activity detector).
+        // AudioContext.getByteTimeDomainData() returns flat 128s when Chrome suspends
+        // the AudioContext before a user gesture, making level-based VAD unreliable.
+        // SpeechRecognition has no autoplay restrictions — it reliably fires onresult
+        // when speech starts and onend when it stops, regardless of AudioContext state.
+        const SttCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SttCtor) {
+          vadRec                = new SttCtor();
+          vadRec.continuous     = true;   // stays open across mid-sentence pauses
+          vadRec.interimResults = true;   // every word resets the silence timer
+          vadRec.lang           = 'en-US';
+
+          // No speech detected within 4 s → give up, don't bother Whisper
+          noSpeechId = setTimeout(() => { if (!hasSpeech) stopAll(); }, 4000);
+          // Hard cap — never record more than 12 s
+          hardId     = setTimeout(stopAll, 12000);
+
+          vadRec.onresult = () => {
+            hasSpeech = true;
+            if (noSpeechId) { clearTimeout(noSpeechId); noSpeechId = null; }
+            // 1.5 s of silence after the last detected word → done
+            if (silenceId) clearTimeout(silenceId);
+            silenceId = setTimeout(stopAll, 1500);
+          };
+
+          vadRec.onend = () => {
+            if (stopped) return;
+            // Chrome may end continuous STT unexpectedly; give it 250 ms before
+            // restarting so the audio pipeline is fully released between sessions.
+            if (!hasSpeech) setTimeout(() => {
+              if (!stopped && !hasSpeech) try { vadRec.start(); } catch {}
+            }, 250);
+            // if hasSpeech: silenceId timer handles the stop
+          };
+
+          vadRec.onerror = (e: any) => {
+            if (stopped || ['aborted', 'no-speech'].includes(e?.error ?? '')) return;
+            if (!hasSpeech) setTimeout(() => {
+              if (!stopped && !hasSpeech) try { vadRec.start(); } catch {}
+            }, 250);
+          };
+
+          try { vadRec.start(); } catch {
+            // SpeechRecognition start failed — fall back to 7 s fixed window
+            if (hardId) clearTimeout(hardId);
+            hardId = setTimeout(stopAll, 7000);
+          }
+        } else {
+          // No browser STT available — fixed 7 s window
+          hardId = setTimeout(stopAll, 7000);
+        }
+
+        recorder.start(100);
       }).catch(() => {
         pendingTranscriptRef.current = null;
         resolve('');
@@ -542,7 +612,20 @@ export function useOrchestratorRuntime(
       setAssistantSpeech('Wake word detected. Connecting to orchestrator…');
       const vpc = voiceProviderRef.current;
       const llm = llmConfigRef.current;
-      const ac  = agentConfigRef.current;
+      let ac  = agentConfigRef.current;
+
+      // Refresh Google token silently before boot if it has expired or expires within 90 s.
+      // This prevents the Calendar/Email agents from getting a stale token on every cold start.
+      if (
+        refreshGoogleToken &&
+        ac?.google.accessToken &&
+        ac.google.tokenExpiresAt > 0 &&
+        ac.google.tokenExpiresAt < Date.now() + 90_000
+      ) {
+        await refreshGoogleToken();
+        ac = agentConfigRef.current; // re-read after refresh so start_session gets the new token
+      }
+
       wsSend('start_session', {
         calling_name:      callingNameRef.current,
         registered_agents: registeredIdsRef.current,
@@ -633,9 +716,9 @@ export function useOrchestratorRuntime(
 
       if (wsConnectedRef.current && orchestratorCapsRef.current.stt) {
         text = await recordAndTranscribeViaServer();
-        // Fall through — wake-word gate and command routing run below, same as browser STT.
+        // Falls through to the same prefix-strip + command routing below.
       } else if (sttSupported) {
-        text = await listenOnce(5000);
+        text = await listenOnce(20000, { continuous: true });
       } else {
         setAssistantSpeech('No microphone or STT available. Please type your command.');
         setPhase('ready');
@@ -660,24 +743,9 @@ export function useOrchestratorRuntime(
         return;
       }
 
-      // ── Wake-word gate ─────────────────────────────────────────────────────
-      // When auto-listening (post-boot ready state) require the wake word before
-      // processing any voice command. This is the Alexa / Google Nest behaviour:
-      // ambient speech is ignored; only "Robo, <command>" triggers a response.
-      if (autoListenRef.current) {
-        const wakeGate = new RegExp(
-          `\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b`,
-          'i',
-        );
-        if (!wakeGate.test(text)) {
-          // Background speech without wake word — discard silently, keep cycling.
-          setPhase('ready');
-          return;
-        }
-      }
-
-      // Strip the wake-word prefix: "Robo, what's the time?" → "what's the time?"
-      // Also handles "Hey Robo, ..." and "Hello Robo, ..." prefixes.
+      // Strip optional wake-word prefix so "Robo, what's the time?" → "what's the time?".
+      // If no prefix is present the text passes through unchanged — once the session
+      // is live the user can speak commands directly without repeating the wake word.
       const wakePfx = new RegExp(
         `^(?:hey[,\\s]+|hello[,\\s]+)?\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b[,\\s]*`,
         'i',
@@ -685,7 +753,7 @@ export function useOrchestratorRuntime(
       const stripped = text.replace(wakePfx, '').trim();
 
       if (!stripped) {
-        // Wake word heard alone (just "Robo") — acknowledge and re-listen for the command.
+        // User spoke only the wake word with nothing after it — prompt for the command.
         const ack = `Yes? How can I help you, ${callingNameRef.current}?`;
         setAssistantSpeech(ack);
         appendTurn('assistant', ack);

@@ -10,9 +10,11 @@ Usage
   Windows       : python  start.py
 
 Flags
-  --no-browser   don't open Chrome automatically
-  --no-color     disable ANSI colours
-  --clean        remove venv / node_modules / build artefacts (keeps source + .env)
+  --no-browser        don't open a browser automatically
+  --browser chrome    open in Chrome with autoplay flags (default)
+  --browser safari    open in Safari (avoids Chrome voice API issues on macOS)
+  --no-color          disable ANSI colours
+  --clean             remove venv / node_modules / build artefacts (keeps source + .env)
 """
 
 from __future__ import annotations
@@ -40,10 +42,18 @@ if sys.platform == 'win32':
         pass
 
 # ── CLI flags ────────────────────────────────────────────────────────────────
-args         = set(sys.argv[1:])
+_argv        = sys.argv[1:]
+args         = set(_argv)
 OPEN_BROWSER = '--no-browser' not in args
 USE_COLOR    = '--no-color'   not in args and sys.stdout.isatty()
 DO_CLEAN     = '--clean'      in args
+
+# --browser chrome|safari  (default: chrome)
+BROWSER_CHOICE = 'chrome'
+if '--browser' in _argv:
+    _bi = _argv.index('--browser')
+    if _bi + 1 < len(_argv):
+        BROWSER_CHOICE = _argv[_bi + 1].lower()
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
 def _c(code: str, text: str) -> str:
@@ -387,18 +397,24 @@ def main() -> None:
         warn(f'Desktop UI did not start in time — check output above.')
 
     hr()
+    browser_label = 'Safari' if BROWSER_CHOICE == 'safari' else 'Chrome'
     print(f'\n  {bold(green("✦  Personal AI Agent is running"))}\n')
-    print(f'  {bold("UI")}             {cyan(DESKTOP_URL)}')
+    print(f'  {bold("UI")}             {cyan(DESKTOP_URL)}  {dim(f"→ {browser_label}")}')
     print(f'  {bold("Orchestrator")}   {cyan(f"http://localhost:{BACKEND_PORT}")}')
     print(f'  {bold("WebSocket")}      {cyan(f"ws://localhost:{BACKEND_PORT}/ws")}')
     print(f'\n  {dim("Press Ctrl+C to stop all services.")}\n')
     hr()
     print()
 
-    # Open browser — Chrome with autoplay unrestricted so TTS plays on wake word.
+    # Open browser
     if OPEN_BROWSER and ui_ready:
         time.sleep(0.5)
-        _launch_chrome(DESKTOP_URL)
+        if BROWSER_CHOICE == 'safari':
+            ok(f'Opening Safari  {dim("(use --browser chrome to switch)")}')
+            _launch_safari(DESKTOP_URL)
+        else:
+            ok(f'Opening Chrome  {dim("(use --browser safari to switch)")}')
+            _launch_chrome(DESKTOP_URL)
 
     # Keep alive — relay output until a process exits or the user hits Ctrl+C
     try:
@@ -418,7 +434,18 @@ def main() -> None:
     shutdown()
 
 
-# ── Chrome helpers ────────────────────────────────────────────────────────────
+# ── Browser helpers ───────────────────────────────────────────────────────────
+
+def _launch_safari(url: str) -> None:
+    """Open url in Safari. Works on macOS; falls back to system browser elsewhere."""
+    if sys.platform == 'darwin':
+        try:
+            subprocess.Popen(['open', '-a', 'Safari', url])
+            return
+        except Exception:
+            pass
+    webbrowser.open(url)
+
 
 def _find_chrome() -> list[str] | None:
     """Return the path to Chrome/Chromium/Edge, or None."""

@@ -33,7 +33,14 @@ class GoogleCalendarAgent(AssistantAgent):
             )
 
         if request.text.strip() == '__boot__':
-            return await self._boot_status(token)
+            try:
+                return await self._boot_status(token)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    return AgentResponse(agent=self.id, text='Google access token expired. Please reconnect in Settings → Agents → Google.')
+                return AgentResponse(agent=self.id, text=f'Google Calendar API error {e.response.status_code} during boot.')
+            except Exception as e:
+                return AgentResponse(agent=self.id, text=f'Could not reach Google Calendar. {str(e)[:60]}')
 
         text = request.text.lower()
         try:

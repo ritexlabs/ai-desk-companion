@@ -183,6 +183,7 @@ export default function App() {
     verifyWeather,
     connectGoogle,
     disconnectGoogle,
+    refreshGoogleToken,
     verifyGitHub,
     disconnectGitHub,
     verifyNews,
@@ -199,11 +200,27 @@ export default function App() {
     testTTS,
     disconnect: disconnectProviders,
   } = useVoiceProviderConfig();
-  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig);
+  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken);
   const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Safari (and any WebKit browser without Chrome) blocks speechSynthesis.speak()
+  // until the page has received a user gesture. Show a one-time unlock overlay.
+  const [audioUnlocked, setAudioUnlocked] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return !/^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  });
+  const unlockAudio = () => {
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 10;
+      window.speechSynthesis.speak(u);
+    }
+    setAudioUnlocked(true);
+  };
 
   useEffect(() => {
     if (transcriptRef.current)
@@ -222,6 +239,35 @@ export default function App() {
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#050816] text-white font-sans select-none">
+      {/* ── Safari audio-unlock gate ─────────────────────────────── */}
+      <AnimatePresence>
+        {!audioUnlocked && (
+          <motion.div
+            key="audio-unlock"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.3 } }}
+            onClick={unlockAudio}
+            className="fixed inset-0 z-[999] flex items-center justify-center bg-[#050816]/95 backdrop-blur-md cursor-pointer"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.35, ease: 'easeOut' }}
+              className="text-center px-8 py-10 rounded-2xl border border-white/10 bg-white/[0.03] shadow-2xl max-w-xs"
+            >
+              <div className="w-14 h-14 rounded-full bg-cyan-400/15 border border-cyan-400/30 flex items-center justify-center mx-auto mb-5">
+                <Mic className="h-6 w-6 text-cyan-400" />
+              </div>
+              <p className="text-white font-semibold text-base mb-1">Tap to Enable Voice</p>
+              <p className="text-slate-400 text-sm leading-relaxed">Safari requires a tap to unlock audio output before the assistant can speak.</p>
+              <div className="mt-5 rounded-xl bg-cyan-400/10 border border-cyan-400/25 px-4 py-2 text-xs text-cyan-300">
+                Click anywhere to continue
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* ── Background ──────────────────────────────────────────── */}
       {/* Animated ambient colour that changes per phase */}
       <motion.div

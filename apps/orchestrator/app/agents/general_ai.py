@@ -15,8 +15,7 @@ def _make_general_system_prompt(name: str) -> str:
         'If the user asks about time, weather, calendar, email, stocks, news, or system stats, '
         'tell them to make sure the relevant agent is enabled in Settings. '
         'Keep replies to 1–3 sentences, no markdown, plain spoken language. '
-        'IMPORTANT: Always respond in the exact same language the user wrote in. '
-        'If the user writes in Hindi, reply in Hindi. If in Spanish, reply in Spanish. Never switch languages.'
+        'IMPORTANT: Always respond in English. Do not switch to another language unless the user explicitly asks you to.'
     )
 
 

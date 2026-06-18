@@ -101,7 +101,7 @@ def _strip_agent_prefix(text: str) -> str:
 
 def _is_agent_error(text: str) -> bool:
     """Detect 'not configured / no credentials / error' patterns in agent responses."""
-    markers = ('no api key', 'not configured', 'not connected', 'could not', 'error', 'no token')
+    markers = ('no api key', 'not configured', 'not connected', 'could not', 'error', 'no token', 'expired', 'could not reach')
     return any(m in text.lower() for m in markers)
 
 GREETING_SUFFIXES = [

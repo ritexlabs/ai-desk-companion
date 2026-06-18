@@ -46,8 +46,9 @@ class OpenAISTTProvider(STTProvider):
                     'https://api.openai.com/v1/audio/transcriptions',
                     headers={'Authorization': f'Bearer {self._api_key}'},
                     files={
-                        'file':  (f'audio.{fmt}', io.BytesIO(audio), f'audio/{fmt}'),
-                        'model': (None, self._model),
+                        'file':     (f'audio.{fmt}', io.BytesIO(audio), f'audio/{fmt}'),
+                        'model':    (None, self._model),
+                        'language': (None, 'en'),  # pin to English; prevents auto-detection from misreading accented speech as Hindi/other
                     },
                 )
                 if r.status_code == 200:

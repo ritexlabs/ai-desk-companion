@@ -106,9 +106,10 @@ class AgentManager:
             'general':  GeneralAIAgent(),
         }
         # Populated at start_session; reset between sessions
-        self._session_llm_config:    dict      = {}
-        self._session_agent_config:  dict      = {}
+        self._session_llm_config:     dict      = {}
+        self._session_agent_config:   dict      = {}
         self._session_enabled_agents: list[str] = []
+        self._session_calling_name:   str       = 'Robo'
 
     @property
     def agents(self):
@@ -120,10 +121,17 @@ class AgentManager:
         api_key  = (self._session_llm_config.get('api_key')  or '').strip()
         return bool(api_key) or provider == 'ollama'
 
-    def configure_session(self, llm_config: dict, agent_config: dict, enabled_agents: list[str] | None = None) -> None:
+    def configure_session(
+        self,
+        llm_config: dict,
+        agent_config: dict,
+        enabled_agents: list[str] | None = None,
+        calling_name: str = 'Robo',
+    ) -> None:
         """Called once per wake/start_session with credentials from the UI payload."""
         self._session_llm_config    = llm_config    or {}
         self._session_agent_config  = agent_config  or {}
+        self._session_calling_name  = calling_name  or 'Robo'
         agents = list(enabled_agents or [])
         if 'general' not in agents:
             agents.append('general')
@@ -156,8 +164,9 @@ class AgentManager:
         enriched = request.model_copy(update={
             'context': {
                 **request.context,
-                'llm_config':   llm_cfg,
-                'agent_config': agent_cfg,
+                'llm_config':    llm_cfg,
+                'agent_config':  agent_cfg,
+                'calling_name':  self._session_calling_name,
             },
         })
         return await self._agents[agent_id].handle(enriched)
@@ -183,6 +192,7 @@ class AgentManager:
                 self._session_llm_config,
                 self._session_enabled_agents,
                 self.handle_as_tool,
+                calling_name=self._session_calling_name,
             )
 
         # No LLM configured — keyword route to a single agent

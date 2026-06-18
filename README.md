@@ -1,15 +1,19 @@
-# Robo Wake-Up — Personal AI Voice Assistant
+# AI Desk Companion
 
-A desktop-first AI voice assistant that listens for the wake phrase **"Robo Wake-Up"**, routes your spoken commands to specialized agents, and responds with natural text-to-speech — all inside a futuristic real-time dashboard UI.
+A desktop-first AI voice assistant with always-on wake-word detection, Alexa-style continuous conversation, and 8 real-data agents — all inside a futuristic real-time dashboard UI.
 
 ---
 
 ## What it does
 
-- Wakes on voice command ("Robo Wake-Up") or a button press, with a personalised greeting
+- Wakes on voice command ("Hey Robo" / "Robo, Wake-Up") or the Wake Up button, with a personalised greeting
+- Listens for the next command automatically after each response — no button press needed (Alexa-style)
+- Understands inline commands: say "Hey Robo, what's the weather?" in one breath, it wakes and answers immediately
 - Routes intents to 8 built-in agents: Weather, System, Google Calendar, Gmail, GitHub, Stock Market, News, General AI
-- LLM-powered intent routing — when an LLM is configured, natural language decides which agent answers (no keyword lists)
-- Says a contextual goodbye ("Goodnight! Rest well.", "Goodbye! Have a wonderful day.") before entering sleep mode
+- LLM-powered orchestration — the model decides which agents to call, fetches live data, and synthesises a spoken response
+- Responds in the same language the user spoke — no language switching
+- Speaks with distinct voice modulations per agent (different pitch and pace for each agent)
+- Handles farewells naturally ("Robo, Good Night", "bye bye") and enters standby mode
 - Speaks responses via browser TTS (default) or OpenAI / ElevenLabs TTS (optional)
 - Transcribes voice via browser STT (default) or OpenAI Whisper (optional)
 - Runs as a browser app **or** as a native desktop app via Tauri
@@ -30,11 +34,9 @@ No API keys are required to run the app in browser-TTS / browser-STT mode.
 
 ## Quick Start
 
-Clone the repo and run one command — it installs all dependencies on first run:
-
 ```bash
-git clone <repo-url>
-cd personal-ai-agent
+git clone https://github.com/ritexlabs/ai-desk-companion.git
+cd ai-desk-companion
 
 # macOS / Linux
 python3 start.py
@@ -56,10 +58,37 @@ Press **Ctrl+C** to stop both services.
 
 ---
 
+## How voice interaction works
+
+### Starting a session
+
+| Method | How |
+|--------|-----|
+| Wake Up button | Click the cyan **Wake Up** button in the dashboard |
+| Voice (standby) | Say **"Hey Robo"** or **"Robo, Wake-Up"** — the mic listens in standby |
+| Inline command | Say **"Hey Robo, what's the weather?"** — wakes and executes in one phrase |
+
+### Giving commands
+
+Once the session is active, the app auto-listens after every response. Just speak naturally:
+- "What is the Nifty 50 price?"
+- **"Robo, check my emails"** — the "Robo," prefix is stripped automatically
+
+### Ending a session
+
+Say any farewell phrase and the app speaks a goodbye and returns to standby:
+- "Robo, Good Bye"
+- "Robo, Good Night"
+- "Robo, See You"
+- "bye bye"
+- Or press the **Sleep** button for an immediate, silent shutdown
+
+---
+
 ## Project Structure
 
 ```
-personal-ai-agent/
+ai-desk-companion/
 ├── apps/
 │   ├── desktop/          React + Vite frontend (port 5173)
 │   └── orchestrator/     Python FastAPI backend (port 8787)
@@ -112,6 +141,7 @@ npm run dev
 
 ## Reference Docs
 
-- [Architecture overview](docs/architecture.md) — system design, WebSocket protocol, agent pipeline
+- [Architecture overview](docs/architecture.md) — system design, WebSocket protocol, agent pipeline, voice interaction model
 - [API contracts](docs/api-contracts.md) — full WebSocket message schema reference
-- [Setup guide](docs/setup.md) — detailed installation, VS Code setup, phase checklist
+- [Development guide](docs/development.md) — local setup, commands, branching strategy
+- [Setup guide](docs/setup.md) — detailed installation and phase checklist

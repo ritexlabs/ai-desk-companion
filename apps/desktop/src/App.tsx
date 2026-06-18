@@ -34,6 +34,7 @@ import { useAgentConfig } from './hooks/useAgentConfig';
 import { useLLMConfig } from './hooks/useLLMConfig';
 import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
 import type { RuntimePhase } from './types/runtime';
+import { useOrchSystemStats } from './hooks/useOrchSystemStats';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 
@@ -90,24 +91,40 @@ function useClock() {
   return t;
 }
 
-/* ─── speaker avatar chips ─────────────────────────────────── */
+/* ─── mission-control log row ───────────────────────────────── */
 
-function SpeakerChip({ speaker }: { speaker: 'user' | 'assistant' | 'system' }) {
-  if (speaker === 'user')
-    return (
-      <div className="flex-shrink-0 h-6 w-6 rounded-full bg-violet-500/30 border border-violet-400/30 flex items-center justify-center text-[9px] font-bold text-violet-300">
-        R
-      </div>
-    );
-  if (speaker === 'system')
-    return (
-      <div className="flex-shrink-0 h-6 w-6 rounded-full bg-slate-700/60 border border-white/10 flex items-center justify-center text-[9px] font-bold text-slate-400">
-        SYS
-      </div>
-    );
+function LogRow({ turn }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string } }) {
+  const time = (() => {
+    try {
+      return new Date(turn.timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+    } catch { return '--:--:--'; }
+  })();
+
+  const isUser = turn.speaker === 'user';
+  const isSys  = turn.speaker === 'system';
+
   return (
-    <div className="flex-shrink-0 h-6 w-6 rounded-full bg-cyan-400/20 border border-cyan-400/30 flex items-center justify-center text-[9px] font-bold text-cyan-300">
-      AI
+    <div className={`flex items-start gap-0 py-[3px] px-2 rounded hover:bg-white/[0.03] transition-colors ${isSys ? 'opacity-55' : ''}`}>
+      {/* Label badge */}
+      <span className={`flex-shrink-0 w-8 text-right text-[9px] font-bold tracking-[0.12em] uppercase mr-2 mt-[2px] ${
+        isUser ? 'text-violet-400' : isSys ? 'text-slate-500' : 'text-cyan-400'
+      }`}>
+        {isUser ? 'YOU' : isSys ? 'SYS' : 'AI'}
+      </span>
+      {/* Pipe separator */}
+      <span className="flex-shrink-0 text-[10px] text-slate-700 mr-2 mt-[1px]">│</span>
+      {/* Timestamp */}
+      <span className="flex-shrink-0 text-[9px] font-mono text-slate-600 tabular-nums mr-3 mt-[2px]">{time}</span>
+      {/* Message text */}
+      <span className={`flex-1 min-w-0 text-[11px] leading-[1.5] whitespace-pre-wrap break-words ${
+        isUser  ? 'text-amber-200'
+        : isSys ? 'text-slate-500 italic'
+        :         'text-emerald-300'
+      }`}>
+        {turn.text}
+      </span>
     </div>
   );
 }
@@ -119,7 +136,18 @@ function StatRow({ label, value, hi }: { label: string; value: string; hi?: 'ok'
   return (
     <div className="flex items-center justify-between gap-1 min-w-0">
       <span className="text-[10px] text-slate-500 flex-shrink-0">{label}</span>
-      <span className={`text-[10px] font-medium tabular-nums truncate ${vc}`}>{value}</span>
+      <AnimatePresence mode="wait">
+        <motion.span
+          key={value}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 4 }}
+          transition={{ duration: 0.18 }}
+          className={`text-[10px] font-medium tabular-nums truncate ${vc}`}
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
     </div>
   );
 }
@@ -155,6 +183,7 @@ export default function App() {
     verifyWeather,
     connectGoogle,
     disconnectGoogle,
+    refreshGoogleToken,
     verifyGitHub,
     disconnectGitHub,
     verifyNews,
@@ -171,10 +200,27 @@ export default function App() {
     testTTS,
     disconnect: disconnectProviders,
   } = useVoiceProviderConfig();
-  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig);
+  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken);
+  const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Safari (and any WebKit browser without Chrome) blocks speechSynthesis.speak()
+  // until the page has received a user gesture. Show a one-time unlock overlay.
+  const [audioUnlocked, setAudioUnlocked] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return !/^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  });
+  const unlockAudio = () => {
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(' ');
+      u.volume = 0;
+      u.rate = 10;
+      window.speechSynthesis.speak(u);
+    }
+    setAudioUnlocked(true);
+  };
 
   useEffect(() => {
     if (transcriptRef.current)
@@ -193,6 +239,35 @@ export default function App() {
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#050816] text-white font-sans select-none">
+      {/* ── Safari audio-unlock gate ─────────────────────────────── */}
+      <AnimatePresence>
+        {!audioUnlocked && (
+          <motion.div
+            key="audio-unlock"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.3 } }}
+            onClick={unlockAudio}
+            className="fixed inset-0 z-[999] flex items-center justify-center bg-[#050816]/95 backdrop-blur-md cursor-pointer"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ delay: 0.1, duration: 0.35, ease: 'easeOut' }}
+              className="text-center px-8 py-10 rounded-2xl border border-white/10 bg-white/[0.03] shadow-2xl max-w-xs"
+            >
+              <div className="w-14 h-14 rounded-full bg-cyan-400/15 border border-cyan-400/30 flex items-center justify-center mx-auto mb-5">
+                <Mic className="h-6 w-6 text-cyan-400" />
+              </div>
+              <p className="text-white font-semibold text-base mb-1">Tap to Enable Voice</p>
+              <p className="text-slate-400 text-sm leading-relaxed">Safari requires a tap to unlock audio output before the assistant can speak.</p>
+              <div className="mt-5 rounded-xl bg-cyan-400/10 border border-cyan-400/25 px-4 py-2 text-xs text-cyan-300">
+                Click anywhere to continue
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* ── Background ──────────────────────────────────────────── */}
       {/* Animated ambient colour that changes per phase */}
       <motion.div
@@ -379,7 +454,7 @@ export default function App() {
         </header>
 
         {/* ── MAIN 3-COLUMN ─────────────────────────────────────── */}
-        <div className="flex-1 grid grid-cols-[260px_1fr_220px] min-h-0 overflow-hidden">
+        <div className="flex-1 grid grid-cols-[320px_1fr_320px] min-h-0 overflow-hidden">
 
           {/* LEFT — Agent Roster */}
           <aside className="border-r border-white/8 overflow-y-auto p-4 bg-black/10 scrollbar-thin">
@@ -488,38 +563,27 @@ export default function App() {
               </div>
             </div>
 
-            {/* Transcript — fills remaining center-column height */}
+            {/* Transcript — mission-control log style */}
             <div
               ref={transcriptRef}
-              className="flex-1 min-h-0 overflow-y-auto border-t border-white/8 bg-black/15 backdrop-blur-sm px-5 py-3 space-y-2 scrollbar-thin"
+              className="flex-1 min-h-0 overflow-y-auto border-t border-white/8 bg-black/15 backdrop-blur-sm px-3 py-2 scrollbar-thin"
             >
+              {/* Column header */}
+              <div className="flex items-center gap-0 px-2 pb-1.5 mb-1 border-b border-white/5">
+                <span className="w-8 mr-2 text-right text-[8px] uppercase tracking-[0.15em] text-slate-700">src</span>
+                <span className="text-[8px] text-slate-700 mr-2">│</span>
+                <span className="text-[8px] uppercase tracking-[0.15em] text-slate-700 mr-3 w-[52px]">time</span>
+                <span className="text-[8px] uppercase tracking-[0.15em] text-slate-700">message</span>
+              </div>
               <AnimatePresence initial={false}>
                 {rt.transcript.map((turn, i) => (
                   <motion.div
                     key={`${turn.timestamp}-${i}`}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className={`flex items-start gap-2 ${turn.speaker === 'user' ? 'justify-end' : 'justify-start'}`}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.15 }}
                   >
-                    {turn.speaker !== 'user' && <SpeakerChip speaker={turn.speaker} />}
-
-                    <div
-                      className={`max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
-                        turn.speaker === 'user'
-                          ? 'bg-violet-500/18 border border-violet-500/25 text-violet-100'
-                          : turn.speaker === 'system'
-                            ? 'bg-white/3 border border-white/8 text-slate-500 text-xs italic'
-                            : 'bg-cyan-400/10 border border-cyan-400/18 text-cyan-50'
-                      }`}
-                    >
-                      {turn.speaker === 'assistant' && (
-                        <div className="text-[9px] uppercase tracking-[0.25em] text-cyan-400/55 mb-1">AI Agent</div>
-                      )}
-                      {turn.text}
-                    </div>
-
-                    {turn.speaker === 'user' && <SpeakerChip speaker="user" />}
+                    <LogRow turn={turn} />
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -552,9 +616,16 @@ export default function App() {
                 disabled={!rt.command.trim()}
                 whileHover={{ scale: 1.06 }}
                 whileTap={{ scale: 0.94 }}
+                animate={rt.command.trim() ? { boxShadow: ['0 0 0px rgba(139,92,246,0)', '0 0 10px rgba(139,92,246,0.45)', '0 0 0px rgba(139,92,246,0)'] } : {}}
+                transition={{ duration: 1.8, repeat: Infinity }}
                 className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-violet-500 text-sm font-medium hover:bg-violet-400 disabled:opacity-35 transition-colors"
               >
-                <Send className="h-3.5 w-3.5" />
+                <motion.div
+                  animate={rt.command.trim() ? { x: [0, 2, 0] } : {}}
+                  transition={{ duration: 0.8, repeat: Infinity, repeatDelay: 1 }}
+                >
+                  <Send className="h-3.5 w-3.5" />
+                </motion.div>
                 Send
               </motion.button>
             </div>
@@ -562,37 +633,101 @@ export default function App() {
 
           {/* RIGHT — Quick Stats */}
           <aside className="border-l border-white/8 overflow-y-auto p-3 space-y-2 bg-black/10 scrollbar-thin">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-slate-600 text-center mb-1">Quick Stats</div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.4 }}
+              className="text-[10px] uppercase tracking-[0.3em] text-slate-600 text-center mb-1"
+            >
+              Quick Stats
+            </motion.div>
 
             {/* ── System Health ─────────────────────────────── */}
-            <div className="rounded-2xl border border-teal-400/20 bg-teal-400/5 p-3">
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
+              className="relative overflow-hidden rounded-2xl border border-teal-400/20 bg-teal-400/5 p-3"
+            >
+              {/* slow background shimmer — always running on this card */}
+              <motion.div
+                className="pointer-events-none absolute inset-y-0 w-28 bg-gradient-to-r from-transparent via-teal-400/5 to-transparent skew-x-12"
+                animate={{ left: ['-7rem', '120%'] }}
+                transition={{ duration: 4, repeat: Infinity, repeatDelay: 3, ease: 'linear' }}
+              />
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
-                  <Cpu className="h-3 w-3 text-teal-400" />
+                  <motion.div
+                    animate={{ rotate: systemOnline ? [0, 15, -15, 0] : 0 }}
+                    transition={{ duration: 3, repeat: Infinity, repeatDelay: 4 }}
+                  >
+                    <Cpu className="h-3 w-3 text-teal-400" />
+                  </motion.div>
                   <span className="text-[10px] uppercase tracking-[0.2em] text-teal-500">System Health</span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className={`text-base font-bold tabular-nums leading-none ${
-                    rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
-                    rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
-                  }`}>{rt.systemStats.healthScore}</span>
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={rt.systemStats.healthScore}
+                      initial={{ opacity: 0, scale: 1.3 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className={`text-base font-bold tabular-nums leading-none ${
+                        rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
+                        rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
+                      }`}
+                    >
+                      {rt.systemStats.healthScore}
+                    </motion.span>
+                  </AnimatePresence>
                   <span className="text-[9px] text-slate-500">/100</span>
-                  <motion.div
-                    animate={{ opacity: systemOnline ? [0.5, 1, 0.5] : 0.3 }}
-                    transition={{ duration: 1.6, repeat: Infinity }}
-                    className={`ml-1 h-1.5 w-1.5 rounded-full ${systemOnline ? 'bg-teal-400' : 'bg-slate-600'}`}
-                  />
+                  {/* ping dot */}
+                  <span className="relative ml-1 h-1.5 w-1.5 flex-shrink-0">
+                    <motion.span
+                      className={`absolute inset-0 rounded-full ${systemOnline ? 'bg-teal-400' : 'bg-slate-600'}`}
+                      animate={systemOnline ? { scale: [1, 2.4], opacity: [0.6, 0] } : {}}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                    />
+                    <span className={`absolute inset-0 rounded-full ${systemOnline ? 'bg-teal-400' : 'bg-slate-600'}`} />
+                  </span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                 <StatRow label="OS" value={rt.systemStats.os} />
-                <StatRow label="CPU" value={`${rt.systemStats.cores} cores`} />
-                {rt.systemStats.deviceMemoryGB != null && (
-                  <StatRow label="RAM" value={`~${rt.systemStats.deviceMemoryGB} GB`} />
+                <StatRow label="Cores" value={`${rt.systemStats.cores}`} />
+
+                {/* Live metrics from orchestrator backend */}
+                {orchSys && (
+                  <>
+                    <StatRow
+                      label="CPU"
+                      value={`${orchSys.cpu_pct}%`}
+                      hi={orchSys.cpu_pct > 85 ? 'err' : orchSys.cpu_pct > 60 ? 'warn' : 'ok'}
+                    />
+                    <StatRow
+                      label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
+                      value={orchSys.cpu_temp_c != null ? `${orchSys.cpu_temp_c}°C` : 'N/A'}
+                      hi={
+                        orchSys.cpu_temp_c == null ? undefined :
+                        orchSys.temp_source === 'battery'
+                          ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok')
+                          : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')
+                      }
+                    />
+                    <StatRow
+                      label="RAM"
+                      value={`${orchSys.mem_pct}%`}
+                      hi={orchSys.mem_pct > 85 ? 'err' : orchSys.mem_pct > 70 ? 'warn' : 'ok'}
+                    />
+                    <StatRow
+                      label="Disk"
+                      value={`${orchSys.disk_pct}%`}
+                      hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'}
+                    />
+                  </>
                 )}
-                {rt.systemStats.jsHeap && (
-                  <StatRow label="Heap" value={`${rt.systemStats.jsHeap.usedMB}/${rt.systemStats.jsHeap.totalMB}MB`} />
-                )}
+
                 {rt.systemStats.battery && (
                   <StatRow
                     label="Battery"
@@ -614,10 +749,15 @@ export default function App() {
                   />
                 )}
               </div>
-            </div>
+            </motion.div>
 
             {/* ── App Status ───────────────────────────────── */}
-            <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.12, duration: 0.4, ease: 'easeOut' }}
+              className="rounded-2xl border border-white/8 bg-white/3 p-3"
+            >
               <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1.5">App Status</div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-1.5">
                 <StatusRow label="STT" ok={rt.sttSupported} />
@@ -638,11 +778,16 @@ export default function App() {
                   ))}
                 </div>
               )}
-            </div>
+            </motion.div>
 
             {/* ── Performance ──────────────────────────────── */}
             {rt.orchestratorMetrics && (
-              <div className="rounded-2xl border border-violet-400/20 bg-violet-400/5 p-3">
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.19, duration: 0.4, ease: 'easeOut' }}
+                className="rounded-2xl border border-violet-400/20 bg-violet-400/5 p-3"
+              >
                 <div className="flex items-center gap-1.5 mb-1.5">
                   <BarChart2 className="h-3 w-3 text-violet-400" />
                   <span className="text-[10px] uppercase tracking-[0.2em] text-violet-500">Performance</span>
@@ -655,20 +800,42 @@ export default function App() {
                 </div>
                 {Object.entries(rt.orchestratorMetrics.agents).length > 0 && (
                   <div className="pt-1.5 border-t border-white/6 mt-1.5 space-y-0.5">
-                    {Object.entries(rt.orchestratorMetrics.agents).map(([id, s]) => (
-                      <div key={id} className="flex justify-between">
+                    {Object.entries(rt.orchestratorMetrics.agents).map(([id, s], idx) => (
+                      <motion.div
+                        key={id}
+                        initial={{ opacity: 0, x: 8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: idx * 0.05, duration: 0.2 }}
+                        className="flex justify-between"
+                      >
                         <span className="text-[9px] text-slate-500 capitalize">{id}</span>
-                        <span className="text-[9px] text-violet-400 tabular-nums">{s.calls}× · {s.avg_ms}ms</span>
-                      </div>
+                        <AnimatePresence mode="wait">
+                          <motion.span
+                            key={`${s.calls}-${s.avg_ms}`}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="text-[9px] text-violet-400 tabular-nums"
+                          >
+                            {s.calls}× · {s.avg_ms}ms
+                          </motion.span>
+                        </AnimatePresence>
+                      </motion.div>
                     ))}
                   </div>
                 )}
-              </div>
+              </motion.div>
             )}
 
             {/* ── Online Agents — compact 2-col grid, clickable for details ── */}
             {onlineAgents.length > 0 && (
-              <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+              <motion.div
+                initial={{ opacity: 0, x: 24 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.26, duration: 0.4, ease: 'easeOut' }}
+                className="rounded-2xl border border-white/8 bg-white/3 p-3"
+              >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
                     Online Agents <span className="text-slate-600">({onlineAgents.length})</span>
@@ -676,40 +843,60 @@ export default function App() {
                   <span className="text-[9px] text-slate-600">tap for details</span>
                 </div>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {onlineAgents.map((agent) => {
-                    const m = AGENT_PILL_META[agent.id];
-                    if (!m) return null;
-                    const Icon = m.icon;
-                    return (
-                      <button
-                        key={agent.id}
-                        onClick={() => setSelectedAgentId(agent.id)}
-                        className={`flex items-center gap-1.5 rounded-xl border ${m.border} ${m.bg} px-2 py-1.5 cursor-pointer transition hover:brightness-125 hover:scale-[1.03] active:scale-95 w-full text-left`}
-                      >
-                        <Icon className={`h-3 w-3 flex-shrink-0 ${m.text}`} style={{ width: 12, height: 12 }} />
-                        <span className={`text-[10px] font-medium truncate ${m.text}`}>{agent.label}</span>
-                      </button>
-                    );
-                  })}
+                  <AnimatePresence>
+                    {onlineAgents.map((agent, idx) => {
+                      const m = AGENT_PILL_META[agent.id];
+                      if (!m) return null;
+                      const Icon = m.icon;
+                      return (
+                        <motion.button
+                          key={agent.id}
+                          initial={{ opacity: 0, scale: 0.88 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.88 }}
+                          transition={{ delay: idx * 0.05, duration: 0.22 }}
+                          whileHover={{ scale: 1.06, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => setSelectedAgentId(agent.id)}
+                          className={`flex items-center gap-1.5 rounded-xl border ${m.border} ${m.bg} px-2 py-1.5 cursor-pointer w-full text-left`}
+                        >
+                          <motion.div
+                            animate={{ rotate: [0, 8, -8, 0] }}
+                            transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
+                          >
+                            <Icon className={`h-3 w-3 flex-shrink-0 ${m.text}`} style={{ width: 12, height: 12 }} />
+                          </motion.div>
+                          <span className={`text-[10px] font-medium truncate ${m.text}`}>{agent.label}</span>
+                        </motion.button>
+                      );
+                    })}
+                  </AnimatePresence>
                 </div>
-              </div>
+              </motion.div>
             )}
 
             {/* ── Config ───────────────────────────────────── */}
-            <div className="rounded-2xl border border-white/8 bg-white/3 p-3">
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.33, duration: 0.4, ease: 'easeOut' }}
+              className="rounded-2xl border border-white/8 bg-white/3 p-3"
+            >
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-2">
                 <StatRow label="Wake" value={appConfig.wakeWord} />
                 <StatRow label="Name" value={appConfig.callingName} />
                 <StatRow label="Voice" value={voiceConfig.gender === 'female' ? '♀ F' : '♂ M'} />
                 <StatRow label="Speed" value={voiceConfig.speed} />
               </div>
-              <button
+              <motion.button
                 onClick={() => setSettingsOpen(true)}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
                 className="w-full h-6 rounded-lg border border-white/8 bg-white/4 text-[10px] text-slate-400 hover:text-cyan-300 hover:border-cyan-400/25 transition"
               >
                 Open settings →
-              </button>
-            </div>
+              </motion.button>
+            </motion.div>
           </aside>
         </div>
       </div>

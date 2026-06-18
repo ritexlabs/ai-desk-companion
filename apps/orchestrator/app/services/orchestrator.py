@@ -44,16 +44,18 @@ _AGENT_TOOL_META: dict[str, dict] = {
 # The only exception is true general knowledge (maths, definitions, history)
 # where no connected system holds the answer.
 
-_SYSTEM_PROMPT = (
-    'You are Robo, a voice assistant. '
-    'Your role is synthesis only: receive data from tools, speak it naturally. '
-    'You have NO built-in knowledge of the user\'s personal world. '
-    'For anything about the user\'s systems or live data '
-    '(time, date, weather, news, calendar events, emails, GitHub, stocks, system stats) '
-    'you MUST call the appropriate tool — never answer from your own knowledge. '
-    'Only answer directly for pure general knowledge (maths, definitions, history). '
-    'Replies: 1–3 sentences, no markdown, no bullet points, plain spoken language.'
-)
+def _make_system_prompt(name: str) -> str:
+    return (
+        f'You are {name}, a voice assistant. '
+        'Your role is synthesis only: receive data from tools, speak it naturally. '
+        'You have NO built-in knowledge of the user\'s personal world. '
+        'For anything about the user\'s systems or live data '
+        '(time, date, weather, news, calendar events, emails, GitHub, stocks, system stats) '
+        'you MUST call the appropriate tool — never answer from your own knowledge. '
+        'Only answer directly for pure general knowledge (maths, definitions, history). '
+        'Replies: 1–3 sentences, no markdown, no bullet points, plain spoken language. '
+        'IMPORTANT: Always respond in English. Do not switch to another language unless the user explicitly asks you to.'
+    )
 
 
 # ── Provider-specific tool format builders ────────────────────────────────────
@@ -126,6 +128,7 @@ class LLMOrchestrator:
         llm_config: dict,
         enabled_agents: list[str],
         call_agent: object,  # async callable (agent_id: str, query: str) -> str
+        calling_name: str = 'Robo',
     ) -> tuple[str, str]:
         """
         Returns (response_text, primary_agent_used).
@@ -147,19 +150,19 @@ class LLMOrchestrator:
                 user_message, api_key,
                 model or ('gpt-4o-mini' if provider == 'openai' else 'llama3'),
                 base_url or ('https://api.openai.com' if provider == 'openai' else 'http://localhost:11434'),
-                tools_available, call_agent,
+                tools_available, call_agent, calling_name,
             )
         if provider == 'anthropic':
             return await self._anthropic_handle(
                 user_message, api_key,
                 model or 'claude-haiku-4-5-20251001',
-                tools_available, call_agent,
+                tools_available, call_agent, calling_name,
             )
         if provider == 'gemini':
             return await self._gemini_handle(
                 user_message, api_key,
                 model or 'gemini-2.0-flash',
-                tools_available, call_agent,
+                tools_available, call_agent, calling_name,
             )
 
         return "I don't recognise the configured AI provider. Please check Settings → AI.", 'error'
@@ -174,6 +177,7 @@ class LLMOrchestrator:
         base_url: str,
         tools_available: dict,
         call_agent: object,
+        calling_name: str = 'Robo',
     ) -> tuple[str, str]:
         headers: dict = {'Content-Type': 'application/json'}
         if api_key:
@@ -181,7 +185,7 @@ class LLMOrchestrator:
 
         tools    = [_openai_tool(aid, meta) for aid, meta in tools_available.items()]
         messages = [
-            {'role': 'system', 'content': _SYSTEM_PROMPT},
+            {'role': 'system', 'content': _make_system_prompt(calling_name)},
             {'role': 'user',   'content': message},
         ]
 
@@ -248,6 +252,7 @@ class LLMOrchestrator:
         model: str,
         tools_available: dict,
         call_agent: object,
+        calling_name: str = 'Robo',
     ) -> tuple[str, str]:
         tools        = [_anthropic_tool(aid, meta) for aid, meta in tools_available.items()]
         base_headers = {
@@ -255,6 +260,7 @@ class LLMOrchestrator:
             'anthropic-version': '2023-06-01',
             'content-type':      'application/json',
         }
+        system_prompt = _make_system_prompt(calling_name)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
@@ -262,7 +268,7 @@ class LLMOrchestrator:
                 headers=base_headers,
                 json={
                     'model':      model,
-                    'system':     _SYSTEM_PROMPT,
+                    'system':     system_prompt,
                     'messages':   [{'role': 'user', 'content': message}],
                     'tools':      tools,
                     'max_tokens': 300,
@@ -301,7 +307,7 @@ class LLMOrchestrator:
                 headers=base_headers,
                 json={
                     'model':    model,
-                    'system':   _SYSTEM_PROMPT,
+                    'system':   system_prompt,
                     'messages': [
                         {'role': 'user',      'content': message},
                         {'role': 'assistant', 'content': content},
@@ -325,15 +331,17 @@ class LLMOrchestrator:
         model: str,
         tools_available: dict,
         call_agent: object,
+        calling_name: str = 'Robo',
     ) -> tuple[str, str]:
-        tool_defs = [_gemini_tool(aid, meta) for aid, meta in tools_available.items()]
-        base_url  = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+        tool_defs     = [_gemini_tool(aid, meta) for aid, meta in tools_available.items()]
+        base_url      = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
+        system_prompt = _make_system_prompt(calling_name)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
                 base_url, params={'key': api_key},
                 json={
-                    'system_instruction': {'parts': [{'text': _SYSTEM_PROMPT}]},
+                    'system_instruction': {'parts': [{'text': system_prompt}]},
                     'contents':           [{'role': 'user', 'parts': [{'text': message}]}],
                     'tools':              [{'function_declarations': tool_defs}],
                     'generationConfig':   {'maxOutputTokens': 300},
@@ -374,7 +382,7 @@ class LLMOrchestrator:
             r = await client.post(
                 base_url, params={'key': api_key},
                 json={
-                    'system_instruction': {'parts': [{'text': _SYSTEM_PROMPT}]},
+                    'system_instruction': {'parts': [{'text': system_prompt}]},
                     'contents':           contents,
                     'generationConfig':   {'maxOutputTokens': 200},
                 },

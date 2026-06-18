@@ -71,6 +71,19 @@ function pitchFor(gender: VoiceConfig['gender']): number {
   return gender === 'female' ? 1.05 : 0.92;
 }
 
+/** Per-agent pitch and rate offsets applied on top of the base voice config.
+ *  Gives each agent a subtly distinct sound when using browser TTS. */
+const AGENT_VOICE_OFFSETS: Record<string, { pitch: number; rate: number }> = {
+  system:   { pitch: -0.15, rate: -0.04 }, // lower, deliberate — technical readouts
+  weather:  { pitch: +0.10, rate:  0.00 }, // brighter, conversational
+  calendar: { pitch: +0.05, rate: +0.04 }, // organised, efficient
+  email:    { pitch:  0.00, rate:  0.00 }, // neutral professional
+  github:   { pitch: -0.10, rate: +0.04 }, // lower, tech-focused
+  stock:    { pitch: -0.12, rate: -0.02 }, // authoritative, measured
+  news:     { pitch: +0.05, rate: +0.07 }, // clear newsreader cadence
+  general:  { pitch:  0.00, rate:  0.00 }, // default
+};
+
 export function useVoice(config?: VoiceConfig) {
   const [speechState, setSpeechState] = useState<SpeechState>('idle');
   const [voiceListenerActive, setVoiceListenerActive] = useState(false);
@@ -80,6 +93,11 @@ export function useVoice(config?: VoiceConfig) {
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    // Pre-warm the browser TTS engine so the first real utterance doesn't pay the cold-start penalty.
+    // Chrome's TTS engine is lazy-initialised; a cancel() on an idle engine primes the pipeline.
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     return () => { mountedRef.current = false; };
   }, []);
 
@@ -87,7 +105,7 @@ export function useVoice(config?: VoiceConfig) {
     if (mountedRef.current) setSpeechState(s);
   }, []);
 
-  const speak = useCallback((text: string): Promise<void> => {
+  const speak = useCallback((text: string, agentId?: string): Promise<void> => {
     return new Promise((resolve) => {
       if (!('speechSynthesis' in window)) { resolve(); return; }
 
@@ -105,11 +123,13 @@ export function useVoice(config?: VoiceConfig) {
       //     after the reset before it can reliably play a new utterance.
       const wasActive = window.speechSynthesis.speaking || window.speechSynthesis.pending;
       window.speechSynthesis.cancel();
-      const delay = wasActive ? 50 : 250;
+      // Cold-start is 150 ms after pre-warming on mount (was 250 ms without it).
+      const delay = wasActive ? 30 : 150;
 
+      const offsets = (agentId ? AGENT_VOICE_OFFSETS[agentId] : undefined) ?? { pitch: 0, rate: 0 };
       const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = rateFor(config?.speed ?? 'normal');
-      utter.pitch = pitchFor(config?.gender ?? 'female');
+      utter.rate   = Math.max(0.5, Math.min(2, rateFor(config?.speed ?? 'normal')  + offsets.rate));
+      utter.pitch  = Math.max(0.5, Math.min(2, pitchFor(config?.gender ?? 'female') + offsets.pitch));
       utter.volume = 1;
 
       // Apply the best available voice at call time.
@@ -134,36 +154,101 @@ export function useVoice(config?: VoiceConfig) {
     set('idle');
   }, [set]);
 
-  const listenOnce = useCallback((timeoutMs = 8000): Promise<string> => {
+  const listenOnce = useCallback((timeoutMs = 20000, opts?: { continuous?: boolean }): Promise<string> => {
     return new Promise((resolve) => {
       const Ctor = getSpeechRecognitionCtor();
       if (!Ctor) { resolve(''); return; }
 
       const rec = new Ctor();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = 'en-US';
+      // continuous=false is more reliable for short phrases (wake-word loop).
+      // Pass { continuous: true } when capturing long commands so the browser
+      // doesn't cut the utterance at the first natural pause.
+      rec.continuous     = opts?.continuous ?? false;
+      rec.interimResults = true;   // needed to reset the silence timer on every word
+      rec.lang           = 'en-US';
       rec.maxAlternatives = 1;
 
-      let settled = false;
-      const done = (t: string) => {
+      let settled         = false;
+      let transcript      = '';
+      let hasSpeech       = false;
+      let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+      let resolveAfterEnd: (() => void) | null = null;
+
+      const done = (text: string) => {
         if (settled) return;
         settled = true;
-        clearTimeout(timer);
-        set('idle');
-        resolve(t);
+        if (silenceTimer) clearTimeout(silenceTimer);
+        clearTimeout(hardTimer);
+        clearTimeout(noSpeechTimer);
+        const finalText = text.trim();
+        // Defer resolve until onend fires — ensures the browser fully releases
+        // the audio pipeline before the next rec.start() in the auto-listen loop.
+        resolveAfterEnd = () => { set('idle'); resolve(finalText); };
+        try { rec.stop(); } catch {
+          // stop() threw — onend won't fire; resolve immediately.
+          const fn = resolveAfterEnd;
+          resolveAfterEnd = null;
+          fn?.();
+          return;
+        }
+        // Safety net: with continuous=false, onend fires naturally (stop() is a no-op
+        // and won't trigger a second onend). If onend already ran and called done()
+        // from within itself, resolveAfterEnd won't be cleared by a future onend —
+        // so we flush it on the next tick.
+        setTimeout(() => {
+          if (resolveAfterEnd) {
+            const fn = resolveAfterEnd;
+            resolveAfterEnd = null;
+            fn();
+          }
+        }, 0);
       };
 
-      const timer = setTimeout(() => { try { rec.stop(); } catch {} done(''); }, timeoutMs);
+      // Absolute ceiling — never hold the mic longer than timeoutMs
+      const hardTimer = setTimeout(() => done(transcript), timeoutMs);
 
-      rec.onstart = () => { set('listening'); if (mountedRef.current) setMicEverStarted(true); };
+      // If the user never speaks at all, give up after 3.5 s so the caller's
+      // loop can cycle without hanging (standby wake-word loop, auto-listen loop).
+      const noSpeechTimer = setTimeout(() => { if (!hasSpeech) done(''); }, 3500);
+
+      rec.onstart = () => {
+        set('listening');
+        if (mountedRef.current) setMicEverStarted(true);
+      };
+
       rec.onresult = (e: any) => {
-        const text = e.results[0][0].transcript.trim();
-        if (mountedRef.current) setLastHeardText(text);
-        done(text);
+        hasSpeech = true;
+
+        // Accumulate only final segments so we don't double-count interim words.
+        let newFinal = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) newFinal += e.results[i][0].transcript;
+        }
+        if (newFinal) {
+          transcript = (transcript + ' ' + newFinal).trim();
+          if (mountedRef.current) setLastHeardText(transcript);
+        }
+
+        // Any speech activity (interim OR final) resets the silence clock.
+        // 1.5 s of silence after the last word = natural end of utterance.
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => { if (transcript) done(transcript); }, 1500);
       };
-      rec.onend = () => done('');
-      rec.onerror = () => done('');
+
+      rec.onend = () => {
+        if (resolveAfterEnd) {
+          const fn = resolveAfterEnd;
+          resolveAfterEnd = null;
+          fn();
+        } else if (!settled) {
+          done(transcript);
+        }
+      };
+      rec.onerror = (e: any) => {
+        if (!['no-speech', 'aborted'].includes(e?.error ?? ''))
+          console.warn('[voice/listenOnce]', e?.error);
+        done(transcript);
+      };
 
       recRef.current = rec;
       set('listening');

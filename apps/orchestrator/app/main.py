@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.health import router as health_router
 from app.api.routes.session import router as session_router
 from app.api.routes.command import router as command_router
+from app.api.routes.system import router as system_router
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -73,6 +74,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(session_router)
 app.include_router(command_router)
+app.include_router(system_router)
 app.include_router(ws_router)
 
 

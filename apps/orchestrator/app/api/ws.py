@@ -19,6 +19,7 @@ from app.dependencies import (
 )
 from app.core.config import settings
 from app.models.contracts import AgentRequest
+from app.services.llm import llm_service
 from app.services.tts import TTSProvider, BrowserTTSProvider, OpenAITTSProvider, ElevenLabsTTSProvider
 
 # ── Per-agent OpenAI TTS voice assignments ────────────────────────────────────
@@ -100,7 +101,7 @@ def _strip_agent_prefix(text: str) -> str:
 
 def _is_agent_error(text: str) -> bool:
     """Detect 'not configured / no credentials / error' patterns in agent responses."""
-    markers = ('no api key', 'not configured', 'not connected', 'could not', 'error', 'no token')
+    markers = ('no api key', 'not configured', 'not connected', 'could not', 'error', 'no token', 'expired', 'could not reach')
     return any(m in text.lower() for m in markers)
 
 GREETING_SUFFIXES = [
@@ -133,8 +134,18 @@ FAREWELL_LINES = [
 ]
 
 
+def _make_farewell_prompt(name: str) -> str:
+    return (
+        f'You are {name}, a warm AI voice assistant saying goodbye to your user. '
+        'Generate exactly ONE short farewell sentence (10–18 words) that naturally responds '
+        'to how the user said goodbye. Match the tone: sleepy if they said goodnight, '
+        'casual if they said bye, warm if they said see you. '
+        'No markdown, no quotes, plain spoken English only.'
+    )
+
+
 def _pick_farewell(text: str) -> str:
-    """Pick a contextually appropriate farewell based on the sleep phrase used."""
+    """Fallback: pick a contextually appropriate farewell from the static list."""
     t = text.lower()
     if 'night' in t:
         night_lines = [l for l in FAREWELL_LINES if 'night' in l.lower() or 'dream' in l.lower()]
@@ -143,6 +154,21 @@ def _pick_farewell(text: str) -> str:
         bye_lines = [l for l in FAREWELL_LINES if 'goodbye' in l.lower() or 'farewell' in l.lower() or 'see you' in l.lower()]
         return random.choice(bye_lines) if bye_lines else random.choice(FAREWELL_LINES)
     return random.choice(FAREWELL_LINES)
+
+
+async def _llm_farewell(phrase: str, llm_config: dict, name: str = 'Robo') -> str:
+    """Generate a farewell via LLM; falls back to static pick if LLM is unavailable."""
+    if llm_config:
+        result = await llm_service.complete(
+            phrase,
+            llm_config,
+            system_prompt=_make_farewell_prompt(name),
+            max_tokens=60,
+            temperature=0.9,
+        )
+        if result:
+            return result
+    return _pick_farewell(phrase)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -224,6 +250,23 @@ async def _speak_event(
 
 # ── boot sequence ─────────────────────────────────────────────────────────────
 
+async def _test_agent(agent_id: str) -> tuple[str, str, str]:
+    """Test a single agent and return (agent_id, status, message). Runs in parallel during boot."""
+    label      = AGENT_LABELS.get(agent_id, agent_id.title())
+    boot_query = AGENT_BOOT_QUERY.get(agent_id, '')
+    if not boot_query:
+        return agent_id, 'online', f"{label} agent, online and ready."
+    try:
+        test_resp = await agent_manager.handle(agent_id, AgentRequest(text=boot_query))
+        raw   = test_resp.text
+        clean = _strip_agent_prefix(raw)
+        if _is_agent_error(raw):
+            return agent_id, 'degraded', f"{label} agent — configuration needed. {clean}"
+        return agent_id, 'online', f"{label} agent, online. {clean}"
+    except Exception as exc:
+        return agent_id, 'failed', f"{label} agent failed to start: {str(exc)[:60]}"
+
+
 async def _boot_sequence(
     ws: WebSocket,
     calling_name: str,
@@ -239,76 +282,53 @@ async def _boot_sequence(
     elif registered_agents[0] != 'system':
         registered_agents = ['system'] + [a for a in registered_agents if a != 'system']
 
-    agent_manager.configure_session(llm_config, agent_config, registered_agents)
+    agent_manager.configure_session(llm_config, agent_config, registered_agents, calling_name)
     router_service.configure_session(llm_config, registered_agents)
     metrics_service.record_session()
 
+    # Send config + phase transitions — no artificial sleeps needed between WS messages
     await _send(ws, 'session_config', {
         'tts_provider':      settings_label(tts),
         'stt_provider':      settings_label(stt),
         'wake_word_enabled': settings.wake_word_enabled and wake_word_service.available,
         'wake_word_model':   settings.wake_word_model,
     })
-
     await _send(ws, 'phase_changed', {'phase': 'wake_detected'})
-    await asyncio.sleep(0.05)
     await _send(ws, 'phase_changed', {'phase': 'booting'})
-    await asyncio.sleep(0.05)
 
-    await _speak_event(ws, 'boot_status', _greeting(calling_name), tts=tts)
-    await asyncio.sleep(0.05)
-
+    # Greeting TTS + initialise all agents in parallel while audio plays
     n = len(registered_agents)
-    await _speak_event(ws, 'boot_status', f'Starting {n} agent{"s" if n != 1 else ""}.', tts=tts)
-    await asyncio.sleep(0.05)
+    greeting_task = asyncio.create_task(_speak_event(ws, 'boot_status', _greeting(calling_name), tts=tts))
+    init_task     = asyncio.create_task(agent_manager.initialize_enabled_agents())
+    await greeting_task
+    await init_task
 
-    await agent_manager.initialize_enabled_agents()
-
-    online_count = 0
+    # Mark all agents as "starting" before parallel test calls begin
     for agent_id in registered_agents:
-        label = AGENT_LABELS.get(agent_id, agent_id.title())
         await _send(ws, 'agent_status_changed', {'agent': agent_id, 'status': 'starting'})
-        await _speak_event(ws, 'boot_status', f'Starting agent {label}.', {'agent_id': agent_id}, tts=tts)
-        await asyncio.sleep(0.05)
 
-        boot_query = AGENT_BOOT_QUERY.get(agent_id, '')
-        if boot_query:
-            try:
-                test_resp = await agent_manager.handle(agent_id, AgentRequest(text=boot_query))
-                raw = test_resp.text
-                clean = _strip_agent_prefix(raw)
-                if _is_agent_error(raw):
-                    status = 'degraded'
-                    msg = f"{label} agent — configuration needed. {clean}"
-                else:
-                    status = 'online'
-                    online_count += 1
-                    msg = f"{label} agent, online. {clean}"
-            except Exception as exc:
-                status = 'failed'
-                msg = f"{label} agent failed to start: {str(exc)[:60]}"
-        else:
-            # General AI: skip real call, just announce ready
-            status = 'online'
+    # Run all agent health checks in parallel — biggest latency win
+    results: list[tuple[str, str, str]] = await asyncio.gather(
+        *[_test_agent(agent_id) for agent_id in registered_agents]
+    )
+
+    # Announce results sequentially with TTS (audio is inherently serial)
+    online_count = 0
+    for agent_id, status, msg in results:
+        if status == 'online':
             online_count += 1
-            msg = f"{label} agent, online and ready."
-
-        # Boot messages use the session voice for uniformity.
-        # Per-agent voices only apply when the agent responds to a real query.
         await _speak_event(
             ws, 'boot_status', msg,
             {'agent_id': agent_id, 'agent_status': status},
             tts=tts,
         )
         await _send(ws, 'agent_status_changed', {'agent': agent_id, 'status': status})
-        await asyncio.sleep(0.05)
 
     await _speak_event(
         ws, 'boot_status',
         f'{online_count} of {n} agent{"s" if n != 1 else ""} online and ready for your command.',
         tts=tts,
     )
-    await asyncio.sleep(0.05)
     await _send(ws, 'phase_changed', {'phase': 'ready'})
 
 
@@ -330,7 +350,6 @@ async def _handle_text_command(
     if emit_transcript:
         await _send(ws, 'transcript_final', {'speaker': 'user', 'text': text})
     await _send(ws, 'phase_changed', {'phase': 'thinking'})
-    await asyncio.sleep(0.05)
 
     t0 = time.monotonic()
     try:
@@ -338,21 +357,16 @@ async def _handle_text_command(
     except Exception as exc:
         metrics_service.record_agent_call('general', (time.monotonic() - t0) * 1000, error=True)
         await _speak_event(ws, 'assistant_speaking', f"I ran into an error: {str(exc)[:80]}", tts=tts)
-        await asyncio.sleep(0.05)
         await _send(ws, 'assistant_done', {})
-        await asyncio.sleep(0.05)
         await _send(ws, 'phase_changed', {'phase': 'ready'})
         return
 
     metrics_service.record_agent_call(agent_used, (time.monotonic() - t0) * 1000)
     await _send(ws, 'route_selected', {'agent': agent_used, 'confidence': 1.0, 'reason': 'llm:orchestrated'})
-    await asyncio.sleep(0.05)
     await _send(ws, 'phase_changed', {'phase': 'responding'})
 
-    await _speak_event(ws, 'assistant_speaking', response_text, tts=_agent_tts(tts, agent_used))
-    await asyncio.sleep(0.05)
+    await _speak_event(ws, 'assistant_speaking', response_text, extra={'agent_id': agent_used}, tts=_agent_tts(tts, agent_used))
     await _send(ws, 'assistant_done', {})
-    await asyncio.sleep(0.05)
     await _send(ws, 'phase_changed', {'phase': 'ready'})
 
 
@@ -372,7 +386,6 @@ async def _handle_audio_chunk(ws: WebSocket, payload: dict, stt: STTProvider, tt
         await _send(ws, 'error', {'message': 'Invalid base64 audio data.'})
         return
 
-    await _send(ws, 'phase_changed', {'phase': 'thinking'})
     text = await stt.transcribe(audio_bytes, fmt)
 
     if not text:
@@ -381,8 +394,10 @@ async def _handle_audio_chunk(ws: WebSocket, payload: dict, stt: STTProvider, tt
         return
 
     metrics_service.record_stt()
+    # Only echo the transcript back — the client applies the wake-word gate and then
+    # sends send_text_command if the text passes. This is the same gate used for
+    # browser STT; without it every ambient word would trigger an agent response.
     await _send(ws, 'transcript_final', {'speaker': 'user', 'text': text})
-    await _handle_text_command(ws, text, tts, emit_transcript=False)
 
 
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
@@ -403,8 +418,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     })
 
     # Per-session providers — updated from start_session voice_config
-    session_tts: TTSProvider = _default_tts
-    session_stt: STTProvider = _default_stt
+    session_tts: TTSProvider  = _default_tts
+    session_stt: STTProvider  = _default_stt
+    session_llm_config: dict  = {}
+    session_calling_name: str = 'Robo'
 
     try:
         while True:
@@ -420,6 +437,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 llm_config: dict         = payload.get('llm_config', {})
                 agent_config: dict       = payload.get('agent_config', {})
                 session_tts, session_stt = _build_session_providers(voice_config)
+                session_llm_config       = llm_config
+                session_calling_name     = calling_name
                 await _boot_sequence(
                     ws, calling_name, registered_agents,
                     session_tts, session_stt,
@@ -434,10 +453,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await _handle_audio_chunk(ws, payload, session_stt, session_tts)
 
             elif command == 'farewell_session':
-                farewell = _pick_farewell(payload.get('phrase', ''))
+                farewell = await _llm_farewell(payload.get('phrase', ''), session_llm_config, session_calling_name)
                 await _send(ws, 'phase_changed', {'phase': 'responding'})
                 await _speak_event(ws, 'assistant_speaking', farewell, tts=session_tts)
-                await asyncio.sleep(0.1)
                 await _send(ws, 'assistant_done', {})
                 await agent_manager.shutdown()
                 await _send(ws, 'phase_changed', {'phase': 'sleep'})

@@ -1,8 +1,8 @@
-# Robo Wake-Up — Architecture Document
+# AI Desk Companion — Architecture Document
 
 ## 1. Overview
 
-**Robo Wake-Up** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
+**AI Desk Companion** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
 
 ---
 
@@ -36,7 +36,7 @@
 
 ### Monorepo layout
 ```
-personal-agent/
+ai-desk-companion/
 ├── apps/
 │   ├── desktop/          React + Vite frontend
 │   └── orchestrator/     Python FastAPI backend
@@ -99,8 +99,7 @@ All UI ↔ orchestrator communication goes through a single persistent WebSocket
 | `start_session` | `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` | Wake + boot sequence |
 | `send_text_command` | `text` | Route a text command |
 | `audio_chunk` | `data_b64`, `format`, `is_final` | Stream audio for server STT |
-| `farewell_session` | `phrase` | Speak a goodbye, then enter sleep mode |
-| `stop_session` | — | Enter sleep mode immediately (no farewell) |
+| `stop_session` | — | Enter sleep mode (with or without farewell) |
 | `retry_agent` | `agent` | Retry a failed agent |
 
 ### Orchestrator → UI Events
@@ -119,32 +118,125 @@ All UI ↔ orchestrator communication goes through a single persistent WebSocket
 | `error` | `message` | Error notification |
 
 ### Phase State Machine
+
 ```
-standby ──wake──▶ wake_detected ──▶ booting ──▶ ready ◀──────┐
-                                                  │           │
-                                              listening       │
-                                                  │           │
-                                              thinking        │
-                                                  │           │
-                                             responding ──────┘
-                                                  │
-ready / booting ──sleep phrase──▶ responding (farewell TTS) ──▶ sleep
-ready / booting ──Sleep button──▶ sleep
-sleep ──wake──▶ wake_detected
+standby ──wake phrase──▶ wake_detected ──▶ booting ──▶ ready ◀─────────────┐
+   ▲                                                      │                 │
+   │           ┌── auto-listen loop (wake word required) ─┤                 │
+   │           │                                       listening            │
+   │           │         (discard if no "Robo" prefix)     │               │
+   │           │                                       thinking             │
+   │           │                                           │                │
+   │           └──────────────────────────────── responding ───────────────┘
+   │                                                       │
+   └──── "Robo, Good night" / Sleep button ───────────────┘
+         (farewell spoken, then stop_session → doSleep)
 ```
+
+**Standby wake rules (phase = standby / sleep):**
+- Accepted triggers: "Hey Robo", "Hello Robo", "Robo, Wake-Up", "Wake-Up Robo"
+- Rejected: bare "Robo" alone (prevents accidental wakes in conversation)
+- Inline command: "Hey Robo, check the weather" → boots AND queues "check the weather" as first command
+
+**Ready-state wake-word gate (the Alexa / Google Nest rule):**
+- After boot, `autoListenRef.current = true` keeps the app in a continuous listen loop
+- Each 5-second listen window is evaluated by a wake-word gate **before** the orchestrator is called
+- If speech is heard **without** the wake word → silently discarded, loop continues
+- If speech **contains** the wake word → prefix stripped, command sent to orchestrator
+- Wake word alone ("Robo" with no command) → app acknowledges ("Yes? How can I help you?") and re-listens
+- Loop continues indefinitely until: sleep phrase, Sleep button pressed, or voice toggled off
+
+**Sleep rules (from ready state):**
+- Voice command: must include wake word + sleep phrase (e.g. "Robo, Good night")
+- Typed command: sleep phrase alone is sufficient (no wake word needed — explicit UI action)
+- Sleep button: immediate, no farewell
+
+### Interaction Model — Full Flow
+
+```
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │  APP STARTS                                                          │
+ │  Phase: STANDBY                                                      │
+ │  Mic: silently listening for wake phrase in 3-second windows         │
+ └─────────────────────────┬───────────────────────────────────────────┘
+                           │
+          ┌────────────────▼─────────────────────┐
+          │  Heard: "Robo, Wake-Up"               │  ← Only these wake:
+          │         "Hey Robo"                    │    "Hey Robo"
+          │         "Hello Robo"                  │    "Hello Robo"
+          │         "Wake-Up Robo"                │    "Robo, Wake-Up"
+          │                                       │    "Wake-Up Robo"
+          │  Anything else → ignored              │
+          └────────────────┬─────────────────────┘
+                           │
+          ┌────────────────▼─────────────────────┐
+          │  Phase: BOOTING                       │
+          │  • LLM generates greeting             │
+          │    "Good morning, Master, your        │
+          │     systems are all online and ready" │
+          │  • All agents boot in parallel        │
+          │  • Each agent speaks its status       │
+          │  • "3 of 3 agents online and ready"   │
+          └────────────────┬─────────────────────┘
+                           │
+          ┌────────────────▼─────────────────────┐
+          │  Phase: READY                         │
+          │  Auto-listen loop begins              │
+          │                                       │
+          │  ┌─── 5-second listen window ───┐    │
+          │  │  No speech → cycle again     │    │
+          │  │  Speech without "Robo"        │    │
+          │  │    → discard, cycle again    │    │
+          │  │  Speech with "Robo":          │    │
+          │  │    → strip "Robo," prefix    │    │
+          │  │    → check for sleep phrase  │    │
+          │  │    → else send to agent      │    │
+          │  └──────────────────────────────┘    │
+          └────────────────┬─────────────────────┘
+                           │
+    ┌──────────────────────┼──────────────────────────┐
+    │                      │                          │
+    ▼                      ▼                          ▼
+ "Robo, Get me        "Robo, Good             "Get me weather"
+  weather in Delhi"    night"                 (no wake word)
+    │                      │                          │
+    ▼                      ▼                          ▼
+ Phase: THINKING       Sleep phrase            Silently discarded
+ Route → Weather       detected                Loop continues
+ Agent responds        ↓
+ Phase: RESPONDING     Farewell spoken
+    │                  Agents → offline
+    ▼                  stop_session sent
+ Phase: READY          ↓
+ Loop continues        Phase: STANDBY
+```
+
+**Voice command examples (in READY state):**
+
+| What you say | Wake word? | Result |
+|---|---|---|
+| "Robo, get me weather in Delhi" | ✅ | Routes to Weather agent |
+| "Robo, what's my next meeting?" | ✅ | Routes to Calendar agent |
+| "Robo, show GitHub pull requests" | ✅ | Routes to GitHub agent |
+| "Robo, Good night" | ✅ | Farewell → sleep → standby |
+| "Get me weather in Delhi" | ❌ | Silently ignored |
+| "What's my next meeting?" | ❌ | Silently ignored |
+| "Good night" | ❌ | Silently ignored |
+| "Robo" (alone) | ✅ | "Yes? How can I help you?" → re-listen |
 
 ### Session Greeting and Farewell
 
 **Wake-up greeting** — sent during the boot sequence as the first `boot_status` line. Varies by time of day (Good morning / afternoon / evening) with a randomised suffix.
 
-**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", etc.):
-1. UI sends `farewell_session { phrase }` to the orchestrator
-2. Orchestrator picks a contextual goodbye based on the phrase (`good night` → night-themed line; `bye/goodbye` → farewell-themed line)
-3. Farewell is synthesised via the session TTS provider and sent as `assistant_speaking`
-4. Orchestrator sends `phase_changed: sleep` after the farewell event
-5. Frontend defers the sleep transition until the farewell audio finishes playing, then runs cleanup (agents → offline, transcript updated, UI enters sleep mode)
+**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", "See you", etc.):
+1. Frontend matches a sleep pattern against the STT text
+2. Selects a random template farewell string (no LLM call)
+3. Marks all agents `offline`, clears `activeAgentId`
+4. Speaks the farewell via browser TTS (`await speak(farewell)`)
+5. Sends `stop_session` to the orchestrator
+6. Calls `doSleep()` — UI enters standby; auto-listen loop disabled
 
-**Sleep button** — skips the farewell and enters sleep immediately via `stop_session`.
+**Sleep button** — calls `doSleep()` directly and sends `stop_session` (immediate, no farewell).
 
 ### Audio Delivery
 When a server TTS provider is active, `boot_status` and `assistant_speaking` events include:
@@ -357,3 +449,50 @@ npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bu
 - Farewell is spoken via the session TTS provider before sleep
 - Frontend defers `phase_changed: sleep` via `pendingPhaseRef` until `drainTTSQueue` finishes, then calls `doSleep()` — guarantees the audio plays fully before the UI transitions
 - Sleep button still sends `stop_session` (immediate, no farewell)
+
+### Phase 7 — Alexa-style Conversation + Performance ✅ COMPLETE
+
+**Alexa-style auto-listen with wake-word gate** (`useOrchestratorRuntime.ts`)
+- `autoListenRef` flag enables the continuous listen loop after boot
+- Set to `true` on `triggerWakeWord`; cleared to `false` only on sleep, or voice toggle off (no longer cleared on no-speech — loop keeps cycling)
+- Each listen cycle: 5-second window → wake-word gate → strip prefix → route to agent
+- Background speech without the wake word is silently discarded — the loop continues automatically
+- 300ms delay after `ready` phase before the next `ask()` — allows TTS queue to settle
+- `phaseRef` tracks the current phase in a ref so async callbacks read the live value without stale closures
+
+**Wake / sleep command model**
+- Standby wake: explicit trigger phrase only ("Hey Robo", "Robo, Wake-Up") — bare "Robo" alone is ignored
+- Ready-state command gate: wake word required in all voice commands (Alexa rule)
+- Inline command capture: "Hey Robo, what's the time?" → boots agents and sends "what's the time?" as the first command via `pendingCmdRef`
+- Sleep: voice sleep requires wake word + sleep phrase ("Robo, Good night"); typed commands accept sleep phrase alone
+- Farewell sequence: agents → offline → speak farewell → send `stop_session` → `doSleep()`
+
+**Wake-prefix stripping**
+- Strips leading "Robo, " / "Hey Robo, " / "Hello Robo, " before sending to the LLM
+- "Robo" heard alone → acknowledges ("Yes? How can I help you?") and re-listens without an LLM call
+
+**Language consistency**
+- `_make_system_prompt()` in `orchestrator.py` and `_make_general_system_prompt()` in `general_ai.py` now include an explicit instruction: "Always respond in the exact same language the user wrote in. Never switch languages."
+- Prevents the LLM from drifting to English when the user speaks Hindi, Spanish, or another language
+
+**Per-agent browser TTS modulations** (`useVoice.ts`)
+- `AGENT_VOICE_OFFSETS` table applies distinct pitch / rate deltas per agent on top of the base voice config
+- Each agent has a perceptually distinct sound: System (lower, deliberate), Weather (brighter), Calendar (efficient), GitHub/Stock (lower, authoritative), News (clear newsreader cadence)
+
+**Performance optimisations**
+
+| Area | Before | After |
+|---|---|---|
+| TTS cold-start delay | 250 ms | 150 ms |
+| TTS warm-interrupt delay | 50 ms | 30 ms |
+| TTS queue pause between utterances | 200 ms | 50 ms |
+| Auto-listen gap after response | 700 ms | 300 ms |
+| STT timeout | 8000 ms | 5000 ms |
+| Standby wake-word listen window | 4000 ms | 3000 ms |
+| Standby loop gap | 80 ms | 30 ms |
+| `asyncio.sleep` between WS sends | 5 × 50 ms per command | 0 |
+| Agent boot | Sequential (one at a time) | Parallel (`asyncio.gather`) |
+| Greeting TTS + agent init | Sequential | Parallel (`asyncio.create_task`) |
+| Boot delay / per-agent pauses | 350 + 300/200 ms × N | 0 |
+
+- Chrome TTS engine pre-warmed on mount via `window.speechSynthesis.cancel()` — primes the lazy pipeline before the first real utterance

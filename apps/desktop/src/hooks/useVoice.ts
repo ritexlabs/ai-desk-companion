@@ -71,6 +71,19 @@ function pitchFor(gender: VoiceConfig['gender']): number {
   return gender === 'female' ? 1.05 : 0.92;
 }
 
+/** Per-agent pitch and rate offsets applied on top of the base voice config.
+ *  Gives each agent a subtly distinct sound when using browser TTS. */
+const AGENT_VOICE_OFFSETS: Record<string, { pitch: number; rate: number }> = {
+  system:   { pitch: -0.15, rate: -0.04 }, // lower, deliberate — technical readouts
+  weather:  { pitch: +0.10, rate:  0.00 }, // brighter, conversational
+  calendar: { pitch: +0.05, rate: +0.04 }, // organised, efficient
+  email:    { pitch:  0.00, rate:  0.00 }, // neutral professional
+  github:   { pitch: -0.10, rate: +0.04 }, // lower, tech-focused
+  stock:    { pitch: -0.12, rate: -0.02 }, // authoritative, measured
+  news:     { pitch: +0.05, rate: +0.07 }, // clear newsreader cadence
+  general:  { pitch:  0.00, rate:  0.00 }, // default
+};
+
 export function useVoice(config?: VoiceConfig) {
   const [speechState, setSpeechState] = useState<SpeechState>('idle');
   const [voiceListenerActive, setVoiceListenerActive] = useState(false);
@@ -80,6 +93,11 @@ export function useVoice(config?: VoiceConfig) {
   const mountedRef = useRef(true);
 
   useEffect(() => {
+    // Pre-warm the browser TTS engine so the first real utterance doesn't pay the cold-start penalty.
+    // Chrome's TTS engine is lazy-initialised; a cancel() on an idle engine primes the pipeline.
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
     return () => { mountedRef.current = false; };
   }, []);
 
@@ -87,7 +105,7 @@ export function useVoice(config?: VoiceConfig) {
     if (mountedRef.current) setSpeechState(s);
   }, []);
 
-  const speak = useCallback((text: string): Promise<void> => {
+  const speak = useCallback((text: string, agentId?: string): Promise<void> => {
     return new Promise((resolve) => {
       if (!('speechSynthesis' in window)) { resolve(); return; }
 
@@ -105,11 +123,13 @@ export function useVoice(config?: VoiceConfig) {
       //     after the reset before it can reliably play a new utterance.
       const wasActive = window.speechSynthesis.speaking || window.speechSynthesis.pending;
       window.speechSynthesis.cancel();
-      const delay = wasActive ? 50 : 250;
+      // Cold-start is 150 ms after pre-warming on mount (was 250 ms without it).
+      const delay = wasActive ? 30 : 150;
 
+      const offsets = (agentId ? AGENT_VOICE_OFFSETS[agentId] : undefined) ?? { pitch: 0, rate: 0 };
       const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = rateFor(config?.speed ?? 'normal');
-      utter.pitch = pitchFor(config?.gender ?? 'female');
+      utter.rate   = Math.max(0.5, Math.min(2, rateFor(config?.speed ?? 'normal')  + offsets.rate));
+      utter.pitch  = Math.max(0.5, Math.min(2, pitchFor(config?.gender ?? 'female') + offsets.pitch));
       utter.volume = 1;
 
       // Apply the best available voice at call time.

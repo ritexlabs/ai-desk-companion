@@ -7,14 +7,17 @@ _NO_LLM_MSG = (
     'Go to Settings → AI to connect OpenAI, Anthropic, Gemini, or a local Ollama model.'
 )
 
-_GENERAL_SYSTEM_PROMPT = (
-    'You are Robo, a voice assistant. '
-    'Answer only general knowledge questions (maths, definitions, history, coding help). '
-    'You have NO access to the user\'s personal data, connected systems, or real-time information. '
-    'If the user asks about time, weather, calendar, email, stocks, news, or system stats, '
-    'tell them to make sure the relevant agent is enabled in Settings. '
-    'Keep replies to 1–3 sentences, no markdown, plain spoken language.'
-)
+def _make_general_system_prompt(name: str) -> str:
+    return (
+        f'You are {name}, a voice assistant. '
+        'Answer only general knowledge questions (maths, definitions, history, coding help). '
+        'You have NO access to the user\'s personal data, connected systems, or real-time information. '
+        'If the user asks about time, weather, calendar, email, stocks, news, or system stats, '
+        'tell them to make sure the relevant agent is enabled in Settings. '
+        'Keep replies to 1–3 sentences, no markdown, plain spoken language. '
+        'IMPORTANT: Always respond in the exact same language the user wrote in. '
+        'If the user writes in Hindi, reply in Hindi. If in Spanish, reply in Spanish. Never switch languages.'
+    )
 
 
 class GeneralAIAgent(AssistantAgent):
@@ -31,7 +34,8 @@ class GeneralAIAgent(AssistantAgent):
         return None
 
     async def handle(self, request: AgentRequest) -> AgentResponse:
-        llm_config: dict = request.context.get('llm_config', {})
+        llm_config:   dict = request.context.get('llm_config', {})
+        calling_name: str  = request.context.get('calling_name', 'Robo')
         provider = (llm_config.get('provider') or '').lower()
         api_key  = (llm_config.get('api_key')  or '').strip()
 
@@ -41,7 +45,7 @@ class GeneralAIAgent(AssistantAgent):
         from app.services.llm import llm_service
         text = await llm_service.complete(
             request.text, llm_config,
-            system_prompt=_GENERAL_SYSTEM_PROMPT,
+            system_prompt=_make_general_system_prompt(calling_name),
             max_tokens=200,
         )
         if not text:

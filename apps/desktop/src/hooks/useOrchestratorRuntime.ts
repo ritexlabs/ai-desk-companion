@@ -94,6 +94,8 @@ export function useOrchestratorRuntime(
 
   /* ── React state ────────────────────────────────────────────────── */
   const [phase, setPhase]                     = useState<RuntimePhase>('standby');
+  const phaseRef = useRef<RuntimePhase>('standby');
+  phaseRef.current = phase; // kept current every render so async callbacks see the latest value
   const [wsConnected, setWsConnected]         = useState(false);
   const [heard, setHeard]                     = useState(`Waiting for "${wakeWord}"…`);
   const [assistantSpeech, setAssistantSpeech] = useState(`System idle. Say "${wakeWord}" or press Wake Up.`);
@@ -136,6 +138,13 @@ export function useOrchestratorRuntime(
   /* ── Pending STT transcript resolve (server STT flow) ───────────── */
   const pendingTranscriptRef = useRef<((text: string) => void) | null>(null);
 
+  /* ── Auto-listen / wake-word conversation mode ───────────────────── */
+  // Set true when wake word fires; set false when session ends or no speech detected.
+  // While true and phase=ready, ask() is triggered automatically (Alexa-style).
+  const autoListenRef  = useRef(false);
+  // Holds the command portion from "Robo, what's the weather?" detected during standby.
+  const pendingCmdRef  = useRef<string | null>(null);
+
   /* ── Helpers ────────────────────────────────────────────────────── */
   const appendTurn = useCallback((speaker: TranscriptTurn['speaker'], text: string) => {
     setTranscript((prev) => [...prev, { speaker, text, timestamp: nowIso() }]);
@@ -154,14 +163,17 @@ export function useOrchestratorRuntime(
       const item = ttsQueueRef.current.shift()!;
       setAssistantSpeech(item.text);
       if (item.agentId) updateAgent(item.agentId, item.agentStatus ?? 'online');
-      await pause(200);
+      // Brief yield so the React state update renders before audio starts
+      await pause(50);
 
-      if (item.audio_b64) {
+      if (!voiceEnabledRef.current) {
+        // Voice muted — text shown in UI, no audio
+      } else if (item.audio_b64) {
         setIsPlayingServerAudio(true);
         await playAudio(item.audio_b64, item.audio_format ?? 'mp3');
         setIsPlayingServerAudio(false);
       } else {
-        await speak(item.text);
+        await speak(item.text, item.agentId);
       }
     }
 
@@ -251,9 +263,10 @@ export function useOrchestratorRuntime(
         break;
 
       case 'assistant_speaking': {
-        const text = payload.text as string;
+        const text    = payload.text     as string;
+        const agentId = payload.agent_id as string | undefined;
         appendTurn('assistant', text);
-        enqueueTTS({ text, ...extractAudio() });
+        enqueueTTS({ text, agentId, ...extractAudio() });
         break;
       }
 
@@ -361,23 +374,34 @@ export function useOrchestratorRuntime(
   /* ── Wake-word listener (browser STT, on in standby/sleep) ─────── */
   const wakeRef = useRef<() => void>(() => {});
 
+  // Wake-word pattern for STANDBY listener:
+  // Requires explicit "Robo, Wake-Up" or "Hey/Hello Robo" — bare "Robo" alone is ignored in standby.
+  // This prevents accidental wake when the name is mentioned in casual speech.
   const wakeWordPattern = useMemo(() => {
     const name = wakeWord.toLowerCase().replace(/[^a-z0-9]/g, '');
-    // Add `t?` suffix to catch common STT misrecognition: "robo" → "robot"
-    const n = `${name}t?`;
-    // Matches: "Robo/Robot", "Hey Robo", "Wake-Up Robo", "Wakeup Robo", "Robo Wakeup", "Robo Wake-Up"
+    const n = `${name}t?`;  // t? catches STT misrecognition: "robo" → "robot"
+    // Allow comma or space as separator so "Robo, Wake-Up" and "Robo Wake-Up" both match.
     return new RegExp(
-      `(?:wake[\\s\\-]?up[\\s\\-]?${n}|${n}[\\s\\-]?wake[\\s\\-]?up|hey[\\s\\-]?${n}|hello[\\s\\-]?${n}|\\b${n}\\b)`,
+      // "Robo Wake-Up" / "Robo, Wake-Up" / "Wake-Up Robo" — explicit start command
+      `wake[\\s\\-]?up[,\\s]*${n}|${n}[,\\s]+wake[\\s\\-]?up` +
+      // "Hey Robo" / "Hello Robo" — natural greeting triggers
+      `|hey[,\\s]+${n}|hello[,\\s]+${n}`,
       'i',
     );
   }, [wakeWord]);
 
-  // Sleep phrases: "Bye Robo", "Good Night Robo", "Robo go to sleep", "Robo go for sleep", etc.
+  // Sleep-phrase pattern for ask() — used during an active session.
+  // Matches "Robo Good Bye", "Robo Good Night", "Robo See You", "Robo Go to Sleep",
+  // and standalone equivalents (no wake word needed when already in a session).
   const sleepPattern = useMemo(() => {
     const name = wakeWord.toLowerCase().replace(/[^a-z0-9]/g, '');
     const n = `${name}t?`;
+    const sleepKw = `bye+|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?|shut\\s?down`;
     return new RegExp(
-      `(?:bye|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|shut\\s?down|stop|see\\s+you).*\\b${n}\\b|\\b${n}\\b.*(?:bye|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|shut\\s?down|stop)`,
+      // wake-word + sleep phrase, either order: "Robo Good Night" / "Good Night Robo"
+      `(?:${sleepKw}).*\\b${n}\\b|\\b${n}\\b.*(?:${sleepKw})` +
+      // standalone sleep phrases (safe in ask() which only runs during an active session)
+      `|^(?:(?:bye+\\s*)+|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?)\\s*[.!]*$`,
       'i',
     );
   }, [wakeWord]);
@@ -394,17 +418,22 @@ export function useOrchestratorRuntime(
     setVoiceEnabled((prev) => !prev);
   }, []);
 
-  // When voice is turned off, immediately abort ANY in-progress STT session
-  // (covers both the wake-word listenOnce loop and ask()'s listenOnce call).
+  // When voice is toggled off: stop all active audio/STT immediately so the
+  // mute is instant for both input (listening) and output (speaking/audio).
   useEffect(() => {
     if (!voiceEnabled) {
+      autoListenRef.current = false;     // cancel auto-listen when voice is muted
       stopListening();
+      stopSpeaking();
+      stopAudio();
+      setIsPlayingServerAudio(false);
+      ttsQueueRef.current = [];          // discard pending speech items
       if (pendingTranscriptRef.current) {
         pendingTranscriptRef.current('');
         pendingTranscriptRef.current = null;
       }
     }
-  }, [voiceEnabled, stopListening]);
+  }, [voiceEnabled, stopListening, stopSpeaking, stopAudio]);
 
   useEffect(() => {
     if (!sttSupported || !voiceEnabled) return;
@@ -417,14 +446,19 @@ export function useOrchestratorRuntime(
     // More reliable than continuous=true which silently ends and creates blind spots.
     (async () => {
       while (alive) {
-        const text = await listenOnce(4000);
+        const text = await listenOnce(3000);
         if (!alive) break;
         if (text && wakeWordPattern.test(text)) {
+          // Extract any inline command after the wake-phrase, e.g. "Hey Robo, what's the time?" → "what's the time?"
+          const inline = text.replace(wakeWordPattern, '').replace(/^[,\s]+/, '').trim();
+          // Discard the inline part if it's just the boot phrase itself (e.g. "Robo, Wake-Up" → inline="", not "Wake-Up")
+          const isBootPhrase = /^wake[\s\-]?up$/i.test(inline);
+          if (inline && !isBootPhrase) pendingCmdRef.current = inline;
           wakeRef.current();
           break;
         }
         // tiny pause so Chrome isn't restarted instantly on the same tick
-        await new Promise<void>((r) => setTimeout(r, 80));
+        await new Promise<void>((r) => setTimeout(r, 30));
       }
     })();
 
@@ -495,6 +529,7 @@ export function useOrchestratorRuntime(
 
   /* ── triggerWakeWord ────────────────────────────────────────────── */
   const triggerWakeWord = useCallback(async () => {
+    autoListenRef.current = true;   // enable Alexa-style auto-listen for this session
     ttsQueueRef.current  = [];
     ttsActiveRef.current = false;
     pendingPhaseRef.current = null;
@@ -553,7 +588,6 @@ export function useOrchestratorRuntime(
     } else {
       setPhase('wake_detected');
       setHeard(wakeWordRef.current);
-      await pause(350);
       setPhase('booting');
 
       const greeting = `${partOfDayFromHour()}, ${callingNameRef.current}. Running in local mode — the orchestrator is offline.`;
@@ -570,7 +604,6 @@ export function useOrchestratorRuntime(
         setAssistantSpeech(text);
         appendTurn('assistant', text);
         if (agentId) updateAgent(agentId, 'online');
-        await pause(i === 0 ? 300 : 200);
         await speak(text);
       }
 
@@ -579,26 +612,16 @@ export function useOrchestratorRuntime(
   }, [wsSend, speak, appendTurn, updateAgent]);
 
   useEffect(() => { wakeRef.current = triggerWakeWord; }, [triggerWakeWord]);
-  // askRef and sleepRef are kept in sync below, after ask/sleep are defined
 
-  /* ── auto-ask: continuous voice mode ───────────────────────────── */
-  // When voice is enabled, automatically listen for a command whenever the
-  // agent becomes ready and TTS has finished playing.  Stays active until
-  // the user explicitly disables voice or puts the agent to sleep.
-  const askRef   = useRef<() => void>(() => {});
+  // askRef and sleepRef are kept in sync below, after ask/sleep are defined.
+  const askRef   = useRef<(input?: string) => void>(() => {});
   const sleepRef = useRef<() => void>(() => {});
-
-  useEffect(() => {
-    if (!voiceEnabled) return;
-    if (phase !== 'ready') return;
-    if (isPlayingServerAudio || speechState === 'speaking') return;
-
-    const t = setTimeout(() => { askRef.current(); }, 800);
-    return () => clearTimeout(t);
-  }, [phase, voiceEnabled, isPlayingServerAudio, speechState]);
 
   /* ── ask ────────────────────────────────────────────────────────── */
   const ask = useCallback(async (input?: string) => {
+    // Prevent starting a new listen session while one is already running
+    if (!input && phaseRef.current === 'listening') return;
+
     let text = (input ?? command).trim();
 
     if (!text) {
@@ -613,21 +636,34 @@ export function useOrchestratorRuntime(
         await recordAndTranscribeViaServer();
         return;
       } else if (sttSupported) {
-        text = await listenOnce(8000);
+        text = await listenOnce(5000);
       } else {
         setAssistantSpeech('No microphone or STT available. Please type your command.');
         setPhase('ready');
         return;
       }
 
+      // Strip wake-word prefix so "Robo, what's the time?" becomes "what's the time?"
+      if (text) {
+        const wakePfx = new RegExp(
+          `^\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b[,\\s]*`,
+          'i',
+        );
+        const stripped = text.replace(wakePfx, '').trim();
+        if (stripped) text = stripped;
+      }
+
       if (!text) {
-        setAssistantSpeech('No input detected. Ready for your command.');
+        // No speech in the listen window — stop auto-listen so we don't loop endlessly.
+        autoListenRef.current = false;
+        setAssistantSpeech(`Listening paused. Say "${wakeWordRef.current}, Wake Up" or press Wake Up.`);
         setPhase('ready');
         return;
       }
 
       // Voice was disabled while we were listening — discard silently
       if (!voiceEnabledRef.current) {
+        autoListenRef.current = false;
         setPhase('ready');
         return;
       }
@@ -636,27 +672,26 @@ export function useOrchestratorRuntime(
     setHeard(text);
     setCommand('');
 
-    // Sleep-phrase detection — handles "Bye Robo", "Good Night Robo", "Robo go to sleep", etc.
+    // Sleep-phrase detection — template farewell, no LLM call.
     if (sleepPattern.test(text)) {
       appendTurn('user', text);
-      if (wsConnectedRef.current) {
-        // Ask orchestrator to speak a farewell then send phase_changed:sleep
-        wsSend('farewell_session', { phrase: text });
-      } else {
-        // Browser-only fallback: speak farewell locally then sleep
-        const farewells = [
-          'Goodbye! Have a wonderful day.',
-          'Take care! I\'ll be here when you need me.',
-          'Goodnight! Rest well.',
-          'Farewell! It was a pleasure.',
-          'See you soon! Powering down now.',
-        ];
-        const farewell = farewells[Math.floor(Math.random() * farewells.length)];
-        setAssistantSpeech(farewell);
-        appendTurn('assistant', farewell);
-        await speak(farewell);
-        sleepRef.current();
-      }
+      const farewells = [
+        `Goodbye, ${callingNameRef.current}! Have a wonderful time.`,
+        `Take care! I'll be here when you need me.`,
+        `Good night! Rest well.`,
+        `Farewell! It was a pleasure chatting.`,
+        `See you later! Powering down now.`,
+      ];
+      const farewell = farewells[Math.floor(Math.random() * farewells.length)];
+      setAssistantSpeech(farewell);
+      appendTurn('assistant', farewell);
+      autoListenRef.current = false;
+      setAgents(agentsFromIds(registeredIdsRef.current).map((a) => ({ ...a, status: 'offline' as const })));
+      setActiveAgentId(null);
+      // Speak first so the farewell message isn't overwritten by orchestrator's phase_changed:sleep
+      await speak(farewell);
+      if (wsConnectedRef.current) wsSend('stop_session');
+      doSleepRef.current();
       return;
     }
 
@@ -676,7 +711,6 @@ export function useOrchestratorRuntime(
         ? `System agent responding: ${systemHealthSummary(systemStatsRef.current)}`
         : `Local mode: I heard "${text}". Start the orchestrator for full AI-powered responses.`;
 
-      await pause(400);
       setPhase('responding');
       setAssistantSpeech(response);
       appendTurn('assistant', response);
@@ -684,12 +718,29 @@ export function useOrchestratorRuntime(
       setActiveAgentId(null);
       setPhase('ready');
     }
-  }, [command, speak, listenOnce, appendTurn, sttSupported, wsSend, recordAndTranscribeViaServer]);
+  }, [command, speak, listenOnce, appendTurn, sttSupported, wsSend, recordAndTranscribeViaServer, sleepPattern]);
 
-  useEffect(() => { askRef.current   = () => ask();   }, [ask]);
+  useEffect(() => { askRef.current = ask; }, [ask]);
+
+  // Alexa-style auto-listen: when phase returns to 'ready' while in auto-listen mode,
+  // automatically start listening for the next command.
+  // auto-listen is enabled by wake-word detection and disabled by no-speech / sleep / voice-off.
+  useEffect(() => {
+    if (phase !== 'ready' || !voiceEnabled || !autoListenRef.current) return;
+    const t = setTimeout(() => {
+      // Re-check everything inside the timeout using refs (closures are stale)
+      if (phaseRef.current !== 'ready' || !voiceEnabledRef.current || !autoListenRef.current) return;
+      const cmd = pendingCmdRef.current;
+      pendingCmdRef.current = null;
+      askRef.current(cmd ?? undefined);
+    }, 300); // 300 ms gap lets TTS settle before mic opens
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, voiceEnabled]);
 
   /* ── doSleep — full sleep cleanup, usable from TTS drain or directly ── */
   const doSleep = useCallback(() => {
+    autoListenRef.current   = false;    // stop auto-listen when session ends
     ttsQueueRef.current     = [];
     ttsActiveRef.current    = false;
     pendingPhaseRef.current = null;
@@ -706,6 +757,7 @@ export function useOrchestratorRuntime(
   // Called by the Sleep button (immediate, no farewell).
   // The farewell_session path waits for TTS then calls doSleep via pendingPhaseRef.
   const sleep = useCallback(() => {
+    autoListenRef.current   = false;    // stop auto-listen when sleeping
     stopSpeaking();
     stopAudio();
     ttsQueueRef.current     = [];

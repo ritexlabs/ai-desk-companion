@@ -1,8 +1,8 @@
-# Robo Wake-Up — Architecture Document
+# AI Desk Companion — Architecture Document
 
 ## 1. Overview
 
-**Robo Wake-Up** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
+**AI Desk Companion** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
 
 ---
 
@@ -36,7 +36,7 @@
 
 ### Monorepo layout
 ```
-personal-agent/
+ai-desk-companion/
 ├── apps/
 │   ├── desktop/          React + Vite frontend
 │   └── orchestrator/     Python FastAPI backend
@@ -99,8 +99,7 @@ All UI ↔ orchestrator communication goes through a single persistent WebSocket
 | `start_session` | `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` | Wake + boot sequence |
 | `send_text_command` | `text` | Route a text command |
 | `audio_chunk` | `data_b64`, `format`, `is_final` | Stream audio for server STT |
-| `farewell_session` | `phrase` | Speak a goodbye, then enter sleep mode |
-| `stop_session` | — | Enter sleep mode immediately (no farewell) |
+| `stop_session` | — | Enter sleep mode (with or without farewell) |
 | `retry_agent` | `agent` | Retry a failed agent |
 
 ### Orchestrator → UI Events
@@ -120,31 +119,42 @@ All UI ↔ orchestrator communication goes through a single persistent WebSocket
 
 ### Phase State Machine
 ```
-standby ──wake──▶ wake_detected ──▶ booting ──▶ ready ◀──────┐
-                                                  │           │
-                                              listening       │
-                                                  │           │
-                                              thinking        │
-                                                  │           │
-                                             responding ──────┘
-                                                  │
-ready / booting ──sleep phrase──▶ responding (farewell TTS) ──▶ sleep
-ready / booting ──Sleep button──▶ sleep
-sleep ──wake──▶ wake_detected
+standby ──wake──▶ wake_detected ──▶ booting ──▶ ready ◀──────────────┐
+   ▲                                               │                  │
+   │    ┌──── (auto-listen loop while active) ─────┤                  │
+   │    │                                      listening              │
+   │    │                                          │                  │
+   │    │                                      thinking               │
+   │    │                                          │                  │
+   │    └──────────────────────────────── responding ────────────────┘
+   │                                               │
+   └──── sleep phrase / sleep button ──────────────┘
+         (farewell spoken in frontend, then stop_session sent)
 ```
+
+**Standby wake rules:**
+- Accepted: "Hey Robo", "Hello Robo", "Robo, Wake-Up", "Wake-Up Robo"
+- Ignored: bare "Robo" alone (avoids accidental wakes in conversation)
+- Inline command: "Hey Robo, check the weather" → boots agents AND queues "check the weather" as the first command
+
+**Auto-listen loop:**
+- Enabled when `autoListenRef.current = true` (set on `triggerWakeWord`)
+- After each `responding → ready` transition, a 300ms timer fires `ask()` automatically
+- Loop stops on: no-speech STT result, voice toggle off, sleep, manual voice-off
 
 ### Session Greeting and Farewell
 
 **Wake-up greeting** — sent during the boot sequence as the first `boot_status` line. Varies by time of day (Good morning / afternoon / evening) with a randomised suffix.
 
-**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", etc.):
-1. UI sends `farewell_session { phrase }` to the orchestrator
-2. Orchestrator picks a contextual goodbye based on the phrase (`good night` → night-themed line; `bye/goodbye` → farewell-themed line)
-3. Farewell is synthesised via the session TTS provider and sent as `assistant_speaking`
-4. Orchestrator sends `phase_changed: sleep` after the farewell event
-5. Frontend defers the sleep transition until the farewell audio finishes playing, then runs cleanup (agents → offline, transcript updated, UI enters sleep mode)
+**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", "See you", etc.):
+1. Frontend matches a sleep pattern against the STT text
+2. Selects a random template farewell string (no LLM call)
+3. Marks all agents `offline`, clears `activeAgentId`
+4. Speaks the farewell via browser TTS (`await speak(farewell)`)
+5. Sends `stop_session` to the orchestrator
+6. Calls `doSleep()` — UI enters standby; auto-listen loop disabled
 
-**Sleep button** — skips the farewell and enters sleep immediately via `stop_session`.
+**Sleep button** — calls `doSleep()` directly and sends `stop_session` (immediate, no farewell).
 
 ### Audio Delivery
 When a server TTS provider is active, `boot_status` and `assistant_speaking` events include:
@@ -357,3 +367,46 @@ npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bu
 - Farewell is spoken via the session TTS provider before sleep
 - Frontend defers `phase_changed: sleep` via `pendingPhaseRef` until `drainTTSQueue` finishes, then calls `doSleep()` — guarantees the audio plays fully before the UI transitions
 - Sleep button still sends `stop_session` (immediate, no farewell)
+
+### Phase 7 — Alexa-style Conversation + Performance ✅ COMPLETE
+
+**Alexa-style auto-listen** (`useOrchestratorRuntime.ts`)
+- `autoListenRef` flag enables automatic listening after every response without requiring a button press
+- Set to `true` on `triggerWakeWord`; cleared to `false` on sleep, no-speech, or voice-off
+- 300ms delay after `ready` phase before triggering the next `ask()` — allows TTS queue to settle
+- `phaseRef` tracks the current phase in a ref so async callbacks read the live value without stale closures
+
+**Simplified wake / sleep command model**
+- Wake requires an explicit trigger phrase ("Hey Robo", "Robo, Wake-Up") — bare "Robo" in standby is ignored
+- Inline command capture: "Hey Robo, what's the time?" → boots agents and sends "what's the time?" as the first command via `pendingCmdRef`
+- Sleep is detected locally in the frontend against a regex pattern; the response is a template string, never routed to the LLM
+- Farewell sequence: agents → offline → speak farewell → send `stop_session` → `doSleep()`
+
+**Wake-prefix stripping**
+- During an active session, if STT text starts with the configured wake word (e.g. "Robo, check my emails") the prefix "Robo, " is stripped before the text is sent to the LLM, keeping queries clean
+
+**Language consistency**
+- `_make_system_prompt()` in `orchestrator.py` and `_make_general_system_prompt()` in `general_ai.py` now include an explicit instruction: "Always respond in the exact same language the user wrote in. Never switch languages."
+- Prevents the LLM from drifting to English when the user speaks Hindi, Spanish, or another language
+
+**Per-agent browser TTS modulations** (`useVoice.ts`)
+- `AGENT_VOICE_OFFSETS` table applies distinct pitch / rate deltas per agent on top of the base voice config
+- Each agent has a perceptually distinct sound: System (lower, deliberate), Weather (brighter), Calendar (efficient), GitHub/Stock (lower, authoritative), News (clear newsreader cadence)
+
+**Performance optimisations**
+
+| Area | Before | After |
+|---|---|---|
+| TTS cold-start delay | 250 ms | 150 ms |
+| TTS warm-interrupt delay | 50 ms | 30 ms |
+| TTS queue pause between utterances | 200 ms | 50 ms |
+| Auto-listen gap after response | 700 ms | 300 ms |
+| STT timeout | 8000 ms | 5000 ms |
+| Standby wake-word listen window | 4000 ms | 3000 ms |
+| Standby loop gap | 80 ms | 30 ms |
+| `asyncio.sleep` between WS sends | 5 × 50 ms per command | 0 |
+| Agent boot | Sequential (one at a time) | Parallel (`asyncio.gather`) |
+| Greeting TTS + agent init | Sequential | Parallel (`asyncio.create_task`) |
+| Boot delay / per-agent pauses | 350 + 300/200 ms × N | 0 |
+
+- Chrome TTS engine pre-warmed on mount via `window.speechSynthesis.cancel()` — primes the lazy pipeline before the first real utterance

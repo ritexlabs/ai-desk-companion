@@ -64,22 +64,29 @@ const AGENT_META: Record<
   },
 };
 
-/** Compact colored dot — matches the legend, no text needed */
+/** Compact colored dot with ping ring for online, spin for starting */
 function StatusDot({ status, dot }: { status: AgentDefinition['status']; dot: string }) {
   if (status === 'online')
     return (
-      <motion.div
-        animate={{ opacity: [0.5, 1, 0.5] }}
-        transition={{ duration: 2, repeat: Infinity }}
-        className={`h-2 w-2 flex-shrink-0 rounded-full ${dot}`}
-      />
+      <span className="relative flex-shrink-0 h-2 w-2">
+        <motion.span
+          className={`absolute inset-0 rounded-full ${dot}`}
+          animate={{ scale: [1, 2.6], opacity: [0.55, 0] }}
+          transition={{ duration: 2, repeat: Infinity, ease: 'easeOut' }}
+        />
+        <span className={`absolute inset-0 rounded-full ${dot}`} />
+      </span>
     );
   if (status === 'starting')
-    return (
-      <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-cyan-400" />
-    );
+    return <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin text-cyan-400" />;
   if (status === 'degraded')
-    return <div className="h-2 w-2 flex-shrink-0 rounded-full bg-amber-400" />;
+    return (
+      <motion.div
+        animate={{ opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 1.2, repeat: Infinity }}
+        className="h-2 w-2 flex-shrink-0 rounded-full bg-amber-400"
+      />
+    );
   if (status === 'failed')
     return <div className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />;
   return <div className="h-2 w-2 flex-shrink-0 rounded-full bg-slate-600" />;
@@ -114,11 +121,17 @@ export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootList
       <AnimatePresence>
         {allOnline && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-3 py-1.5 text-[10px] text-emerald-300 text-center"
+            initial={{ opacity: 0, height: 0, scale: 0.97 }}
+            animate={{ opacity: 1, height: 'auto', scale: 1 }}
+            exit={{ opacity: 0, height: 0, scale: 0.97 }}
+            className="relative overflow-hidden rounded-xl border border-emerald-400/25 bg-emerald-400/8 px-3 py-1.5 text-[10px] text-emerald-300 text-center"
           >
+            {/* shimmer sweep */}
+            <motion.div
+              className="pointer-events-none absolute inset-y-0 w-20 bg-gradient-to-r from-transparent via-emerald-400/15 to-transparent skew-x-12"
+              animate={{ left: ['-5rem', '110%'] }}
+              transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 1.5, ease: 'easeInOut' }}
+            />
             ✦ All {sorted.length} agent{sorted.length !== 1 ? 's' : ''} online
           </motion.div>
         )}
@@ -133,14 +146,16 @@ export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootList
         return (
           <motion.div
             key={agent.id}
-            initial={{ opacity: 0, x: -12 }}
+            initial={{ opacity: 0, x: -14 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: i * 0.05, duration: 0.3 }}
-            className={`relative overflow-hidden rounded-xl border transition-all duration-300 ${
+            transition={{ delay: i * 0.06, duration: 0.35, ease: 'easeOut' }}
+            whileHover={agent.status === 'online' ? { y: -2, transition: { duration: 0.15 } } : {}}
+            whileTap={agent.status === 'online' ? { scale: 0.98 } : {}}
+            className={`relative overflow-hidden rounded-xl border transition-colors duration-300 cursor-default ${
               isActive
                 ? `${meta.border} ${meta.bg} shadow-lg ${meta.glow}`
                 : agent.status === 'online'
-                  ? 'border-white/10 bg-white/3 hover:bg-white/5'
+                  ? 'border-white/10 bg-white/3 hover:bg-white/5 hover:border-white/18'
                   : agent.status === 'degraded'
                     ? 'border-amber-400/15 bg-amber-400/5 opacity-70'
                     : agent.status === 'failed'
@@ -154,6 +169,15 @@ export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootList
                 className={`absolute inset-0 rounded-xl border ${meta.border}`}
                 animate={{ opacity: [0, 0.9, 0] }}
                 transition={{ duration: 1.1, repeat: Infinity }}
+              />
+            )}
+
+            {/* Shimmer sweep — only when this agent is actively responding */}
+            {isActive && (
+              <motion.div
+                className="pointer-events-none absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/[0.07] to-transparent skew-x-12"
+                animate={{ left: ['-3rem', '110%'] }}
+                transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 0.5, ease: 'easeInOut' }}
               />
             )}
 

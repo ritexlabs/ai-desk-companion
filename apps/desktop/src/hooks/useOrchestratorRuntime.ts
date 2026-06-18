@@ -250,9 +250,9 @@ export function useOrchestratorRuntime(
       case 'transcript_final':
         if (payload.speaker === 'user') {
           const text = payload.text as string;
-          setHeard(text);
-          appendTurn('user', text);
-          // Resolve any pending server-STT wait
+          // Only resolve the pending server-STT wait.
+          // setHeard / appendTurn happen in ask() after the wake-word gate so that
+          // ambient speech without "Robo" never appears in the transcript.
           pendingTranscriptRef.current?.(text);
           pendingTranscriptRef.current = null;
         }
@@ -626,15 +626,14 @@ export function useOrchestratorRuntime(
 
     if (!text) {
       setPhase('listening');
-      setAssistantSpeech('Listening… speak your command now.');
-      appendTurn('system', 'Microphone active. Listening for command.');
+      setAssistantSpeech('Listening…');
+      if (!autoListenRef.current) {
+        appendTurn('system', 'Microphone active. Listening for command.');
+      }
 
       if (wsConnectedRef.current && orchestratorCapsRef.current.stt) {
-        // Server STT: audio is sent to orchestrator which transcribes and runs
-        // the full pipeline (transcript_final → assistant_speaking → phase changes).
-        // Return immediately — WS events drive everything from here.
-        await recordAndTranscribeViaServer();
-        return;
+        text = await recordAndTranscribeViaServer();
+        // Fall through — wake-word gate and command routing run below, same as browser STT.
       } else if (sttSupported) {
         text = await listenOnce(5000);
       } else {
@@ -643,30 +642,58 @@ export function useOrchestratorRuntime(
         return;
       }
 
-      // Strip wake-word prefix so "Robo, what's the time?" becomes "what's the time?"
-      if (text) {
-        const wakePfx = new RegExp(
-          `^\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b[,\\s]*`,
-          'i',
-        );
-        const stripped = text.replace(wakePfx, '').trim();
-        if (stripped) text = stripped;
-      }
-
-      if (!text) {
-        // No speech in the listen window — stop auto-listen so we don't loop endlessly.
-        autoListenRef.current = false;
-        setAssistantSpeech(`Listening paused. Say "${wakeWordRef.current}, Wake Up" or press Wake Up.`);
-        setPhase('ready');
-        return;
-      }
-
-      // Voice was disabled while we were listening — discard silently
+      // Voice was disabled while listening — discard silently
       if (!voiceEnabledRef.current) {
         autoListenRef.current = false;
         setPhase('ready');
         return;
       }
+
+      if (!text) {
+        // Nothing heard in the listen window.
+        // Auto-listen mode: silently cycle back — keep waiting for the wake word.
+        // Manual listen mode: pause and show a hint so the user knows to try again.
+        if (!autoListenRef.current) {
+          setAssistantSpeech(`Listening paused. Say "${wakeWordRef.current}, Wake Up" or press Wake Up.`);
+        }
+        setPhase('ready');
+        return;
+      }
+
+      // ── Wake-word gate ─────────────────────────────────────────────────────
+      // When auto-listening (post-boot ready state) require the wake word before
+      // processing any voice command. This is the Alexa / Google Nest behaviour:
+      // ambient speech is ignored; only "Robo, <command>" triggers a response.
+      if (autoListenRef.current) {
+        const wakeGate = new RegExp(
+          `\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b`,
+          'i',
+        );
+        if (!wakeGate.test(text)) {
+          // Background speech without wake word — discard silently, keep cycling.
+          setPhase('ready');
+          return;
+        }
+      }
+
+      // Strip the wake-word prefix: "Robo, what's the time?" → "what's the time?"
+      // Also handles "Hey Robo, ..." and "Hello Robo, ..." prefixes.
+      const wakePfx = new RegExp(
+        `^(?:hey[,\\s]+|hello[,\\s]+)?\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b[,\\s]*`,
+        'i',
+      );
+      const stripped = text.replace(wakePfx, '').trim();
+
+      if (!stripped) {
+        // Wake word heard alone (just "Robo") — acknowledge and re-listen for the command.
+        const ack = `Yes? How can I help you, ${callingNameRef.current}?`;
+        setAssistantSpeech(ack);
+        appendTurn('assistant', ack);
+        await speak(ack);
+        setPhase('ready');
+        return;
+      }
+      text = stripped;
     }
 
     setHeard(text);

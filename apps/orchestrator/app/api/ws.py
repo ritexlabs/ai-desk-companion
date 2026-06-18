@@ -386,7 +386,6 @@ async def _handle_audio_chunk(ws: WebSocket, payload: dict, stt: STTProvider, tt
         await _send(ws, 'error', {'message': 'Invalid base64 audio data.'})
         return
 
-    await _send(ws, 'phase_changed', {'phase': 'thinking'})
     text = await stt.transcribe(audio_bytes, fmt)
 
     if not text:
@@ -395,8 +394,10 @@ async def _handle_audio_chunk(ws: WebSocket, payload: dict, stt: STTProvider, tt
         return
 
     metrics_service.record_stt()
+    # Only echo the transcript back — the client applies the wake-word gate and then
+    # sends send_text_command if the text passes. This is the same gate used for
+    # browser STT; without it every ambient word would trigger an agent response.
     await _send(ws, 'transcript_final', {'speaker': 'user', 'text': text})
-    await _handle_text_command(ws, text, tts, emit_transcript=False)
 
 
 # ── WebSocket endpoint ────────────────────────────────────────────────────────

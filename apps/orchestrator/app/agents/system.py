@@ -33,8 +33,9 @@ def _collect_metrics() -> dict:
     mem = psutil.virtual_memory()
     swap = psutil.swap_memory()
 
-    # Disk (root partition)
-    disk = psutil.disk_usage('/')
+    # Disk (root/system drive — cross-platform)
+    _disk_path = os.path.abspath(os.sep)
+    disk = psutil.disk_usage(_disk_path)
 
     # Battery (optional — may not exist on desktops)
     battery = psutil.sensors_battery()
@@ -121,7 +122,7 @@ class SystemAgent(AssistantAgent):
         lines += [
             f"RAM: {_gb(m['mem_used'])} used / {_gb(m['mem_total'])} total ({m['mem_pct']}% used, {_gb(m['mem_avail'])} available)",
             f"Swap: {_gb(m['swap_used'])} used / {_gb(m['swap_total'])} total",
-            f"Disk (/): {_gb(m['disk_used'])} used / {_gb(m['disk_total'])} total ({m['disk_pct']}% used)",
+            f"Disk: {_gb(m['disk_used'])} used / {_gb(m['disk_total'])} total ({m['disk_pct']}% used)",
         ]
 
         if m['bat_info']:

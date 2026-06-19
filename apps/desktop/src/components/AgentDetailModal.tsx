@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { X, RotateCw } from 'lucide-react';
+import { X, RotateCw, LayoutDashboard } from 'lucide-react';
 import type { AgentDefinition } from '../types/runtime';
 
 interface AgentMetrics {
@@ -14,6 +14,7 @@ interface AgentDetailModalProps {
   metrics?: AgentMetrics;
   onClose: () => void;
   onReload?: () => void;
+  onOpenDashboard?: () => void;
 }
 
 const COLORS: Record<string, { text: string; border: string; bg: string; dot: string; glow: string }> = {
@@ -23,8 +24,9 @@ const COLORS: Record<string, { text: string; border: string; bg: string; dot: st
   email:    { text: 'text-emerald-300', border: 'border-emerald-400/30', bg: 'bg-emerald-400/8', dot: 'bg-emerald-400', glow: 'rgba(52,211,153,0.12)' },
   github:   { text: 'text-amber-300',   border: 'border-amber-400/30',   bg: 'bg-amber-400/8',   dot: 'bg-amber-400',   glow: 'rgba(251,191,36,0.12)' },
   stock:    { text: 'text-green-300',   border: 'border-green-400/30',   bg: 'bg-green-400/8',   dot: 'bg-green-400',   glow: 'rgba(74,222,128,0.12)' },
-  news:     { text: 'text-sky-300',     border: 'border-sky-400/30',     bg: 'bg-sky-400/8',     dot: 'bg-sky-400',     glow: 'rgba(56,189,248,0.12)' },
-  general:  { text: 'text-violet-300',  border: 'border-violet-400/30',  bg: 'bg-violet-400/8',  dot: 'bg-violet-400',  glow: 'rgba(167,139,250,0.12)' },
+  news:      { text: 'text-sky-300',     border: 'border-sky-400/30',     bg: 'bg-sky-400/8',     dot: 'bg-sky-400',     glow: 'rgba(56,189,248,0.12)' },
+  smarthome: { text: 'text-orange-300', border: 'border-orange-400/30', bg: 'bg-orange-400/8', dot: 'bg-orange-400', glow: 'rgba(251,146,60,0.12)' },
+  general:   { text: 'text-violet-300',  border: 'border-violet-400/30',  bg: 'bg-violet-400/8',  dot: 'bg-violet-400',  glow: 'rgba(167,139,250,0.12)' },
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
@@ -44,7 +46,7 @@ function Row({ label, value, valueClass = 'text-slate-300' }: { label: string; v
   );
 }
 
-export function AgentDetailModal({ agent, bootMessage, metrics, onClose, onReload }: AgentDetailModalProps) {
+export function AgentDetailModal({ agent, bootMessage, metrics, onClose, onReload, onOpenDashboard }: AgentDetailModalProps) {
   const c = COLORS[agent.id] ?? COLORS.general;
   const st = STATUS_LABEL[agent.status] ?? STATUS_LABEL.offline;
 
@@ -146,6 +148,15 @@ export function AgentDetailModal({ agent, bootMessage, metrics, onClose, onReloa
             >
               <RotateCw className="h-3 w-3" />
               Reload
+            </button>
+          )}
+          {onOpenDashboard && (
+            <button
+              onClick={() => { onOpenDashboard(); onClose(); }}
+              className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125`}
+            >
+              <LayoutDashboard className="h-3 w-3" />
+              Dashboard
             </button>
           )}
         </div>

@@ -16,13 +16,14 @@ const WS_URL = (import.meta.env.VITE_BACKEND_URL ?? 'ws://localhost:8787').repla
 /* ── Agent catalogue ────────────────────────────────────────────── */
 
 const AGENT_CATALOGUE: AgentDefinition[] = [
-  { id: 'weather',  label: 'Weather',        description: 'Forecasts and current conditions.', example: 'How is the weather today?',     status: 'offline', color: 'from-cyan-400 to-sky-500'      },
-  { id: 'system',   label: 'System',          description: 'OS, CPU, battery, and health.',    example: 'What is my system health?',     status: 'offline', color: 'from-teal-400 to-cyan-500'     },
-  { id: 'calendar', label: 'Google Calendar', description: 'Meetings and schedule.',           example: 'What is my next meeting?',      status: 'offline', color: 'from-violet-400 to-fuchsia-500' },
-  { id: 'email',    label: 'Google Email',    description: 'Inbox and message summaries.',     example: 'Do I have any urgent emails?',  status: 'offline', color: 'from-emerald-400 to-teal-500'  },
-  { id: 'github',   label: 'GitHub',          description: 'PRs, issues, and workflows.',      example: 'Any failed GitHub workflows?',  status: 'offline', color: 'from-amber-400 to-orange-500'  },
-  { id: 'stock',    label: 'Stock Market',    description: 'Prices, RSI, support/resistance.', example: 'What is the Nifty 50 price?',   status: 'offline', color: 'from-green-400 to-emerald-500' },
-  { id: 'news',     label: 'News',            description: 'Latest headlines by location.',     example: 'What are the top headlines?',   status: 'offline', color: 'from-sky-400 to-blue-500'      },
+  { id: 'weather',   label: 'Weather',        description: 'Forecasts and current conditions.', example: 'How is the weather today?',        status: 'offline', color: 'from-cyan-400 to-sky-500'       },
+  { id: 'system',   label: 'System',          description: 'OS, CPU, battery, and health.',    example: 'What is my system health?',        status: 'offline', color: 'from-teal-400 to-cyan-500'      },
+  { id: 'calendar', label: 'Google Calendar', description: 'Meetings and schedule.',           example: 'What is my next meeting?',         status: 'offline', color: 'from-violet-400 to-fuchsia-500'  },
+  { id: 'email',    label: 'Google Email',    description: 'Inbox and message summaries.',     example: 'Do I have any urgent emails?',     status: 'offline', color: 'from-emerald-400 to-teal-500'   },
+  { id: 'github',   label: 'GitHub',          description: 'PRs, issues, and workflows.',      example: 'Any failed GitHub workflows?',     status: 'offline', color: 'from-amber-400 to-orange-500'   },
+  { id: 'stock',    label: 'Stock Market',    description: 'Prices, RSI, support/resistance.', example: 'What is the Nifty 50 price?',      status: 'offline', color: 'from-green-400 to-emerald-500'  },
+  { id: 'news',     label: 'News',            description: 'Latest headlines by location.',    example: 'What are the top headlines?',      status: 'offline', color: 'from-sky-400 to-blue-500'       },
+  { id: 'smarthome', label: 'Smart Home',     description: 'Control lights, switches, climate, scenes.', example: 'Turn on the living room lights.', status: 'offline', color: 'from-orange-400 to-amber-500' },
 ];
 
 function agentsFromIds(ids: string[]): AgentDefinition[] {
@@ -110,12 +111,14 @@ export function useOrchestratorRuntime(
   const [isPlayingServerAudio, setIsPlayingServerAudio] = useState(false);
   const [orchestratorMetrics, setOrchestratorMetrics] = useState<OrchestratorMetrics | null>(null);
   const [agentBootMessages, setAgentBootMessages] = useState<Record<string, string>>({});
+  const [isAutoListening, setIsAutoListening]     = useState(false);
 
   /* ── Always-current refs ────────────────────────────────────────── */
   const wsRef              = useRef<WebSocket | null>(null);
   const wsConnectedRef     = useRef(false);
-  const registeredIdsRef   = useRef(registeredAgentIds);
-  registeredIdsRef.current = registeredAgentIds;
+  const registeredIdsRef    = useRef(registeredAgentIds);
+  registeredIdsRef.current  = registeredAgentIds;
+  const prevAgentIdsRef     = useRef<Set<string>>(new Set(registeredAgentIds));
   const systemStatsRef     = useRef<SystemStats>(systemStats);
   systemStatsRef.current   = systemStats;
   const callingNameRef     = useRef(callingName);
@@ -484,12 +487,23 @@ export function useOrchestratorRuntime(
   }, []);
 
   useEffect(() => {
+    const newlyAdded = registeredAgentIds.filter((id) => !prevAgentIdsRef.current.has(id));
+    prevAgentIdsRef.current = new Set(registeredAgentIds);
+
     setAgents((prev) =>
       agentsFromIds(registeredAgentIds).map((a) => ({
         ...a,
         status: prev.find((p) => p.id === a.id)?.status ?? 'offline',
       })),
     );
+
+    // Hot-boot any newly enabled agents into an already-running session
+    const inactive = new Set<string>(['standby', 'sleep']);
+    if (newlyAdded.length > 0 && wsConnectedRef.current && !inactive.has(phaseRef.current)) {
+      for (const id of newlyAdded) {
+        wsSend('retry_agent', { agent: id });
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registeredAgentIds.join(',')]);
 
@@ -600,6 +614,7 @@ export function useOrchestratorRuntime(
   /* ── triggerWakeWord ────────────────────────────────────────────── */
   const triggerWakeWord = useCallback(async () => {
     autoListenRef.current = true;   // enable Alexa-style auto-listen for this session
+    setIsAutoListening(true);
     ttsQueueRef.current  = [];
     ttsActiveRef.current = false;
     pendingPhaseRef.current = null;
@@ -666,6 +681,10 @@ export function useOrchestratorRuntime(
             state:   ac.news.state,
             city:    ac.news.city,
           },
+          smarthome: {
+            endpoint: ac.smarthome.endpoint,
+            token:    ac.smarthome.token,
+          },
         } : {},
       });
     } else {
@@ -716,7 +735,6 @@ export function useOrchestratorRuntime(
 
       if (wsConnectedRef.current && orchestratorCapsRef.current.stt) {
         text = await recordAndTranscribeViaServer();
-        // Falls through to the same prefix-strip + command routing below.
       } else if (sttSupported) {
         text = await listenOnce(20000, { continuous: true });
       } else {
@@ -734,7 +752,7 @@ export function useOrchestratorRuntime(
 
       if (!text) {
         // Nothing heard in the listen window.
-        // Auto-listen mode: silently cycle back — keep waiting for the wake word.
+        // Auto-listen mode: silently cycle back — keep waiting for the next command.
         // Manual listen mode: pause and show a hint so the user knows to try again.
         if (!autoListenRef.current) {
           setAssistantSpeech(`Listening paused. Say "${wakeWordRef.current}, Wake Up" or press Wake Up.`);
@@ -836,6 +854,7 @@ export function useOrchestratorRuntime(
   /* ── doSleep — full sleep cleanup, usable from TTS drain or directly ── */
   const doSleep = useCallback(() => {
     autoListenRef.current   = false;    // stop auto-listen when session ends
+    setIsAutoListening(false);
     ttsQueueRef.current     = [];
     ttsActiveRef.current    = false;
     pendingPhaseRef.current = null;
@@ -903,5 +922,6 @@ export function useOrchestratorRuntime(
     toggleVoice,
     reloadAgent,
     agentBootMessages,
+    isAutoListening,
   };
 }

@@ -9,6 +9,8 @@ from app.api.routes.health import router as health_router
 from app.api.routes.session import router as session_router
 from app.api.routes.command import router as command_router
 from app.api.routes.system import router as system_router
+from app.api.routes.smarthome import router as smarthome_router
+from app.services.hass_mcp import close_all as close_hass_clients
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -59,6 +61,7 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     await agent_manager.shutdown()
+    await close_hass_clients()
 
 
 app = FastAPI(title=settings.app_name, version='0.1.0', lifespan=lifespan)
@@ -75,6 +78,7 @@ app.include_router(health_router)
 app.include_router(session_router)
 app.include_router(command_router)
 app.include_router(system_router)
+app.include_router(smarthome_router)
 app.include_router(ws_router)
 
 

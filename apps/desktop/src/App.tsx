@@ -8,6 +8,7 @@ import {
   Cloud,
   Cpu,
   Github,
+  Home,
   Mail,
   Mic,
   MicOff,
@@ -24,6 +25,7 @@ import { RobotAvatar } from './components/RobotAvatar';
 import { WaveVisualizer } from './components/WaveVisualizer';
 import { AgentBootList } from './components/AgentBootList';
 import { AgentDetailModal } from './components/AgentDetailModal';
+import { SmartHomeDashboard } from './components/SmartHomeDashboard';
 import { ParticleField } from './components/ParticleField';
 import { TypingText } from './components/TypingText';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -93,7 +95,7 @@ function useClock() {
 
 /* ─── mission-control log row ───────────────────────────────── */
 
-function LogRow({ turn }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string } }) {
+function LogRow({ turn, aiName }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string }; aiName: string }) {
   const time = (() => {
     try {
       return new Date(turn.timestamp).toLocaleTimeString('en-US', {
@@ -111,7 +113,7 @@ function LogRow({ turn }: { turn: { speaker: 'user' | 'assistant' | 'system'; te
       <span className={`flex-shrink-0 w-8 text-right text-[9px] font-bold tracking-[0.12em] uppercase mr-2 mt-[2px] ${
         isUser ? 'text-violet-400' : isSys ? 'text-slate-500' : 'text-cyan-400'
       }`}>
-        {isUser ? 'YOU' : isSys ? 'SYS' : 'AI'}
+        {isUser ? 'YOU' : isSys ? 'SYS' : aiName.toUpperCase().slice(0, 5)}
       </span>
       {/* Pipe separator */}
       <span className="flex-shrink-0 text-[10px] text-slate-700 mr-2 mt-[1px]">│</span>
@@ -162,13 +164,14 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
 }
 
 const AGENT_PILL_META: Record<string, { icon: LucideIcon; text: string; bg: string; border: string }> = {
-  weather:  { icon: Cloud,      text: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' },
-  calendar: { icon: Calendar,   text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
-  email:    { icon: Mail,       text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
-  github:   { icon: Github,     text: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' },
-  stock:    { icon: TrendingUp, text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
-  news:     { icon: Newspaper,  text: 'text-sky-400',     bg: 'bg-sky-400/10',     border: 'border-sky-400/20' },
-  general:  { icon: Zap,        text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
+  weather:   { icon: Cloud,      text: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' },
+  calendar:  { icon: Calendar,   text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
+  email:     { icon: Mail,       text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
+  github:    { icon: Github,     text: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' },
+  stock:     { icon: TrendingUp, text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
+  news:      { icon: Newspaper,  text: 'text-sky-400',     bg: 'bg-sky-400/10',     border: 'border-sky-400/20' },
+  smarthome: { icon: Home,       text: 'text-orange-400',  bg: 'bg-orange-400/10',  border: 'border-orange-400/20' },
+  general:   { icon: Zap,        text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
 };
 
 /* ─── App ───────────────────────────────────────────────────── */
@@ -187,6 +190,7 @@ export default function App() {
     verifyGitHub,
     disconnectGitHub,
     verifyNews,
+    verifySmartHome,
   } = useAgentConfig();
   const {
     config: llmConfig,
@@ -229,13 +233,20 @@ export default function App() {
 
   const isActive = rt.phase !== 'standby' && rt.phase !== 'sleep';
   const isSpeaking = rt.speechState === 'speaking' || rt.isPlayingServerAudio;
-  const isListening = rt.speechState === 'listening';
+  // During auto-listen the phase briefly returns to 'ready' between cycles; treat it as 'listening' in the UI
+  const isListening = rt.speechState === 'listening' || (rt.isAutoListening && rt.phase === 'ready');
+  const displayPhase: typeof rt.phase = rt.isAutoListening && rt.phase === 'ready' ? 'listening' : rt.phase;
   const waveActive = isSpeaking || isListening || rt.phase === 'responding';
-  const ambient = PHASE_AMBIENT[rt.phase];
+  const ambient = PHASE_AMBIENT[displayPhase];
   const systemOnline = rt.agents.find((a) => a.id === 'system')?.status === 'online';
   const onlineAgents = rt.agents.filter((a) => a.id !== 'system' && a.status === 'online');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const selectedAgent = selectedAgentId ? rt.agents.find((a) => a.id === selectedAgentId) : null;
+  const [smartHomeDashboardOpen, setSmartHomeDashboardOpen] = useState(false);
+
+  const handleAgentClick = (agentId: string) => {
+    setSelectedAgentId(agentId);
+  };
 
   return (
     <div className="min-h-screen overflow-hidden bg-[#050816] text-white font-sans select-none">
@@ -307,6 +318,7 @@ export default function App() {
         onVerifyGitHub={verifyGitHub}
         onDisconnectGitHub={disconnectGitHub}
         onVerifyNews={verifyNews}
+        onVerifySmartHome={verifySmartHome}
         llmConfig={llmConfig}
         onLLMUpdate={updateLLM}
         onVerifyLLM={verifyLLM}
@@ -390,13 +402,13 @@ export default function App() {
             <span className="text-xs text-slate-500 tabular-nums">{clock}</span>
 
             {/* Phase badge */}
-            <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] ${PHASE_BADGE[rt.phase]}`}>
+            <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] ${PHASE_BADGE[displayPhase]}`}>
               <motion.div
                 animate={{ opacity: isActive ? [0.4, 1, 0.4] : 0.4 }}
                 transition={{ duration: 1.4, repeat: Infinity }}
-                className={`h-1.5 w-1.5 rounded-full ${PHASE_DOT[rt.phase]}`}
+                className={`h-1.5 w-1.5 rounded-full ${PHASE_DOT[displayPhase]}`}
               />
-              {PHASE_LABEL[rt.phase]}
+              {PHASE_LABEL[displayPhase]}
             </div>
 
             {/* Orchestrator connection badge */}
@@ -468,7 +480,7 @@ export default function App() {
             <div className="flex flex-col items-center justify-center gap-4 px-8 py-4 flex-shrink-0">
 
               {/* Animated orb */}
-              <RobotAvatar phase={rt.phase} />
+              <RobotAvatar phase={displayPhase} />
 
               {/* Assistant speech bubble with typing animation */}
               <AnimatePresence mode="wait">
@@ -537,11 +549,11 @@ export default function App() {
               {/* Hint text + mic listening indicator */}
               <div className="flex flex-col items-center gap-1.5">
                 <div className="text-[10px] text-slate-600 text-center max-w-xs leading-relaxed">
-                  {(rt.phase === 'standby' || rt.phase === 'sleep')
+                  {(displayPhase === 'standby' || displayPhase === 'sleep')
                     ? rt.sttSupported
                       ? `Say "${appConfig.wakeWord}" or press Wake Up to start`
                       : 'Press Wake Up • Enable mic for wake-word detection'
-                    : rt.phase === 'ready'
+                    : displayPhase === 'ready'
                       ? 'Ask a question by voice or type below · Gear icon → voice settings'
                       : null}
                 </div>
@@ -583,7 +595,7 @@ export default function App() {
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ duration: 0.15 }}
                   >
-                    <LogRow turn={turn} />
+                    <LogRow turn={turn} aiName={appConfig.wakeWord} />
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -828,7 +840,7 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* ── Online Agents — compact 2-col grid, clickable for details ── */}
+            {/* ── Online Agents — appear dynamically as each comes online ── */}
             {onlineAgents.length > 0 && (
               <motion.div
                 initial={{ opacity: 0, x: 24 }}
@@ -857,7 +869,7 @@ export default function App() {
                           transition={{ delay: idx * 0.05, duration: 0.22 }}
                           whileHover={{ scale: 1.06, y: -2 }}
                           whileTap={{ scale: 0.95 }}
-                          onClick={() => setSelectedAgentId(agent.id)}
+                          onClick={() => handleAgentClick(agent.id)}
                           className={`flex items-center gap-1.5 rounded-xl border ${m.border} ${m.bg} px-2 py-1.5 cursor-pointer w-full text-left`}
                         >
                           <motion.div
@@ -910,6 +922,22 @@ export default function App() {
             metrics={rt.orchestratorMetrics?.agents[selectedAgent.id]}
             onClose={() => setSelectedAgentId(null)}
             onReload={rt.reloadAgent ? () => rt.reloadAgent(selectedAgent.id) : undefined}
+            onOpenDashboard={selectedAgent.id === 'smarthome' ? () => setSmartHomeDashboardOpen(true) : undefined}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Smart Home dashboard modal */}
+      <AnimatePresence>
+        {smartHomeDashboardOpen && (
+          <SmartHomeDashboard
+            endpoint={agentConfig.smarthome.endpoint}
+            token={agentConfig.smarthome.token}
+            onClose={() => setSmartHomeDashboardOpen(false)}
+            onVoice={(text) => {
+              setSmartHomeDashboardOpen(false);
+              rt.ask(text);
+            }}
           />
         )}
       </AnimatePresence>

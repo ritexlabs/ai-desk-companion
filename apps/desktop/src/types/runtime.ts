@@ -24,4 +24,5 @@ export type TranscriptTurn = {
   speaker: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
+  agentId?: string;
 };

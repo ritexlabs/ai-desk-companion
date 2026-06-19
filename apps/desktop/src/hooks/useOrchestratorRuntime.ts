@@ -150,8 +150,8 @@ export function useOrchestratorRuntime(
   const pendingCmdRef  = useRef<string | null>(null);
 
   /* ── Helpers ────────────────────────────────────────────────────── */
-  const appendTurn = useCallback((speaker: TranscriptTurn['speaker'], text: string) => {
-    setTranscript((prev) => [...prev, { speaker, text, timestamp: nowIso() }]);
+  const appendTurn = useCallback((speaker: TranscriptTurn['speaker'], text: string, agentId?: string) => {
+    setTranscript((prev) => [...prev, { speaker, text, timestamp: nowIso(), agentId }]);
   }, []);
 
   const updateAgent = useCallback((id: string, status: AgentDefinition['status']) => {
@@ -241,7 +241,7 @@ export function useOrchestratorRuntime(
         const msg         = payload.message as string;
         const agentId     = payload.agent_id     as string | undefined;
         const agentStatus = payload.agent_status as AgentDefinition['status'] | undefined;
-        appendTurn('assistant', msg);
+        appendTurn('assistant', msg, agentId);
         enqueueTTS({ text: msg, agentId, agentStatus, ...extractAudio() });
         if (agentId) setAgentBootMessages((prev) => ({ ...prev, [agentId]: msg }));
         break;
@@ -269,7 +269,7 @@ export function useOrchestratorRuntime(
       case 'assistant_speaking': {
         const text    = payload.text     as string;
         const agentId = payload.agent_id as string | undefined;
-        appendTurn('assistant', text);
+        appendTurn('assistant', text, agentId);
         enqueueTTS({ text, agentId, ...extractAudio() });
         break;
       }
@@ -894,6 +894,15 @@ export function useOrchestratorRuntime(
     wsSend('retry_agent', { agent: agentId });
   }, [wsSend, updateAgent]);
 
+  // Proactive notification: add to transcript and speak if voice is active in a live session
+  const pushNotification = useCallback((text: string, agentId: string) => {
+    appendTurn('assistant', text, agentId);
+    const canSpeak = voiceEnabledRef.current
+      && phaseRef.current !== 'standby'
+      && phaseRef.current !== 'sleep';
+    if (canSpeak) enqueueTTS({ text, agentId });
+  }, [appendTurn, enqueueTTS]);
+
   return {
     phase,
     heard,
@@ -923,5 +932,6 @@ export function useOrchestratorRuntime(
     reloadAgent,
     agentBootMessages,
     isAutoListening,
+    pushNotification,
   };
 }

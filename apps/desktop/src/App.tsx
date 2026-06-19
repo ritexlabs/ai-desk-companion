@@ -37,6 +37,7 @@ import { useLLMConfig } from './hooks/useLLMConfig';
 import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
 import type { RuntimePhase } from './types/runtime';
 import { useOrchSystemStats } from './hooks/useOrchSystemStats';
+import { useProactiveNotifications } from './hooks/useProactiveNotifications';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 
@@ -95,7 +96,12 @@ function useClock() {
 
 /* ─── mission-control log row ───────────────────────────────── */
 
-function LogRow({ turn, aiName }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string }; aiName: string }) {
+const AGENT_SHORT: Record<string, string> = {
+  system: 'Sys', weather: 'Wthr', calendar: 'Cal', email: 'Mail',
+  github: 'GitHub', stock: 'Stock', news: 'News', smarthome: 'Home', general: '',
+};
+
+function LogRow({ turn, aiName }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string; agentId?: string }; aiName: string }) {
   const time = (() => {
     try {
       return new Date(turn.timestamp).toLocaleTimeString('en-US', {
@@ -107,13 +113,20 @@ function LogRow({ turn, aiName }: { turn: { speaker: 'user' | 'assistant' | 'sys
   const isUser = turn.speaker === 'user';
   const isSys  = turn.speaker === 'system';
 
+  const label = (() => {
+    if (isUser) return 'You';
+    if (isSys)  return 'Sys';
+    const short = turn.agentId ? AGENT_SHORT[turn.agentId] : '';
+    return short || aiName.charAt(0).toUpperCase() + aiName.slice(1).toLowerCase();
+  })();
+
   return (
     <div className={`flex items-start gap-0 py-[3px] px-2 rounded hover:bg-white/[0.03] transition-colors ${isSys ? 'opacity-55' : ''}`}>
       {/* Label badge */}
-      <span className={`flex-shrink-0 w-8 text-right text-[9px] font-bold tracking-[0.12em] uppercase mr-2 mt-[2px] ${
+      <span className={`flex-shrink-0 w-12 text-right text-[9px] font-bold tracking-[0.08em] mr-2 mt-[2px] ${
         isUser ? 'text-violet-400' : isSys ? 'text-slate-500' : 'text-cyan-400'
       }`}>
-        {isUser ? 'YOU' : isSys ? 'SYS' : aiName.toUpperCase().slice(0, 5)}
+        {label}
       </span>
       {/* Pipe separator */}
       <span className="flex-shrink-0 text-[10px] text-slate-700 mr-2 mt-[1px]">│</span>
@@ -210,6 +223,23 @@ export default function App() {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
+  useProactiveNotifications(agentConfig, ({ text, agentId }) => rt.pushNotification(text, agentId));
+
+  const notificationsEnabledFor = (agentId: string): boolean => {
+    if (agentId === 'system')    return agentConfig.system.notificationsEnabled;
+    if (agentId === 'email')     return agentConfig.google.emailNotificationsEnabled;
+    if (agentId === 'news')      return agentConfig.news.notificationsEnabled;
+    if (agentId === 'smarthome') return agentConfig.smarthome.notificationsEnabled;
+    return false;
+  };
+
+  const toggleNotificationsFor = (agentId: string, enabled: boolean) => {
+    if (agentId === 'system')    patchAgent('system', { notificationsEnabled: enabled });
+    if (agentId === 'email')     patchAgent('google', { emailNotificationsEnabled: enabled });
+    if (agentId === 'news')      patchAgent('news',   { notificationsEnabled: enabled });
+    if (agentId === 'smarthome') patchAgent('smarthome', { notificationsEnabled: enabled });
+  };
+
   // Safari (and any WebKit browser without Chrome) blocks speechSynthesis.speak()
   // until the page has received a user gesture. Show a one-time unlock overlay.
   const [audioUnlocked, setAudioUnlocked] = useState(() => {
@@ -236,7 +266,8 @@ export default function App() {
   // During auto-listen the phase briefly returns to 'ready' between cycles; treat it as 'listening' in the UI
   const isListening = rt.speechState === 'listening' || (rt.isAutoListening && rt.phase === 'ready');
   const displayPhase: typeof rt.phase = rt.isAutoListening && rt.phase === 'ready' ? 'listening' : rt.phase;
-  const waveActive = isSpeaking || isListening || rt.phase === 'responding';
+  const waveActive = isSpeaking || isListening || rt.phase === 'responding' || rt.phase === 'thinking';
+  const waveIntensity = isSpeaking ? 1.0 : rt.phase === 'responding' ? 0.9 : isListening ? 0.6 : rt.phase === 'thinking' ? 0.32 : 0.0;
   const ambient = PHASE_AMBIENT[displayPhase];
   const systemOnline = rt.agents.find((a) => a.id === 'system')?.status === 'online';
   const onlineAgents = rt.agents.filter((a) => a.id !== 'system' && a.status === 'online');
@@ -508,7 +539,7 @@ export default function App() {
 
               {/* Wave visualizer */}
               <div className="w-full max-w-sm">
-                <WaveVisualizer active={waveActive} color={waveColor(rt.phase)} />
+                <WaveVisualizer active={waveActive} color={waveColor(displayPhase)} intensity={waveIntensity} />
               </div>
 
               {/* Action buttons */}
@@ -923,6 +954,13 @@ export default function App() {
             onClose={() => setSelectedAgentId(null)}
             onReload={rt.reloadAgent ? () => rt.reloadAgent(selectedAgent.id) : undefined}
             onOpenDashboard={selectedAgent.id === 'smarthome' ? () => setSmartHomeDashboardOpen(true) : undefined}
+            agentConfig={agentConfig}
+            notificationsEnabled={notificationsEnabledFor(selectedAgent.id)}
+            onToggleNotifications={
+              ['system', 'email', 'news', 'smarthome'].includes(selectedAgent.id)
+                ? (enabled) => toggleNotificationsFor(selectedAgent.id, enabled)
+                : undefined
+            }
           />
         )}
       </AnimatePresence>

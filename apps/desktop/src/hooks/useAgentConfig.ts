@@ -21,6 +21,7 @@ export type ConnectionStatus = 'idle' | 'verifying' | 'connected' | 'error';
 
 export interface SystemConfig {
   enabled: boolean;
+  notificationsEnabled: boolean;
 }
 
 export interface WeatherCreds {
@@ -44,6 +45,7 @@ export interface GoogleCreds {
   scopes: string[];
   status: ConnectionStatus;
   info: string;
+  emailNotificationsEnabled: boolean;
 }
 
 export interface GitHubCreds {
@@ -64,11 +66,12 @@ export interface StockCreds {
 export interface NewsCreds {
   enabled: boolean;
   apiKey: string;
-  country: string;   // ISO 2-letter code: 'in', 'us', 'gb', etc.
-  state: string;     // optional — e.g. 'Maharashtra'
-  city: string;      // optional — e.g. 'Mumbai'
+  country: string;
+  state: string;
+  city: string;
   status: ConnectionStatus;
   info: string;
+  notificationsEnabled: boolean;
 }
 
 export interface SmartHomeCreds {
@@ -77,6 +80,7 @@ export interface SmartHomeCreds {
   token:    string;
   status:   ConnectionStatus;
   info:     string;
+  notificationsEnabled: boolean;
 }
 
 export interface AgentConfig {
@@ -94,6 +98,7 @@ export interface AgentConfig {
 const DEFAULT_AGENT_CONFIG: AgentConfig = {
   system: {
     enabled: true,
+    notificationsEnabled: false,
   },
   smarthome: {
     enabled:  false,
@@ -101,6 +106,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     token:    '',
     status:   'idle',
     info:     '',
+    notificationsEnabled: false,
   },
   weather: {
     enabled: false,
@@ -122,6 +128,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     scopes: ['calendar', 'gmail', 'drive'],
     status: 'idle',
     info: '',
+    emailNotificationsEnabled: false,
   },
   github: {
     enabled: false,
@@ -144,6 +151,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     city: '',
     status: 'idle',
     info: '',
+    notificationsEnabled: false,
   },
 };
 

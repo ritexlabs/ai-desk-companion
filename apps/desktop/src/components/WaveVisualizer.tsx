@@ -25,9 +25,11 @@ interface WaveVisualizerProps {
   active: boolean;
   color?: WaveColor;
   barCount?: number;
+  /** 0–1: controls peak height and animation speed. 1 = speaking, 0.6 = listening, 0.3 = thinking */
+  intensity?: number;
 }
 
-export function WaveVisualizer({ active, color = 'cyan', barCount = BAR_COUNT }: WaveVisualizerProps) {
+export function WaveVisualizer({ active, color = 'cyan', barCount = BAR_COUNT, intensity = 1.0 }: WaveVisualizerProps) {
   const bars = useMemo(
     () =>
       Array.from({ length: barCount }, (_, i) => {
@@ -38,9 +40,10 @@ export function WaveVisualizer({ active, color = 'cyan', barCount = BAR_COUNT }:
         const delay = x * 0.55;
         return { base, peak, duration, delay };
       }),
-    [barCount]
+    [barCount],
   );
 
+  const clampedIntensity = Math.max(0.05, Math.min(1.0, intensity));
   const barColor = COLOR_CLASS[color];
   const glowColor = GLOW_STYLE[color];
 
@@ -50,34 +53,39 @@ export function WaveVisualizer({ active, color = 'cyan', barCount = BAR_COUNT }:
       style={{ height: 64 }}
       aria-hidden
     >
-      {bars.map((bar, i) => (
-        <motion.div
-          key={i}
-          className={`rounded-full ${barColor}`}
-          style={{
-            width: 3,
-            boxShadow: active ? `0 0 6px ${glowColor}` : 'none',
-          }}
-          animate={
-            active
-              ? {
-                  height: [`${bar.base}px`, `${bar.peak}px`, `${bar.base}px`],
-                  opacity: [0.55, 1, 0.55],
-                }
-              : { height: '2px', opacity: 0.18 }
-          }
-          transition={
-            active
-              ? {
-                  duration: bar.duration,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                  delay: bar.delay,
-                }
-              : { duration: 0.5, ease: 'easeOut' }
-          }
-        />
-      ))}
+      {bars.map((bar, i) => {
+        const scaledPeak = Math.max(bar.base + 2, bar.peak * clampedIntensity);
+        const scaledDuration = bar.duration / Math.max(0.4, clampedIntensity);
+        const scaledDelay = bar.delay * (1 / Math.max(0.5, clampedIntensity));
+        return (
+          <motion.div
+            key={i}
+            className={`rounded-full ${barColor}`}
+            style={{
+              width: 3,
+              boxShadow: active ? `0 0 ${4 + clampedIntensity * 4}px ${glowColor}` : 'none',
+            }}
+            animate={
+              active
+                ? {
+                    height: [`${bar.base}px`, `${scaledPeak}px`, `${bar.base}px`],
+                    opacity: [0.45, Math.min(1, 0.5 + 0.5 * clampedIntensity), 0.45],
+                  }
+                : { height: '2px', opacity: 0.18 }
+            }
+            transition={
+              active
+                ? {
+                    duration: scaledDuration,
+                    repeat: Infinity,
+                    ease: 'easeInOut',
+                    delay: scaledDelay,
+                  }
+                : { duration: 0.5, ease: 'easeOut' }
+            }
+          />
+        );
+      })}
     </div>
   );
 }

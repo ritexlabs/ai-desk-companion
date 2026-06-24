@@ -21,23 +21,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Supported: javascript-typescript, python, go, java-kotlin, ruby, swift, csharp, cpp
-        # Remove languages that don't apply to this repo
         language: [javascript-typescript]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Install dependencies
+        run: npm ci
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
+        # continue-on-error prevents job failure when Code Scanning upload is blocked
+        # (e.g. repository setting not yet enabled). Remove once Code Scanning is active.
+        continue-on-error: true
         with:
           category: "/language:${{ matrix.language }}"

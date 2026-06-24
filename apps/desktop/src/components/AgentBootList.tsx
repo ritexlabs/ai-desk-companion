@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Loader2, RotateCw } from 'lucide-react';
+import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home, Loader2, RotateCw } from 'lucide-react';
 import type { AgentDefinition } from '../types/runtime';
 
 const AGENT_META: Record<
@@ -61,6 +61,14 @@ const AGENT_META: Record<
     bg: 'bg-sky-400/10',
     glow: 'shadow-sky-400/25',
     dot: 'bg-sky-400',
+  },
+  smarthome: {
+    icon: <Home className="h-3.5 w-3.5" />,
+    text: 'text-orange-400',
+    border: 'border-orange-400/35',
+    bg: 'bg-orange-400/10',
+    glow: 'shadow-orange-400/25',
+    dot: 'bg-orange-400',
   },
 };
 

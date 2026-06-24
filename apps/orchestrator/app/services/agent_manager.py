@@ -9,19 +9,21 @@ from app.agents.github import GitHubAgent
 from app.agents.general_ai import GeneralAIAgent
 from app.agents.stock import StockAgent
 from app.agents.news import NewsAgent
+from app.agents.smarthome import SmartHomeAgent
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse
 from app.core.config import settings
 
 # Maps agent ID → key under agent_config dict sent from the UI
 _CONFIG_KEY: dict[str, str | None] = {
-    'weather':  'weather',
-    'github':   'github',
-    'calendar': 'google',
-    'email':    'google',
-    'stock':    'stock',
-    'news':     'news',
-    'system':   None,
-    'general':  None,
+    'weather':   'weather',
+    'github':    'github',
+    'calendar':  'google',
+    'email':     'google',
+    'stock':     'stock',
+    'news':      'news',
+    'smarthome': 'smarthome',
+    'system':    None,
+    'general':   None,
 }
 
 
@@ -49,6 +51,10 @@ def _env_agent_defaults() -> dict:
         'news': {
             'api_key': settings.news_api_key,
             'country': settings.news_default_country,
+        },
+        'smarthome': {
+            'endpoint': settings.myhome_mcp_endpoint,
+            'token':    settings.myhome_mcp_token,
         },
     }
 
@@ -96,14 +102,15 @@ def _merge_llm(env: dict, session: dict) -> dict:
 class AgentManager:
     def __init__(self) -> None:
         self._agents = {
-            'weather':  WeatherAgent(),
-            'system':   SystemAgent(),
-            'calendar': GoogleCalendarAgent(),
-            'email':    GoogleEmailAgent(),
-            'github':   GitHubAgent(),
-            'stock':    StockAgent(),
-            'news':     NewsAgent(),
-            'general':  GeneralAIAgent(),
+            'weather':   WeatherAgent(),
+            'system':    SystemAgent(),
+            'calendar':  GoogleCalendarAgent(),
+            'email':     GoogleEmailAgent(),
+            'github':    GitHubAgent(),
+            'stock':     StockAgent(),
+            'news':      NewsAgent(),
+            'smarthome': SmartHomeAgent(),
+            'general':   GeneralAIAgent(),
         }
         # Populated at start_session; reset between sessions
         self._session_llm_config:     dict      = {}

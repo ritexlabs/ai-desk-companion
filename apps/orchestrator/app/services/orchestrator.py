@@ -34,6 +34,21 @@ _AGENT_TOOL_META: dict[str, dict] = {
         'description': 'Get latest news headlines, breaking news, or top stories by country or topic.',
         'query_hint':  'The news query, e.g. "top India news today" or "news about cricket"',
     },
+    'smarthome': {
+        'description': (
+            'Control and query smart home devices via Home Assistant. '
+            'ALWAYS use this tool for ANY request involving lights, switches, fans, covers, locks, '
+            'climate/thermostat, scenes, sensors, or any connected smart device. '
+            'Use it to turn devices on or off, dim lights, change colors, set temperatures, '
+            'activate scenes, or list device states. '
+            'Never answer smart home questions from your own knowledge — always call this tool.'
+        ),
+        'query_hint': (
+            'The full smart home command or question, e.g. '
+            '"turn off light 1", "how many lights are on", '
+            '"set living room brightness to 50%", "lock the front door", "activate movie scene"'
+        ),
+    },
 }
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -50,8 +65,10 @@ def _make_system_prompt(name: str) -> str:
         'Your role is synthesis only: receive data from tools, speak it naturally. '
         'You have NO built-in knowledge of the user\'s personal world. '
         'For anything about the user\'s systems or live data '
-        '(time, date, weather, news, calendar events, emails, GitHub, stocks, system stats) '
+        '(time, date, weather, news, calendar events, emails, GitHub, stocks, system stats, '
+        'smart home devices, lights, switches, locks, climate, scenes) '
         'you MUST call the appropriate tool — never answer from your own knowledge. '
+        'If the user asks to control or query a smart device, ALWAYS call the smarthome tool. '
         'Only answer directly for pure general knowledge (maths, definitions, history). '
         'Replies: 1–3 sentences, no markdown, no bullet points, plain spoken language. '
         'IMPORTANT: Always respond in English. Do not switch to another language unless the user explicitly asks you to.'

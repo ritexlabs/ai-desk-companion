@@ -60,5 +60,11 @@ class Settings(BaseSettings):
     news_api_key:         str = ''
     news_default_country: str = 'in'   # ISO 2-letter country code
 
+    # ── Smart Home agent (Home Assistant) ──────────────────────────────
+    # Endpoint: e.g. http://homeassistant.local:8123
+    # Token: long-lived access token from HA profile page
+    myhome_mcp_endpoint: str = 'http://homeassistant.local:8123'
+    myhome_mcp_token:    str = ''
+
 
 settings = Settings()

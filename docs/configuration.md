@@ -109,6 +109,17 @@ Google access tokens are short-lived. These `.env` values are useful only for lo
 | `GOOGLE_CLIENT_ID` | _(empty)_ | OAuth2 client ID |
 | `GOOGLE_CLIENT_SECRET` | _(empty)_ | OAuth2 client secret |
 
+### Smart Home agent (Home Assistant)
+
+The Smart Home agent uses the `voska/hass-mcp` Docker container to communicate with Home Assistant. Docker must be running when this agent is enabled.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MYHOME_MCP_ENDPOINT` | `http://homeassistant.local:8123` | Home Assistant base URL (no trailing slash) |
+| `MYHOME_MCP_TOKEN` | _(empty)_ | Long-lived access token from HA Profile → Long-lived access tokens |
+
+> For normal use, configure these through the Settings UI — the `.env` values serve as server-level defaults only.
+
 ### Wake word detection
 
 | Variable | Default | Description |
@@ -150,6 +161,10 @@ STOCK_DEFAULT_MARKET=IN
 # News agent
 NEWS_API_KEY=your-newsapi-key
 NEWS_DEFAULT_COUNTRY=in
+
+# Smart Home agent
+MYHOME_MCP_ENDPOINT=http://homeassistant.local:8123
+# MYHOME_MCP_TOKEN=eyJ...  # set this in .env, never commit the real token
 
 # Wake word
 WAKE_WORD_ENABLED=false

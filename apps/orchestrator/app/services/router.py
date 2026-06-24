@@ -17,8 +17,9 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
     'email':    'Email inbox, unread messages, email summaries, sender information',
     'github':   'GitHub repos, pull requests, issues, commits, CI/CD workflows, code review status',
     'stock':    'Stock prices, market indices (Nifty 50, Sensex, S&P 500, Dow Jones), RSI, technical analysis',
-    'news':     'Latest news headlines, breaking news, current events, top stories by country or city',
-    'general':  'General knowledge, creative writing, explanations, calculations, anything not covered above',
+    'news':      'Latest news headlines, breaking news, current events, top stories by country or city',
+    'smarthome': 'Control smart home devices: lights (on/off, brightness, color), switches, climate/thermostat, covers, scenes, automations, device status',
+    'general':   'General knowledge, creative writing, explanations, calculations, anything not covered above',
 }
 
 # ── Helpers shared by LLM and keyword paths ───────────────────────────────────
@@ -97,6 +98,16 @@ def _keyword_route(text: str) -> RouteResult:
             'latest news', 'current events', 'what is happening', "what's happening",
             'top news'):
         return RouteResult(agent='news', confidence=0.9, reason='keyword:news')
+
+    if _has(t, 'light', 'lights', 'lamp', 'bulb', 'switch', 'plug',
+            'fan', 'thermostat', 'air conditioner', 'ac', 'heater',
+            'cover', 'blind', 'curtain', 'shutter', 'garage',
+            'scene', 'automation', 'home assistant', 'smart home',
+            'living room', 'bedroom', 'kitchen', 'bathroom', 'hallway',
+            'turn on', 'turn off', 'switch on', 'switch off',
+            'brightness', 'dim', 'dimmer', 'color', 'colour',
+            'temperature', 'lock', 'unlock', 'vacuum', 'robot'):
+        return RouteResult(agent='smarthome', confidence=0.9, reason='keyword:smarthome')
 
     return RouteResult(agent='general', confidence=0.6, reason='keyword:fallback')
 

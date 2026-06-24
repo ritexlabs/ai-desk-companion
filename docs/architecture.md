@@ -74,16 +74,27 @@ ai-desk-companion/
 │  │  STTProvider (OpenAI Whisper / Browser)              │   │
 │  │  LLMService   (OpenAI / Anthropic / Gemini / Ollama) │   │
 │  └──────────────────────────────────────────────────────┘   │
-│    │      │      │       │       │       │       │           │
-│  ┌─▼─┐ ┌─▼─┐ ┌──▼─┐ ┌──▼─┐ ┌──▼─┐ ┌──▼─┐ ┌───▼──┐       │
-│  │Wth│ │Sys│ │ GH │ │Cal │ │Stk │ │News│ │Gen AI│       │
-│  └───┘ └───┘ └────┘ └────┘ └────┘ └────┘ └──────┘       │
-└─────────────────────────────────────────────────────────────┘
-       │         │          │          │          │
-  ┌────▼───┐ ┌───▼──┐ ┌────▼───┐ ┌───▼──┐ ┌────▼───┐
-  │Weather │ │GitHub│ │Yahoo   │ │News  │ │LLM API │
-  │API     │ │API   │ │Finance │ │API   │ │        │
-  └────────┘ └──────┘ └────────┘ └──────┘ └────────┘
+│    │    │    │     │     │     │     │     │                 │
+│  ┌─▼─┐┌─▼─┐┌─▼─┐┌──▼─┐┌──▼─┐┌──▼─┐┌──▼─┐┌──▼──┐          │
+│  │Wth││Sys││ GH ││Cal ││Stk ││News││ SM ││GenAI│          │
+│  └───┘└───┘└────┘└────┘└────┘└────┘└──┬─┘└─────┘          │
+└──────────────────────────────────────┬─┼─────────────────────┘
+       │         │          │          │ │          │
+  ┌────▼───┐ ┌───▼──┐ ┌────▼───┐ ┌───▼─┘│ ┌────▼───┐
+  │Weather │ │GitHub│ │Yahoo   │ │News   │ │LLM API │
+  │API     │ │API   │ │Finance │ │API    │ │        │
+  └────────┘ └──────┘ └────────┘ └───────┘ └────────┘
+                                         │
+                              ┌──────────▼──────────┐
+                              │  voska/hass-mcp      │
+                              │  (Docker subprocess) │
+                              │  MCP JSON-RPC 2.0    │
+                              └──────────┬───────────┘
+                                         │
+                              ┌──────────▼───────────┐
+                              │   Home Assistant      │
+                              │   REST API            │
+                              └──────────────────────┘
 ```
 
 ---
@@ -279,6 +290,7 @@ Each agent implements `handle(AgentRequest) → AgentResponse`.
 | `github` | GitHub | ✅ Real | GitHub REST API via Personal Access Token |
 | `stock` | Stock Market | ✅ Real | Yahoo Finance via `yfinance` — no API key required |
 | `news` | News | ✅ Real | NewsAPI.org via `agent_config.news.api_key` |
+| `smarthome` | Smart Home | ✅ Real | Home Assistant REST API via `voska/hass-mcp` Docker (MCP JSON-RPC 2.0) |
 | `general` | General AI | ✅ Real | LLM service — OpenAI / Anthropic / Gemini / Ollama |
 
 ### Intent Router
@@ -303,6 +315,8 @@ system / cpu / battery / memory / ram / health / os        →  SystemAgent
 stock / nifty / sensex / s&p / rsi / moving average…      →  StockAgent
 github / repo / pr / issue / workflow / commit             →  GitHubAgent
 news / headline / breaking news / current events           →  NewsAgent
+light / switch / fan / lock / cover / blind / thermostat   →  SmartHomeAgent
+smart home / home assistant / device / turn on / turn off  →  SmartHomeAgent
 (everything else)                                          →  GeneralAgent
 ```
 
@@ -496,3 +510,34 @@ npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bu
 | Boot delay / per-agent pauses | 350 + 300/200 ms × N | 0 |
 
 - Chrome TTS engine pre-warmed on mount via `window.speechSynthesis.cancel()` — primes the lazy pipeline before the first real utterance
+
+### Phase 8 — Smart Home Agent ✅ COMPLETE
+
+**Smart Home agent** (`app/agents/smarthome.py`)
+- Controls Home Assistant devices via the `voska/hass-mcp` Docker container using MCP JSON-RPC 2.0
+- A single long-lived Docker subprocess per (HA URL, token) pair is managed by `HassMCPClient` (`app/services/hass_mcp.py`)
+- MCP handshake on startup: `initialize` → `notifications/initialized` → tools ready
+- `asyncio.Lock` on stdin writes prevents concurrent JSON frames from colliding
+
+**Device control strategy**
+- Bulk (domain-wide) commands — e.g. "turn on lights" — call `call_service_tool(domain, service, {})` with no `entity_id`; Home Assistant broadcasts to all devices in the domain
+- Named device commands — e.g. "turn off light 1" — call `list_entities(search_query=name)` first, extract the `entity_id`, then call `call_service_tool`
+
+**LLM orchestration integration**
+- `smarthome` added to `_AGENT_TOOL_META` in `orchestrator.py` — the dict that the LLM sees as available tools; agents absent from this dict are silently excluded from LLM routing
+- System prompt updated to force tool use for any smart home request
+
+**Smart Home Dashboard** (`apps/desktop/src/components/SmartHomeDashboard.tsx`)
+- Animated Framer Motion card grid, grouped by device domain
+- Toggle and slider controls call `POST /api/smarthome/call` directly (bypasses voice pipeline for immediate response)
+- Auto-refreshes device states every 8 seconds via `GET /api/smarthome/states`
+
+**REST API endpoints** (see [api.md](api.md) for full schema)
+- `GET /api/smarthome/ping` — test HA connectivity; used by Settings UI "Test Connection" button
+- `GET /api/smarthome/states` — all entity states grouped by domain; used by dashboard
+- `POST /api/smarthome/call` — call any HA service (used by dashboard controls)
+
+**UI auto-listen fix** (`useOrchestratorRuntime.ts`, `App.tsx`)
+- `isAutoListening` React state mirrors `autoListenRef.current` for UI awareness
+- `displayPhase` derived value masks the brief `ready` flash between auto-listen cycles — all phase-sensitive UI uses `displayPhase` without altering the real state machine
+- Prevents the Listening↔Ready badge flicker introduced when the Smart Home agent was added

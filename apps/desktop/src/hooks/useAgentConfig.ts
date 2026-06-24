@@ -21,6 +21,7 @@ export type ConnectionStatus = 'idle' | 'verifying' | 'connected' | 'error';
 
 export interface SystemConfig {
   enabled: boolean;
+  notificationsEnabled: boolean;
 }
 
 export interface WeatherCreds {
@@ -44,6 +45,7 @@ export interface GoogleCreds {
   scopes: string[];
   status: ConnectionStatus;
   info: string;
+  emailNotificationsEnabled: boolean;
 }
 
 export interface GitHubCreds {
@@ -64,20 +66,31 @@ export interface StockCreds {
 export interface NewsCreds {
   enabled: boolean;
   apiKey: string;
-  country: string;   // ISO 2-letter code: 'in', 'us', 'gb', etc.
-  state: string;     // optional — e.g. 'Maharashtra'
-  city: string;      // optional — e.g. 'Mumbai'
+  country: string;
+  state: string;
+  city: string;
   status: ConnectionStatus;
   info: string;
+  notificationsEnabled: boolean;
+}
+
+export interface SmartHomeCreds {
+  enabled:  boolean;
+  endpoint: string;
+  token:    string;
+  status:   ConnectionStatus;
+  info:     string;
+  notificationsEnabled: boolean;
 }
 
 export interface AgentConfig {
-  system:  SystemConfig;
-  weather: WeatherCreds;
-  google:  GoogleCreds;
-  github:  GitHubCreds;
-  stock:   StockCreds;
-  news:    NewsCreds;
+  system:     SystemConfig;
+  weather:    WeatherCreds;
+  google:     GoogleCreds;
+  github:     GitHubCreds;
+  stock:      StockCreds;
+  news:       NewsCreds;
+  smarthome:  SmartHomeCreds;
 }
 
 /* ── Defaults — NO real tokens here ─────────────────────────────── */
@@ -85,6 +98,15 @@ export interface AgentConfig {
 const DEFAULT_AGENT_CONFIG: AgentConfig = {
   system: {
     enabled: true,
+    notificationsEnabled: false,
+  },
+  smarthome: {
+    enabled:  false,
+    endpoint: 'http://homeassistant.local:8123',
+    token:    '',
+    status:   'idle',
+    info:     '',
+    notificationsEnabled: false,
   },
   weather: {
     enabled: false,
@@ -106,6 +128,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     scopes: ['calendar', 'gmail', 'drive'],
     status: 'idle',
     info: '',
+    emailNotificationsEnabled: false,
   },
   github: {
     enabled: false,
@@ -128,6 +151,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     city: '',
     status: 'idle',
     info: '',
+    notificationsEnabled: false,
   },
 };
 
@@ -136,12 +160,13 @@ const STORAGE_KEY = 'robo-agent-config';
 /** Strip runtime-only fields before persisting (enabled flags are persisted). */
 function toPersist(cfg: AgentConfig): AgentConfig {
   return {
-    system:  { ...cfg.system },
-    weather: { ...cfg.weather, status: 'idle', info: '' },
-    google:  { ...cfg.google,  status: 'idle', info: '' },
-    github:  { ...cfg.github,  status: 'idle', info: '' },
-    stock:   { ...cfg.stock,   status: 'idle', info: '' },
-    news:    { ...cfg.news,    status: 'idle', info: '' },
+    system:    { ...cfg.system },
+    weather:   { ...cfg.weather,   status: 'idle', info: '' },
+    google:    { ...cfg.google,    status: 'idle', info: '' },
+    github:    { ...cfg.github,    status: 'idle', info: '' },
+    stock:     { ...cfg.stock,     status: 'idle', info: '' },
+    news:      { ...cfg.news,      status: 'idle', info: '' },
+    smarthome: { ...cfg.smarthome, status: 'idle', info: '' },
   };
 }
 
@@ -151,18 +176,20 @@ function load(): AgentConfig {
     if (!raw) return DEFAULT_AGENT_CONFIG;
     const parsed = JSON.parse(raw) as Partial<AgentConfig>;
     const cfg: AgentConfig = {
-      system:  { ...DEFAULT_AGENT_CONFIG.system,  ...parsed.system  },
-      weather: { ...DEFAULT_AGENT_CONFIG.weather, ...parsed.weather },
-      google:  { ...DEFAULT_AGENT_CONFIG.google,  ...parsed.google  },
-      github:  { ...DEFAULT_AGENT_CONFIG.github,  ...parsed.github  },
-      stock:   { ...DEFAULT_AGENT_CONFIG.stock,   ...parsed.stock   },
-      news:    { ...DEFAULT_AGENT_CONFIG.news,    ...parsed.news    },
+      system:    { ...DEFAULT_AGENT_CONFIG.system,    ...parsed.system    },
+      weather:   { ...DEFAULT_AGENT_CONFIG.weather,   ...parsed.weather   },
+      google:    { ...DEFAULT_AGENT_CONFIG.google,    ...parsed.google    },
+      github:    { ...DEFAULT_AGENT_CONFIG.github,    ...parsed.github    },
+      stock:     { ...DEFAULT_AGENT_CONFIG.stock,     ...parsed.stock     },
+      news:      { ...DEFAULT_AGENT_CONFIG.news,      ...parsed.news      },
+      smarthome: { ...DEFAULT_AGENT_CONFIG.smarthome, ...parsed.smarthome },
     };
     // Restore connected status from persisted credentials.
-    if (cfg.weather.apiKey)        cfg.weather.status = 'connected';
-    if (cfg.google.connectedEmail) cfg.google.status  = 'connected';
-    if (cfg.github.username)       cfg.github.status  = 'connected';
-    if (cfg.news.apiKey)           cfg.news.status    = 'connected';
+    if (cfg.weather.apiKey)        cfg.weather.status   = 'connected';
+    if (cfg.google.connectedEmail) cfg.google.status    = 'connected';
+    if (cfg.github.username)       cfg.github.status    = 'connected';
+    if (cfg.news.apiKey)           cfg.news.status      = 'connected';
+    if (cfg.smarthome.token)       cfg.smarthome.status = 'connected';
     // Stock agent is always ready (no key needed)
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
@@ -398,6 +425,7 @@ export function useAgentConfig() {
     if (config.github.enabled && config.github.username) ids.push('github');
     if (config.stock.enabled) ids.push('stock');
     if (config.news.enabled) ids.push('news');
+    if (config.smarthome.enabled && config.smarthome.token) ids.push('smarthome');
     return ids;
   }, [
     config.system.enabled,
@@ -407,7 +435,32 @@ export function useAgentConfig() {
     config.github.enabled,        config.github.username,
     config.stock.enabled,
     config.news.enabled,
+    config.smarthome.enabled, config.smarthome.token,
   ]);
+
+  /* ── Smart Home verify ───────────────────────────────────────── */
+  const verifySmartHome = useCallback(async () => {
+    const { endpoint, token } = config.smarthome;
+    if (!token) return;
+    patch('smarthome', { status: 'verifying', info: '' });
+    try {
+      const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
+      const params = new URLSearchParams({
+        endpoint: endpoint || 'http://homeassistant.local:8123',
+        token,
+      });
+      const res = await fetch(`${backendBase}/api/smarthome/ping?${params}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      const location = data.location_name || 'Home';
+      patch('smarthome', { status: 'connected', info: `Connected to ${location}` });
+    } catch (e: any) {
+      patch('smarthome', { status: 'error', info: e.message ?? 'Connection failed' });
+    }
+  }, [config.smarthome, patch]);
 
   /* ── News API verify (GNews) ─────────────────────────────────── */
   const verifyNews = useCallback(async () => {
@@ -439,5 +492,6 @@ export function useAgentConfig() {
     verifyGitHub,
     disconnectGitHub,
     verifyNews,
+    verifySmartHome,
   };
 }

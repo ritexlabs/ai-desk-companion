@@ -36,6 +36,7 @@ Used when no LLM is configured, or as a safety net if the LLM path fails:
 | stock, share, nifty, sensex, s&p, rsi, moving average… | Stock Market |
 | github, repo, pull request, pr, issue, commit, workflow | GitHub |
 | news, headline, breaking news, latest news, current events | News |
+| light, switch, fan, lock, cover, blind, curtain, thermostat, climate, scene, smart home, home assistant, device, turn on, turn off | Smart Home |
 | _(anything else)_ | General AI |
 
 ---
@@ -323,6 +324,79 @@ Example commands:
 - "Write me a haiku about coffee"
 - "Explain quantum computing in simple terms"
 - "What is the capital of Iceland?"
+
+---
+
+## Smart Home Agent
+
+**Credentials needed:** Home Assistant URL and a Long-Lived Access Token.
+**Additional prerequisite:** Docker must be installed and running — the agent uses the `voska/hass-mcp` container to communicate with Home Assistant over MCP (Model Context Protocol).
+
+### Prerequisites
+
+- Home Assistant running and reachable on your local network
+- Docker Desktop (or Docker Engine) installed and running
+- The agent pulls `voska/hass-mcp:latest` automatically on first use — no manual `docker pull` needed
+
+### Get a Home Assistant Long-Lived Access Token
+
+1. Open your Home Assistant web interface
+2. Click your username (bottom-left) → **Profile**
+3. Scroll to **Long-lived access tokens** at the bottom
+4. Click **Create Token**, give it a name (e.g. "Robo"), copy it immediately — it is shown only once
+
+### Configure via Settings UI
+
+1. Gear icon **⚙** → **Agents** tab
+2. Expand **Smart Home**
+3. Enter your Home Assistant URL (e.g. `http://homeassistant.local:8123` or `http://192.168.1.x:8123`)
+4. Paste your Long-Lived Access Token
+5. Click **Test Connection** — it should show "Connected to [your home name]"
+6. Toggle **Enable** to add it to the active agent roster
+
+### Configure via `.env` (server-level default)
+
+```dotenv
+MYHOME_MCP_ENDPOINT=http://homeassistant.local:8123
+MYHOME_MCP_TOKEN=eyJhbGciOiJIUzI1NiIsInR5...
+```
+
+### What it controls
+
+| Domain | Capabilities |
+|--------|-------------|
+| Lights | Turn on/off, dim, set brightness %, change color |
+| Switches & plugs | Turn on/off |
+| Fans | Turn on/off |
+| Covers (blinds, curtains, shutters) | Open/close |
+| Locks | Lock/unlock |
+| Climate / Thermostat | Turn on/off, set temperature |
+| Scenes | Activate by name |
+| Sensors & binary sensors | Read state (temperature, humidity, motion, etc.) |
+
+### Dashboard
+
+When the Smart Home agent is online, click its pill in the **Online Agents** panel to open a detail popup, then click **Dashboard** to open the full Smart Home Dashboard — an animated live view of all devices with real-time controls.
+
+The dashboard auto-refreshes every 8 seconds and groups devices by type (Lights, Switches, Climate, etc.).
+
+### Example voice commands
+
+```
+Turn on the lights
+Switch off light 1
+Set living room brightness to 50%
+Turn the kitchen lights red
+What lights are on in my room?
+Lock the front door
+Set thermostat to 22 degrees
+Activate the movie scene
+Turn off all fans
+```
+
+### How it works (technical)
+
+The agent runs `voska/hass-mcp` as a Docker subprocess over MCP JSON-RPC 2.0. A single long-lived Docker process is shared per (HA URL, token) pair and restarted automatically if it exits. All device control goes through `call_service_tool` — Home Assistant's native service calls — so it works with any HA-compatible device without requiring entity IDs.
 
 ---
 

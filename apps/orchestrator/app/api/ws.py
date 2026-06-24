@@ -25,14 +25,15 @@ from app.services.tts import TTSProvider, BrowserTTSProvider, OpenAITTSProvider,
 # ── Per-agent OpenAI TTS voice assignments ────────────────────────────────────
 # Only applied when session TTS is OpenAI — gives each agent a distinct voice.
 AGENT_VOICES: dict[str, str] = {
-    'system':   'echo',     # clear, neutral — good for technical data
-    'weather':  'nova',     # warm, natural
-    'calendar': 'shimmer',  # soft, organised
-    'email':    'alloy',    # balanced, professional
-    'github':   'onyx',     # deeper, tech
-    'stock':    'fable',    # expressive, financial
-    'news':     'echo',     # clear, newsreader
-    'general':  'nova',     # default LLM voice
+    'system':    'echo',     # clear, neutral — good for technical data
+    'weather':   'nova',     # warm, natural
+    'calendar':  'shimmer',  # soft, organised
+    'email':     'alloy',    # balanced, professional
+    'github':    'onyx',     # deeper, tech
+    'stock':     'fable',    # expressive, financial
+    'news':      'echo',     # clear, newsreader
+    'smarthome': 'alloy',    # balanced, home control
+    'general':   'nova',     # default LLM voice
 }
 from app.services.stt import STTProvider, BrowserSTTProvider, OpenAISTTProvider
 
@@ -57,38 +58,41 @@ async def broadcast(event: str, payload: dict) -> None:
 # ── constants ─────────────────────────────────────────────────────────────────
 
 AGENT_LABELS: dict[str, str] = {
-    'weather':  'Weather',
-    'system':   'System',
-    'calendar': 'Google Calendar',
-    'email':    'Google Email',
-    'github':   'GitHub',
-    'stock':    'Stock Market',
-    'news':     'News',
-    'general':  'General AI',
+    'weather':   'Weather',
+    'system':    'System',
+    'calendar':  'Google Calendar',
+    'email':     'Google Email',
+    'github':    'GitHub',
+    'stock':     'Stock Market',
+    'news':      'News',
+    'smarthome': 'Smart Home',
+    'general':   'General AI',
 }
 
 # Natural spoken name for each agent — used in "I'm the X agent" prefix
 AGENT_SPOKEN_NAME: dict[str, str] = {
-    'weather':  'Weather',
-    'system':   'System',
-    'calendar': 'Calendar',
-    'email':    'Email',
-    'github':   'GitHub',
-    'stock':    'Stock Market',
-    'news':     'News',
-    'general':  'General AI',
+    'weather':   'Weather',
+    'system':    'System',
+    'calendar':  'Calendar',
+    'email':     'Email',
+    'github':    'GitHub',
+    'stock':     'Stock Market',
+    'news':      'News',
+    'smarthome': 'Smart Home',
+    'general':   'General AI',
 }
 
 # Test prompt sent to each agent during boot to verify real data
 AGENT_BOOT_QUERY: dict[str, str] = {
-    'weather':  '__boot__',
-    'system':   '__boot__',
-    'github':   '__boot__',
-    'calendar': '__boot__',
-    'email':    '__boot__',
-    'stock':    '__boot__',
-    'news':     '__boot__',
-    'general':  '',   # skip — no LLM call on boot; just announce ready
+    'weather':   '__boot__',
+    'system':    '__boot__',
+    'github':    '__boot__',
+    'calendar':  '__boot__',
+    'email':     '__boot__',
+    'stock':     '__boot__',
+    'news':      '__boot__',
+    'smarthome': '__boot__',
+    'general':   '',   # skip — no LLM call on boot; just announce ready
 }
 
 # Regex to strip "Foo agent: " / "Foo summary: " prefixes agents add to their own text

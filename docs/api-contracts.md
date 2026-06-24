@@ -69,6 +69,10 @@ Begins the wake/boot sequence. Passes session-level configuration for all provid
         "refresh_token": "...",
         "client_id": "...",
         "client_secret": "..."
+      },
+      "smarthome": {
+        "endpoint": "http://homeassistant.local:8123",
+        "token": "eyJ..."
       }
     }
   }

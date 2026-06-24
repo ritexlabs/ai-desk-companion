@@ -400,12 +400,12 @@ export function useOrchestratorRuntime(
   const sleepPattern = useMemo(() => {
     const name = wakeWord.toLowerCase().replace(/[^a-z0-9]/g, '');
     const n = `${name}t?`;
-    const sleepKw = `bye+|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?|shut\\s?down`;
+    const sleepKw = `bye+|good[\\s\\-]?bye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?|shut\\s?down`;
     return new RegExp(
       // wake-word + sleep phrase, either order: "Robo Good Night" / "Good Night Robo"
       `(?:${sleepKw}).*\\b${n}\\b|\\b${n}\\b.*(?:${sleepKw})` +
       // standalone sleep phrases (safe in ask() which only runs during an active session)
-      `|^(?:(?:bye+\\s*)+|goodbye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?)\\s*[.!]*$`,
+      `|^(?:(?:bye+\\s*)+|good[\\s\\-]?bye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?)\\s*[.!]*$`,
       'i',
     );
   }, [wakeWord]);
@@ -801,10 +801,12 @@ export function useOrchestratorRuntime(
       autoListenRef.current = false;
       setAgents(agentsFromIds(registeredIdsRef.current).map((a) => ({ ...a, status: 'offline' as const })));
       setActiveAgentId(null);
-      // Speak first so the farewell message isn't overwritten by orchestrator's phase_changed:sleep
-      await speak(farewell);
       if (wsConnectedRef.current) wsSend('stop_session');
-      doSleepRef.current();
+      // Route through drainTTSQueue so ttsActiveRef stays true while speech plays.
+      // This defers doSleep until the farewell finishes — direct speak() bypasses the
+      // ttsActiveRef guard, causing phase_changed:sleep to fire mid-sentence.
+      pendingPhaseRef.current = 'sleep';
+      enqueueTTS({ text: farewell });
       return;
     }
 

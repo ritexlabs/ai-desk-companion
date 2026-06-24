@@ -764,8 +764,10 @@ export function useOrchestratorRuntime(
       // Strip optional wake-word prefix so "Robo, what's the time?" → "what's the time?".
       // If no prefix is present the text passes through unchanged — once the session
       // is live the user can speak commands directly without repeating the wake word.
+      // Reduce to alphanumeric only before embedding in RegExp (mirrors wakeWordPattern/sleepPattern).
+      const safeWake = wakeWordRef.current.replace(/[^a-z0-9]/gi, '');
       const wakePfx = new RegExp(
-        `^(?:hey[,\\s]+|hello[,\\s]+)?\\b${wakeWordRef.current.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}t?\\b[,\\s]*`,
+        `^(?:hey[,\\s]+|hello[,\\s]+)?\\b${safeWake}t?\\b[,\\s]*`,
         'i',
       );
       const stripped = text.replace(wakePfx, '').trim();

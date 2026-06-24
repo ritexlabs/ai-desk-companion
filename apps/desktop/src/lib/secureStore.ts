@@ -21,9 +21,10 @@ let _tauriStore: any = null;
 
 async function _getTauriStore(): Promise<any> {
   if (!_tauriStore) {
-    // Dynamic import avoids a compile-time hard dep on the optional package.
+    // vite-ignore: prevents Vite from bundling this at build time;
+    // the module is only available at runtime inside the Tauri host.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mod = await (Function('m', 'return import(m)') as any)('@tauri-apps/plugin-store');
+    const mod = await (import(/* @vite-ignore */ '@tauri-apps/plugin-store') as any);
     _tauriStore = await mod.Store.load('.robo-config.dat', { autoSave: false });
   }
   return _tauriStore;

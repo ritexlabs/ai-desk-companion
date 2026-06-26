@@ -8,8 +8,13 @@ from app.services.clock import local_now, local_today_range, utc_now_iso
 
 
 class GoogleCalendarAgent(AssistantAgent):
-    id = 'calendar'
-    name = 'Google Calendar'
+    id         = 'calendar'
+    name       = 'Google Calendar'
+    config_key = 'google'
+    tool_meta  = {
+        'description': 'Get upcoming meetings, events, appointments, or free time slots from Google Calendar.',
+        'query_hint':  'The calendar query, e.g. "meetings today" or "what is on my schedule this week"',
+    }
 
     _BASE = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
 

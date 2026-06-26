@@ -1,5 +1,20 @@
 # Configuration Reference
 
+## In-app settings guides
+
+Configure most things through the UI — no `.env` edits needed for day-to-day use:
+
+| Tab | What it controls | Guide |
+|-----|-----------------|-------|
+| **Profile** | Wake-up word, calling name | [profile.md](configuration/profile.md) |
+| **Voice** | Browser voice gender, speed, voice name | [voice.md](configuration/voice.md) |
+| **AI** | LLM provider, model, API key | [ai.md](configuration/ai.md) |
+| **Providers** | STT/TTS provider, OpenAI/ElevenLabs keys | [providers.md](configuration/providers.md) |
+
+---
+
+## Server configuration (`.env`)
+
 All runtime configuration for the orchestrator lives in `apps/orchestrator/.env`.
 
 ---
@@ -33,7 +48,7 @@ Then edit `apps/orchestrator/.env` with your values. The file is listed in `.git
 | `STT_PROVIDER` | `browser` | `browser` `openai` | Speech-to-text engine |
 
 `browser` uses the Web Speech APIs — no key required, quality varies by OS.  
-See [voice-providers.md](voice-providers.md) for full provider setup.
+See [configuration/providers.md](configuration/providers.md) for full provider setup.
 
 ### OpenAI
 
@@ -65,7 +80,7 @@ Used when the UI does not send `llm_config` in the `start_session` command.
 | `LLM_BASE_URL` | _(empty)_ | URL | Required for Ollama (e.g. `http://localhost:11434`) |
 
 API keys for LLM providers are passed from the UI settings panel (not from `.env`).  
-The LLM is used for two purposes: answering General AI queries, and classifying which agent should handle each command (intent routing). See [llm-setup.md](llm-setup.md) for details.
+The LLM is used for two purposes: answering General AI queries, and classifying which agent should handle each command (intent routing). See [configuration/ai.md](configuration/ai.md) for details.
 
 ### Weather agent fallback
 

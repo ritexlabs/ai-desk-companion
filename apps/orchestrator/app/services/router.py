@@ -19,6 +19,7 @@ AGENT_DESCRIPTIONS: dict[str, str] = {
     'stock':    'Stock prices, market indices (Nifty 50, Sensex, S&P 500, Dow Jones), RSI, technical analysis',
     'news':      'Latest news headlines, breaking news, current events, top stories by country or city',
     'smarthome': 'Control smart home devices: lights (on/off, brightness, color), switches, climate/thermostat, covers, scenes, automations, device status',
+    'whatsapp':  'Send WhatsApp messages to contacts, read incoming WhatsApp messages, check messages from a specific person',
     'general':   'General knowledge, creative writing, explanations, calculations, anything not covered above',
 }
 
@@ -98,6 +99,10 @@ def _keyword_route(text: str) -> RouteResult:
             'latest news', 'current events', 'what is happening', "what's happening",
             'top news'):
         return RouteResult(agent='news', confidence=0.9, reason='keyword:news')
+
+    if _has(t, 'whatsapp', 'whats app', 'wa message',
+            'send whatsapp', 'whatsapp message', 'text to'):
+        return RouteResult(agent='whatsapp', confidence=0.9, reason='keyword:whatsapp')
 
     if _has(t, 'light', 'lights', 'lamp', 'bulb', 'switch', 'plug',
             'fan', 'thermostat', 'air conditioner', 'ac', 'heater',

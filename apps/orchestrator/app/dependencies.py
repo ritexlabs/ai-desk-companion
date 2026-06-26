@@ -3,9 +3,9 @@ from app.services.event_bus import EventBus
 from app.services.router import IntentRouter
 from app.services.auth import AuthManager
 from app.services.mcp import MCPManager
-from app.services.stt import STTProvider, BrowserSTTProvider, OpenAISTTProvider
-from app.services.tts import TTSProvider, BrowserTTSProvider, OpenAITTSProvider, ElevenLabsTTSProvider
-from app.services.wake_word import wake_word_service
+from app.voice.stt import STTProvider, BrowserSTTProvider, OpenAISTTProvider
+from app.voice.tts import TTSProvider, BrowserTTSProvider, OpenAITTSProvider, ElevenLabsTTSProvider
+from app.voice.wake_word import wake_word_service
 from app.services.metrics import metrics_service
 from app.core.config import settings
 

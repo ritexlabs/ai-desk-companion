@@ -119,8 +119,8 @@ Once the app is running with the default browser voice, configure real integrati
 
 | Step | Guide |
 |------|-------|
-| Add OpenAI / ElevenLabs voice | [voice-providers.md](voice-providers.md) |
-| Add an LLM for AI responses | [llm-setup.md](llm-setup.md) |
+| Add OpenAI / ElevenLabs voice | [configuration/providers.md](configuration/providers.md) |
+| Add an LLM for AI responses | [configuration/ai.md](configuration/ai.md) |
 | Connect Weather / GitHub / Google | [agents.md](agents.md) |
 | Enable server-side wake word | [wake-word.md](wake-word.md) |
 | Build native desktop app | [tauri-desktop.md](tauri-desktop.md) |

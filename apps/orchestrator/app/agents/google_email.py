@@ -7,8 +7,13 @@ from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, Agent
 
 
 class GoogleEmailAgent(AssistantAgent):
-    id = 'email'
-    name = 'Google Email'
+    id         = 'email'
+    name       = 'Google Email'
+    config_key = 'google'
+    tool_meta  = {
+        'description': 'Read Gmail inbox, check unread emails, get message summaries or sender information.',
+        'query_hint':  'The email query, e.g. "unread emails" or "emails from John today"',
+    }
 
     _BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 

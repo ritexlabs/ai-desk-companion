@@ -9,8 +9,13 @@ from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, Agent
 
 
 class WeatherAgent(AssistantAgent):
-    id = 'weather'
-    name = 'Weather'
+    id         = 'weather'
+    name       = 'Weather'
+    config_key = 'weather'
+    tool_meta  = {
+        'description': 'Get current weather conditions, temperature, humidity, wind, or forecast for any city.',
+        'query_hint':  'The weather query, e.g. "weather in Mumbai" or "Delhi forecast tomorrow"',
+    }
 
     async def initialize(self) -> None:
         return None

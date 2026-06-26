@@ -11,7 +11,10 @@ from app.api.routes.command import router as command_router
 from app.api.routes.system import router as system_router
 from app.api.routes.smarthome import router as smarthome_router
 from app.api.routes.agent_data import router as agent_data_router
+from app.api.routes.whatsapp import router as whatsapp_router
+from app.api.routes.tunnel import router as tunnel_router
 from app.services.hass_mcp import close_all as close_hass_clients
+from app.services.tunnel import tunnel_service
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -44,6 +47,20 @@ async def lifespan(app: FastAPI):
                 'Run: pip install sounddevice openwakeword numpy'
             )
 
+    # ── Auto-start WhatsApp Cloudflare tunnel ────────────────────────
+    async def _auto_tunnel() -> None:
+        try:
+            await tunnel_service.start(
+                provider='cloudflare',
+                port=8787,
+                domain=settings.cloudflare_domain,
+            )
+            logger.info('WhatsApp tunnel auto-started (Cloudflare): %s', tunnel_service.url)
+        except Exception as exc:
+            logger.warning('WhatsApp tunnel auto-start failed: %s', exc)
+
+    asyncio.create_task(_auto_tunnel())
+
     # ── Periodic metrics broadcast (every 5 s) ───────────────────────
     async def _metrics_loop() -> None:
         while True:
@@ -63,6 +80,7 @@ async def lifespan(app: FastAPI):
         pass
     await agent_manager.shutdown()
     await close_hass_clients()
+    await tunnel_service.shutdown()
 
 
 app = FastAPI(title=settings.app_name, version='0.1.0', lifespan=lifespan)
@@ -81,6 +99,8 @@ app.include_router(command_router)
 app.include_router(system_router)
 app.include_router(smarthome_router)
 app.include_router(agent_data_router)
+app.include_router(whatsapp_router)
+app.include_router(tunnel_router)
 app.include_router(ws_router)
 
 

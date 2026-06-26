@@ -54,8 +54,13 @@ def _extract_topic(text: str) -> str:
 
 
 class NewsAgent(AssistantAgent):
-    id = 'news'
-    name = 'News'
+    id         = 'news'
+    name       = 'News'
+    config_key = 'news'
+    tool_meta  = {
+        'description': 'Get latest news headlines, breaking news, or top stories by country or topic.',
+        'query_hint':  'The news query, e.g. "top India news today" or "news about cricket"',
+    }
 
     async def initialize(self) -> None:
         return None

@@ -1,0 +1,7 @@
+tunnel: 35922a9b-baed-4081-8361-9f4545f0da10
+credentials-file: /Users/ritesh/.cloudflared/35922a9b-baed-4081-8361-9f4545f0da10.json
+
+ingress:
+  - hostname: whatsapp.robokingmaster.in
+    service: http://localhost:8787
+  - service: http_status:404

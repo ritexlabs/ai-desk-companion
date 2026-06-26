@@ -38,6 +38,7 @@ import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
 import type { RuntimePhase } from './types/runtime';
 import { useOrchSystemStats } from './hooks/useOrchSystemStats';
 import { useProactiveNotifications } from './hooks/useProactiveNotifications';
+import { useAgentVoiceConfig } from './hooks/useAgentVoiceConfig';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 
@@ -204,6 +205,10 @@ export default function App() {
     disconnectGitHub,
     verifyNews,
     verifySmartHome,
+    verifyWhatsApp,
+    checkTunnelStatus,
+    startTunnel,
+    stopTunnel,
   } = useAgentConfig();
   const {
     config: llmConfig,
@@ -217,7 +222,8 @@ export default function App() {
     testTTS,
     disconnect: disconnectProviders,
   } = useVoiceProviderConfig();
-  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken);
+  const { agentVoices, updateAgentVoice, resetAgentVoice } = useAgentVoiceConfig();
+  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken, agentVoices);
   const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -340,7 +346,10 @@ export default function App() {
         voiceConfig={voiceConfig}
         onVoiceUpdate={updateVoiceConfig}
         voices={voices}
-        onTestVoice={(text: string) => rt.ask(text)}
+        onTestVoice={(text: string, agentId?: string) => rt.speak(text, agentId)}
+        agentVoices={agentVoices}
+        onAgentVoiceUpdate={updateAgentVoice}
+        onAgentVoiceReset={resetAgentVoice}
         agentConfig={agentConfig}
         onAgentPatch={patchAgent}
         onVerifyWeather={verifyWeather}
@@ -350,6 +359,10 @@ export default function App() {
         onDisconnectGitHub={disconnectGitHub}
         onVerifyNews={verifyNews}
         onVerifySmartHome={verifySmartHome}
+        onVerifyWhatsApp={verifyWhatsApp}
+        onCheckTunnel={checkTunnelStatus}
+        onStartTunnel={startTunnel}
+        onStopTunnel={stopTunnel}
         llmConfig={llmConfig}
         onLLMUpdate={updateLLM}
         onVerifyLLM={verifyLLM}

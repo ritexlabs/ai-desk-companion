@@ -4,7 +4,15 @@
       "Bash(git:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npx vitest *)",
+      "Bash(python3 scripts/gen_tests.py --list)",
+      "Bash(bash scripts/test.sh)",
+      "Bash(.venv/bin/python3 -m py_compile app/api/ws.py app/services/agent_manager.py app/services/orchestrator.py app/services/session.py app/services/tts_helpers.py app/agents/general_ai.py)",
+      "Bash(git show *)"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

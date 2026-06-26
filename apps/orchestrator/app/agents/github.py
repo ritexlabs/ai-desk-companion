@@ -7,8 +7,13 @@ from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, Agent
 
 
 class GitHubAgent(AssistantAgent):
-    id = 'github'
-    name = 'GitHub'
+    id         = 'github'
+    name       = 'GitHub'
+    config_key = 'github'
+    tool_meta  = {
+        'description': 'Get GitHub pull requests, issues, commits, branch info, or CI/CD workflow status.',
+        'query_hint':  'The GitHub query, e.g. "open pull requests" or "recent commits on main"',
+    }
 
     _BASE = 'https://api.github.com'
 

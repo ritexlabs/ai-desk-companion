@@ -54,8 +54,24 @@ _STOP_WORDS = re.compile(
 
 
 class SmartHomeAgent(AssistantAgent):
-    id   = 'smarthome'
-    name = 'Smart Home'
+    id         = 'smarthome'
+    name       = 'Smart Home'
+    config_key = 'smarthome'
+    tool_meta  = {
+        'description': (
+            'Control and query smart home devices via Home Assistant. '
+            'ALWAYS use this tool for ANY request involving lights, switches, fans, covers, locks, '
+            'climate/thermostat, scenes, sensors, or any connected smart device. '
+            'Use it to turn devices on or off, dim lights, change colors, set temperatures, '
+            'activate scenes, or list device states. '
+            'Never answer smart home questions from your own knowledge — always call this tool.'
+        ),
+        'query_hint': (
+            'The full smart home command or question, e.g. '
+            '"turn off light 1", "how many lights are on", '
+            '"set living room brightness to 50%", "lock the front door", "activate movie scene"'
+        ),
+    }
 
     async def initialize(self) -> None:
         return None

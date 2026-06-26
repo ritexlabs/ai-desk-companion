@@ -41,7 +41,6 @@ ai-desk-companion/
 │   ├── desktop/          React + Vite frontend
 │   └── orchestrator/     Python FastAPI backend
 ├── docs/                 Architecture, API contracts, setup
-├── packages/             Shared packages (reserved)
 ├── start.py              Cross-platform dev launcher
 ├── start.sh              macOS / Linux convenience wrapper
 └── start.bat             Windows convenience wrapper
@@ -107,7 +106,7 @@ All UI ↔ orchestrator communication goes through a single persistent WebSocket
 
 | Command | Key Payload Fields | Description |
 |---|---|---|
-| `start_session` | `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` | Wake + boot sequence |
+| `start_session` | `assistant_name`, `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config`, `agent_voices` | Wake + boot sequence |
 | `send_text_command` | `text` | Route a text command |
 | `audio_chunk` | `data_b64`, `format`, `is_final` | Stream audio for server STT |
 | `stop_session` | — | Enter sleep mode (with or without farewell) |
@@ -281,17 +280,20 @@ The UI plays these via `HTMLAudioElement`; falls back to browser `SpeechSynthesi
 Each agent implements `handle(AgentRequest) → AgentResponse`.
 
 ### Agent Table
-| Agent ID | Label | Status | Data Source |
-|---|---|---|---|
-| `system` | System | ✅ Real | `platform` module + system time |
-| `weather` | Weather | ✅ Real | OpenWeatherMap / WeatherAPI via `agent_config.weather` |
-| `calendar` | Google Calendar | ✅ Real | Google Calendar API v3 via OAuth `access_token` |
-| `email` | Google Email | ✅ Real | Gmail API via OAuth `access_token` |
-| `github` | GitHub | ✅ Real | GitHub REST API via Personal Access Token |
-| `stock` | Stock Market | ✅ Real | Yahoo Finance via `yfinance` — no API key required |
-| `news` | News | ✅ Real | NewsAPI.org via `agent_config.news.api_key` |
-| `smarthome` | Smart Home | ✅ Real | Home Assistant REST API via `voska/hass-mcp` Docker (MCP JSON-RPC 2.0) |
-| `general` | General AI | ✅ Real | LLM service — OpenAI / Anthropic / Gemini / Ollama |
+
+| Agent ID | Label | Browser voice (default) | OpenAI voice (default) | Data Source |
+|---|---|---|---|---|
+| `system` | System | male / slow | echo | `platform` module + system time |
+| `weather` | Weather | female / normal | nova | OpenWeatherMap / WeatherAPI |
+| `calendar` | Google Calendar | female / fast | shimmer | Google Calendar API v3 via OAuth |
+| `email` | Google Email | female / normal | alloy | Gmail API via OAuth |
+| `github` | GitHub | male / fast | onyx | GitHub REST API via PAT |
+| `stock` | Stock Market | male / slow | fable | Yahoo Finance via `yfinance` |
+| `news` | News | female / fast | echo | NewsAPI.org |
+| `smarthome` | Smart Home | female / normal | alloy | Home Assistant REST API via MCP |
+| `general` | General AI | female / normal | nova | LLM service (OpenAI / Anthropic / Gemini / Ollama) |
+
+All voice defaults are overridable per user in **Settings → Agents → [agent] → Voice**.
 
 ### Intent Router
 
@@ -321,6 +323,85 @@ smart home / home assistant / device / turn on / turn off  →  SmartHomeAgent
 ```
 
 Contraction normalisation (`whats` / `what's` → `what is`) is applied before phrase matching to handle voice-to-text variations.
+
+### Adding a New Agent — 8-Step Checklist
+
+Every new agent requires exactly these eight touch-points. Skipping any one causes the agent to be missing from the roster, missing from voice config, or silently ignored by the router.
+
+**Step 1 — Backend Python class** (`apps/orchestrator/app/agents/<name>.py`)
+```python
+class MyAgent(AssistantAgent):
+    id         = 'myagent'       # unique snake_case identifier
+    name       = 'My Agent'      # human display label
+    config_key = 'myagent'       # key in agent_config dict (None if no credentials)
+    tool_meta  = {
+        'description': 'One sentence what this agent does.',
+        'query_hint':  'The user query string for this tool.',
+    }
+    # implement: initialize, health, handle, shutdown
+```
+
+**Step 2 — Register** (`apps/orchestrator/app/agents/registry.py`) — add `MyAgent` to the `AGENTS` list.
+
+**Step 3 — Keyword routing** (`apps/orchestrator/app/services/router.py`) — add keyword patterns → `'myagent'` in `_keyword_route()`.
+
+**Step 4 — Boot labels + query** (`apps/orchestrator/app/services/session.py`)
+```python
+AGENT_LABELS['myagent']     = 'My Agent'
+AGENT_BOOT_QUERY['myagent'] = 'boot'   # triggers health check; omit if no meaningful check
+```
+
+**Step 5 — Default OpenAI TTS voice** (`apps/orchestrator/app/services/tts_helpers.py`)
+```python
+AGENT_VOICES['myagent'] = 'nova'   # alloy | echo | fable | nova | onyx | shimmer
+```
+
+**Step 6 — Frontend roster catalogue** (`apps/desktop/src/hooks/useOrchestratorRuntime.ts` → `AGENT_CATALOGUE`)
+```typescript
+{ id: 'myagent', label: 'My Agent', description: '...', example: 'Ask me about X',
+  status: 'offline', color: 'from-X-400 to-Y-500' }
+```
+The roster panel automatically shows/hides and enables/disables agents based on this list — no extra display logic needed.
+
+**Step 7 — Default per-agent browser voice** (`apps/desktop/src/hooks/useAgentVoiceConfig.ts` → `DEFAULT_AGENT_VOICES`)
+```typescript
+myagent: { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova' },
+```
+
+**Step 8 — Settings accordion** (`apps/desktop/src/components/settings/AgentsSettings.tsx`)
+```tsx
+<AgentAccordion id="myagent" label="My Agent" emoji="🔧" status={config.myagent.status}
+  open={openSection === 'myagent'} onToggle={() => toggle('myagent')}
+  enabled={config.myagent.enabled} onToggleEnabled={() => onPatch('myagent', { enabled: !config.myagent.enabled })}
+>
+  <MyAgentSettings config={config.myagent} onPatch={(p) => onPatch('myagent', p)} />
+  {voiceRow('myagent', 'My Agent')}   {/* voice gender/speed/OpenAI selector */}
+</AgentAccordion>
+```
+Also add `myagent` to `AgentConfig` in `useAgentConfig.ts` (credential type + defaults) if it needs credentials.
+
+### Voice Config Architecture
+
+```
+Global defaults (Voice tab)           Per-agent overrides (Agents tab)
+──────────────────────────────        ─────────────────────────────────────────────
+gender, speed, browser voice  ←───── overridden per agent by AgentVoiceRow
+stored: robo-voice-config             stored: robo-agent-voice-config
+                                      sent in start_session.agent_voices
+                                      backend: agent_tts(tts, agent_id, session_voices)
+```
+
+When the agent speaks, `useVoice.speak(text, agentId)` picks up the agent's own gender/speed/voiceName (or falls back to global). The backend uses `session_voices[agent_id].openai_voice` (or `AGENT_VOICES[agent_id]`) when OpenAI TTS is active.
+
+### Assistant Name Architecture
+
+| Config field | Where set | Used for |
+|---|---|---|
+| `assistantName` | Settings → Profile | Bot identity in LLM system prompt (`You are {name}…`), UI header |
+| `wakeWord` | Settings → Profile | Wake-pattern regex in `useVoiceLoop.ts` (Hey {name}, {name} wake-up) |
+| `callingName` | Settings → Profile | How the bot greets the user ("Good morning, {callingName}") |
+
+All three are sent in `start_session` and propagated through the backend to the LLM system prompt.
 
 ---
 
@@ -541,3 +622,84 @@ npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bu
 - `isAutoListening` React state mirrors `autoListenRef.current` for UI awareness
 - `displayPhase` derived value masks the brief `ready` flash between auto-listen cycles — all phase-sensitive UI uses `displayPhase` without altering the real state machine
 - Prevents the Listening↔Ready badge flicker introduced when the Smart Home agent was added
+
+### Phase 9 — Modular Architecture Refactor + Security Hardening ✅ COMPLETE
+
+**SettingsPanel decomposition** (`apps/desktop/src/components/settings/`)
+
+`SettingsPanel.tsx` was 1 445 lines; split into 12 focused components:
+
+| Component | Responsibility |
+|---|---|
+| `shared.tsx` | `SectionLabel`, `StatusBadge`, `TokenField`, `SecurityNotice` atoms |
+| `AgentAccordion.tsx` | `AgentToggle` on/off switch + `AgentAccordion` Framer Motion section |
+| `ProfileSettings.tsx` | Wake-up word + calling name |
+| `VoiceSettings.tsx` | Gender, speed, voice selector, test-speak |
+| `AISettings.tsx` | LLM provider grid, model, API key, base URL, connect/disconnect |
+| `ProvidersSettings.tsx` | Generic `ProviderToggle<T>` for STT/TTS; OpenAI + ElevenLabs credential panels |
+| `WeatherSettings.tsx` | Weather API key + provider selection |
+| `GoogleSettings.tsx` | OAuth PKCE connect/disconnect, scopes, per-agent toggles, token expiry warning |
+| `GithubSettings.tsx` | GitHub PAT verify/disconnect |
+| `StockSettings.tsx` | Market selector (IN/US) |
+| `NewsSettings.tsx` | GNews API key + country/state/city |
+| `SmartHomeSettings.tsx` | Home Assistant URL + token test/disconnect |
+| `AgentsSettings.tsx` | Orchestrates all agent accordion sections |
+| `SettingsPanel.tsx` | Thin shell ~165 lines; imports tab components |
+
+**Hook decomposition**
+
+- `apps/desktop/src/hooks/useVoiceLoop.ts` (new, 144 lines) — extracted from `useOrchestratorRuntime`
+  - Wake-word regex: matches "Hey Robo", "Hello Robo", "Robo Wake-Up", "Wake-Up Robo"; bare "Robo" alone does not match
+  - Sleep regex: matches "Good night", "Bye", "See you", "Go to sleep" — standalone or combined with wake word
+  - 4-second discrete listen loop with `alive` flag for cleanup; cycles only in `standby`/`sleep` phases
+  - `autoListenRef` and `setIsAutoListening` passed in as props — avoids shared-state conflict with the main hook
+- `apps/desktop/src/hooks/agentVerify.ts` (new, 237 lines) — pure async verify functions extracted from `useAgentConfig`
+  - `verifyWeather` — fetches OWM or WeatherAPI; patches `status` idle → verifying → connected/error
+  - `connectGoogle` — full Authorization Code + PKCE flow with popup polling; exchanges code for tokens; fetches user email
+  - `refreshGoogleToken` — silent token refresh from `refresh_token`
+  - `verifyGitHub` — hits `/user` with Bearer PAT; patches username + rate-limit info
+  - `verifySmartHome` — calls backend `/api/smarthome/ping`; patches location name
+  - `verifyNews` — calls GNews `/top-headlines?max=1`; patches article count
+
+**WebSocket security hardening** (`apps/orchestrator/app/api/ws.py`)
+- **Origin enforcement** — `ws.headers.get('origin', '')` checked against `settings.allowed_origins`; browser clients always send Origin; unknown origins rejected with WS close code 4003; empty origin (wscat, curl, tests) passes through
+- **Per-connection rate limiter** — `_RateLimiter(max_calls=20, window_sec=10.0)` — sliding-window via `collections.deque`; applied to `send_text_command`, `audio_chunk`, `start_session`, `retry_agent`; returns `error` WS event on violation without disconnecting
+- **Input length cap** — `payload.get('text', '')[:MAX_INPUT_CHARS]` (`MAX_INPUT_CHARS = 2000`) — applied before any agent call
+
+### Phase 10 — Automated Test Suite ✅ COMPLETE
+
+**200 tests total — 125 backend (pytest) + 75 frontend (vitest) — all green**
+
+**Backend test infrastructure**
+- `apps/orchestrator/requirements-dev.txt` — `pytest`, `pytest-asyncio`, `pytest-cov`, `respx` (httpx mock)
+- `apps/orchestrator/pytest.ini` — `asyncio_mode = auto`, testpaths = tests, verbose
+- `apps/orchestrator/tests/conftest.py` — shared `make_req` and `mock_http` (respx) fixtures
+
+**Backend test modules**
+
+| Module | Tests | Key techniques |
+|---|---|---|
+| `test_agents/test_weather.py` | 17 | `respx.mock` intercepts `httpx.AsyncClient`; OWM/WeatherAPI/Open-Meteo; 401/404 |
+| `test_agents/test_system.py` | 13 | `unittest.mock.patch('app.agents.system._collect_metrics', ...)` |
+| `test_agents/test_github.py` | 11 | `respx.mock`; routing via keyword; 401/403 error paths |
+| `test_agents/test_news.py` | 20 | `_extract_topic` pure function; `respx.mock` for GNews endpoints |
+| `test_services/test_session.py` | 26 | Pure function assertions; `FAREWELL_LINES`/`GREETING_SUFFIXES` membership checks |
+| `test_services/test_tts_helpers.py` | 10 | Provider type checks; `agent_tts` same-instance vs new-instance identity |
+| `test_services/test_agent_manager.py` | 20 | `_merge`/`_merge_llm` semantics; configure/clear/`llm_configured`; unknown-agent fallback |
+| `test_api/test_ws_security.py` | 8 | `_RateLimiter` window logic; `MAX_INPUT_CHARS` constant; `allowed_origins` list |
+
+**Frontend test infrastructure**
+- `apps/desktop/vitest.config.ts` — jsdom environment, `@vitest/coverage-v8`
+- `apps/desktop/package.json` — `vitest`, `@vitest/coverage-v8`, `jsdom`; npm scripts `test`, `test:watch`, `test:coverage`
+
+**Frontend test modules**
+
+| File | Tests | Key techniques |
+|---|---|---|
+| `src/__tests__/lib/utils.test.ts` | 14 | `partOfDayFromHour` all 24 hours; `nowIso` ISO validity and timing |
+| `src/__tests__/hooks/agentVerify.test.ts` | 16 | `vi.stubGlobal('fetch', vi.fn())` per test; patcher call-sequence inspection |
+| `src/__tests__/hooks/voiceLoop.patterns.test.ts` | 45 | Pure regex construction from same logic as hook; `it.each` for positive/negative cases |
+
+**Automation scripts**
+- `scripts/test.sh` — installs deps, runs pytest then vitest, prints per-module colour table with pass/fail counts; flags `--backend`, `--frontend`, `--coverage`
+- `scripts/gen_tests.py` — AST-scans agent/service source files; generates stub test files for any uncovered module; never overwrites; `--list` and `--dry-run` modes

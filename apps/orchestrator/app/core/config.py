@@ -66,5 +66,23 @@ class Settings(BaseSettings):
     myhome_mcp_endpoint: str = 'http://homeassistant.local:8123'
     myhome_mcp_token:    str = ''
 
+    # ── WhatsApp agent (Meta Cloud API) ────────────────────────────────
+    # phone_number_id: from Meta Developer Console → WhatsApp → API Setup
+    # access_token:    permanent system user token or temporary test token (24 h)
+    # webhook_verify_token: custom string you set in Meta's webhook config
+    # app_secret:      Meta app secret — validates X-Hub-Signature-256 on webhooks
+    # contacts:        "Name: +E164number" lines, one per line
+    whatsapp_phone_number_id:      str = ''
+    whatsapp_access_token:         str = ''
+    whatsapp_webhook_verify_token: str = 'robo-whatsapp-verify'
+    whatsapp_app_secret:           str = ''
+    whatsapp_contacts:             str = ''
+
+    # ── Cloudflare Tunnel ───────────────────────────────────────────────
+    # Base domain for the WhatsApp webhook tunnel.
+    # If set, callback URL becomes https://whatsapp.<CLOUDFLARE_DOMAIN>.
+    # Not sensitive — domain name is returned to the UI for display purposes.
+    cloudflare_domain: str = ''
+
 
 settings = Settings()

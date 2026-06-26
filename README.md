@@ -94,8 +94,6 @@ ai-desk-companion/
 │   ├── desktop/          React + Vite frontend (port 5173)
 │   └── orchestrator/     Python FastAPI backend (port 8787)
 ├── docs/                 Configuration guides and API reference
-├── packages/
-│   └── shared-types/     Shared TypeScript/Python contracts (reserved)
 ├── start.py              Cross-platform dev launcher
 ├── start.sh              macOS/Linux wrapper
 └── start.bat             Windows wrapper
@@ -138,6 +136,47 @@ cd apps/desktop
 npm install
 npm run dev
 ```
+
+---
+
+## Testing
+
+The project ships with a full automated test suite — **200 tests, zero configuration needed** after the initial install.
+
+### Run all tests
+
+```bash
+./scripts/test.sh              # backend + frontend, per-module summary report
+./scripts/test.sh --backend    # backend only (pytest)
+./scripts/test.sh --frontend   # frontend only (vitest)
+./scripts/test.sh --coverage   # include HTML coverage report
+```
+
+### Run individually
+
+**Backend (pytest)**
+```bash
+cd apps/orchestrator
+.venv/bin/python3 -m pip install -r requirements-dev.txt
+.venv/bin/python3 -m pytest tests/ -v
+```
+
+**Frontend (vitest)**
+```bash
+cd apps/desktop
+npm test               # single run
+npm run test:watch     # watch mode
+npm run test:coverage  # with coverage report
+```
+
+### Auto-generate test stubs for new modules
+
+```bash
+python3 scripts/gen_tests.py --list   # show coverage gaps (✓ / ✗)
+python3 scripts/gen_tests.py          # create stub files for uncovered modules
+```
+
+See [docs/development.md](docs/development.md#testing) for full details.
 
 ---
 

@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home, Loader2, RotateCw } from 'lucide-react';
+import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home, MessageCircle, Loader2, RotateCw } from 'lucide-react';
 import type { AgentDefinition } from '../types/runtime';
 
 const AGENT_META: Record<
@@ -69,6 +69,14 @@ const AGENT_META: Record<
     bg: 'bg-orange-400/10',
     glow: 'shadow-orange-400/25',
     dot: 'bg-orange-400',
+  },
+  whatsapp: {
+    icon: <MessageCircle className="h-3.5 w-3.5" />,
+    text: 'text-green-400',
+    border: 'border-green-400/35',
+    bg: 'bg-green-400/10',
+    glow: 'shadow-green-400/25',
+    dot: 'bg-green-400',
   },
 };
 

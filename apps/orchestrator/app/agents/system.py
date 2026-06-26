@@ -84,8 +84,12 @@ def _collect_metrics() -> dict:
 
 
 class SystemAgent(AssistantAgent):
-    id = 'system'
-    name = 'System'
+    id        = 'system'
+    name      = 'System'
+    tool_meta = {
+        'description': 'Get the current time, date, day of the week, timezone, or OS/hardware/CPU/memory info.',
+        'query_hint':  'The system query, e.g. "what time is it" or "current date" or "CPU usage"',
+    }
 
     async def initialize(self) -> None:
         return None

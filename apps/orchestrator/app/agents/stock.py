@@ -206,8 +206,13 @@ def _price_brief(yf_module, alias: str, label: str, default_market: str) -> str:
 # ── Agent ─────────────────────────────────────────────────────────────────────
 
 class StockAgent(AssistantAgent):
-    id   = 'stock'
-    name = 'Stock Market'
+    id         = 'stock'
+    name       = 'Stock Market'
+    config_key = 'stock'
+    tool_meta  = {
+        'description': 'Get live stock prices and market indices like Nifty 50, Sensex, S&P 500, or Dow Jones.',
+        'query_hint':  'The stock query, e.g. "Nifty 50 today" or "price of RELIANCE"',
+    }
 
     async def initialize(self) -> None:
         return None

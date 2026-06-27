@@ -10,6 +10,7 @@ from app.api.routes.session import router as session_router
 from app.api.routes.command import router as command_router
 from app.api.routes.system import router as system_router
 from app.api.routes.smarthome import router as smarthome_router
+from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.agent_data import router as agent_data_router
 from app.api.routes.whatsapp import router as whatsapp_router
 from app.api.routes.tunnel import router as tunnel_router
@@ -98,6 +99,7 @@ app.include_router(session_router)
 app.include_router(command_router)
 app.include_router(system_router)
 app.include_router(smarthome_router)
+app.include_router(portfolio_router)
 app.include_router(agent_data_router)
 app.include_router(whatsapp_router)
 app.include_router(tunnel_router)

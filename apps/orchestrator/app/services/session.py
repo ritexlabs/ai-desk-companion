@@ -12,35 +12,46 @@ from app.models.contracts import AgentRequest
 from app.services.llm import llm_service
 from app.voice.tts import TTSProvider
 from app.voice.stt import STTProvider
-from app.services.tts_helpers import settings_label
+from app.services.tts_helpers import settings_label, agent_tts
 
 # ── Agent protocol constants ──────────────────────────────────────────────────
 
 AGENT_LABELS: dict[str, str] = {
-    'weather':   'Weather',
-    'system':    'System',
-    'calendar':  'Google Calendar',
-    'email':     'Google Email',
-    'github':    'GitHub',
-    'stock':     'Stock Market',
-    'news':      'News',
-    'smarthome': 'Smart Home',
-    'whatsapp':  'WhatsApp',
-    'general':   'General AI',
+    'weather':    'Weather',
+    'system':     'System',
+    'calendar':   'Google Calendar',
+    'email':      'Google Email',
+    'github':     'GitHub',
+    'stock':      'Stock Market',
+    'news':       'News',
+    'smarthome':  'Smart Home',
+    'whatsapp':   'WhatsApp',
+    'portfolio':  'Portfolio',
+    'websearch':  'Web Search',
+    'calculator': 'Calculator',
+    'memory':     'Memory',
+    'briefing':   'Briefing',
+    'general':    'General AI',
 }
 
 # '__boot__' triggers the agent's built-in boot summary; '' skips the test call
 AGENT_BOOT_QUERY: dict[str, str] = {
-    'weather':   '__boot__',
-    'system':    '__boot__',
-    'github':    '__boot__',
-    'calendar':  '__boot__',
-    'email':     '__boot__',
-    'stock':     '__boot__',
-    'news':      '__boot__',
-    'smarthome': '__boot__',
-    'whatsapp':  '__boot__',
-    'general':   '',
+    'weather':    '__boot__',
+    'system':     '__boot__',
+    'github':     '__boot__',
+    'calendar':   '__boot__',
+    'email':      '__boot__',
+    'stock':      '__boot__',
+    'news':       '__boot__',
+    'smarthome':  '__boot__',
+    'whatsapp':   '__boot__',
+    'portfolio':  '__boot__',
+    # Built-in skills — always online, no boot health-check needed
+    'websearch':  '',
+    'calculator': '',
+    'memory':     '',
+    'briefing':   '',
+    'general':    '',
 }
 
 GREETING_SUFFIXES = [
@@ -164,6 +175,10 @@ async def test_agent(agent_id: str) -> tuple[str, str, str]:
         return agent_id, 'failed', f"{label} agent failed to start: {str(exc)[:60]}"
 
 
+# Built-in skills that are always available regardless of user configuration
+_ALWAYS_ON_SKILLS = ('websearch', 'calculator', 'memory', 'briefing')
+
+
 async def boot_sequence(
     send_fn: SendFn,
     speak_fn: SpeakFn,
@@ -174,12 +189,18 @@ async def boot_sequence(
     llm_config: dict,
     agent_config: dict,
     assistant_name: str = 'Robo',
+    agent_voices: dict | None = None,
 ) -> None:
     # System agent always initialises first — it seeds the live clock
     if 'system' not in registered_agents:
         registered_agents = ['system'] + registered_agents
     elif registered_agents[0] != 'system':
         registered_agents = ['system'] + [a for a in registered_agents if a != 'system']
+
+    # Auto-inject built-in skills at the end
+    for skill in _ALWAYS_ON_SKILLS:
+        if skill not in registered_agents:
+            registered_agents = registered_agents + [skill]
 
     agent_manager.configure_session(llm_config, agent_config, registered_agents, calling_name, assistant_name)
     router_service.configure_session(llm_config, registered_agents)
@@ -194,30 +215,45 @@ async def boot_sequence(
     await send_fn('phase_changed', {'phase': 'wake_detected'})
     await send_fn('phase_changed', {'phase': 'booting'})
 
-    n             = len(registered_agents)
     greeting_task = asyncio.create_task(speak_fn('boot_status', make_greeting(calling_name), None, tts))
     init_task     = asyncio.create_task(agent_manager.initialize_enabled_agents())
     await greeting_task
     await init_task
 
+    # Split: configurable agents get tested and spoken; built-in skills update silently
+    skill_ids     = set(_ALWAYS_ON_SKILLS)
+    to_announce   = [a for a in registered_agents if a not in skill_ids]
+    silent_skills = [a for a in registered_agents if a in skill_ids]
+
     for agent_id in registered_agents:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'starting'})
 
+    # Test configurable agents in parallel
     results: list[tuple[str, str, str]] = await asyncio.gather(
-        *[test_agent(agent_id) for agent_id in registered_agents]
+        *[test_agent(agent_id) for agent_id in to_announce]
     )
 
+    # Speak each configurable agent result in its own voice
     online_count = 0
     for agent_id, status, msg in results:
         if status == 'online':
             online_count += 1
-        await speak_fn('boot_status', msg, {'agent_id': agent_id, 'agent_status': status}, tts)
+        await speak_fn(
+            'boot_status', msg,
+            {'agent_id': agent_id, 'agent_status': status},
+            agent_tts(tts, agent_id, agent_voices),
+        )
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
 
+    # Mark skills online silently — no test call, no voice announcement
+    for agent_id in silent_skills:
+        await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
+
+    n = len(to_announce)
     await speak_fn(
         'boot_status',
         f'{online_count} of {n} agent{"s" if n != 1 else ""} online and ready for your command.',
         None,
-        tts,
+        agent_tts(tts, 'general', agent_voices),
     )
     await send_fn('phase_changed', {'phase': 'ready'})

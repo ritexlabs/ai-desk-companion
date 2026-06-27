@@ -8,6 +8,10 @@ Robo routes voice commands to specialised agents. Each agent has its own setup g
 
 ## Agent index
 
+### Configurable agents
+
+These agents connect to external services and require credentials.
+
 | Agent | Credentials needed | Detailed guide |
 |-------|-------------------|----------------|
 | **System** | None | **[Full guide →](agents/system.md)** |
@@ -19,7 +23,19 @@ Robo routes voice commands to specialised agents. Each agent has its own setup g
 | **News** | GNews API key (free, 100 req/day) | **[Full guide →](agents/news.md)** |
 | **Smart Home** | Home Assistant URL + Long-Lived Access Token | **[Full guide →](agents/smarthome.md)** |
 | **WhatsApp** | Meta app credentials + Cloudflare Tunnel | **[Full guide →](agents/whatsapp.md)** |
+| **Portfolio** | INDmoney account (OAuth — no API key needed) | **[Full guide →](agents/portfolio.md)** |
 | [General AI](#general-ai-agent) | LLM API key | [AI settings →](configuration/ai.md) |
+
+### Built-in skills
+
+These skills are **always active on every session** — no credentials, no setup, no toggle required. They appear in the boot roster and are exposed as tools to the LLM orchestrator alongside all configured agents.
+
+| Skill | What it does | Detailed guide |
+|-------|-------------|----------------|
+| **Web Search** | Live DuckDuckGo search for current facts and recent events | **[Full guide →](agents/websearch.md)** |
+| **Calculator** | Precise arithmetic, percentages, tips, unit formulas, trig | **[Full guide →](agents/calculator.md)** |
+| **Memory** | Store and recall personal notes, preferences, and reminders | **[Full guide →](agents/memory.md)** |
+| **Briefing** | One-command morning summary from all connected agents | **[Full guide →](agents/briefing.md)** |
 
 ---
 
@@ -53,7 +69,10 @@ The configured LLM classifies intent before dispatching. A compact system prompt
 | news, headline, breaking news, latest news | News |
 | light, switch, fan, lock, thermostat, climate, smart home, turn on, turn off | Smart Home |
 | whatsapp, message, send whatsapp, any messages | WhatsApp |
+| portfolio, holdings, invested, investment, mutual fund, sip, watchlist | Portfolio |
 | _(anything else)_ | General AI |
+
+> **Note on built-in skills:** Web Search, Calculator, Memory, and Briefing are exposed as LLM tools directly — the orchestrator's LLM tier picks them based on intent (e.g. a calculation query → Calculator, a "morning briefing" query → Briefing). There are no keyword fallback rules for skills because the LLM routing is reliable enough and these skills serve open-ended intents that keyword rules cannot cleanly capture.
 
 ---
 
@@ -181,6 +200,85 @@ Send and receive WhatsApp messages by voice using the Meta Cloud API.
 - Requires `cloudflared` for the webhook tunnel
 - No physical WhatsApp Business device needed — Meta provides a free test number
 - Voice commands: *"Send WhatsApp to Mom saying hello"*, *"Any WhatsApp messages?"*
+
+---
+
+## Portfolio Agent
+
+Connect to your INDmoney account via MCP to query equity holdings, mutual funds, P&L, and transactions — by voice.
+
+**→ [Full setup guide](agents/portfolio.md)** — covers the OAuth flow, auto-registration, token refresh, and troubleshooting.
+
+**Quick summary:**
+- No API key or developer portal needed — click **Connect with INDmoney** and sign in with your normal credentials
+- Uses OAuth 2.0 + PKCE with Dynamic Client Registration (RFC 7591) — app auto-registers itself
+- MCP server: `https://mcp.indmoney.com/mcp` — tools discovered dynamically at runtime
+- Voice: **Fable** voice
+- Voice commands: *"Show my portfolio holdings"*, *"What is my total P&L?"*, *"List my mutual funds"*, *"Any recent transactions?"*
+
+---
+
+## Built-in Skills
+
+The four skills below are always active — they require no credentials and are never shown in Settings as togglable agents.
+
+---
+
+### Web Search Skill
+
+Searches the live web via DuckDuckGo Instant Answer API. Fills the gap when the LLM's training data is out of date.
+
+**→ [Full guide](agents/websearch.md)** — covers result tiers, limitations, and troubleshooting.
+
+**Quick summary:**
+- No API key or account — completely free
+- Uses DuckDuckGo Instant Answers: direct answers → Wikipedia abstract → related topics
+- Best for: current prices, factual lookups, recent releases, distances, population data
+- Not suited for real-time breaking news (use News agent) or stock prices (use Stock agent)
+- Voice commands: *"What is the current gold price?"*, *"Search for Python 3.13 release date"*, *"Who is the CEO of Apple?"*
+
+---
+
+### Calculator Skill
+
+Evaluates math expressions precisely using Python's AST evaluator — no `eval()`, no external calls.
+
+**→ [Full guide](agents/calculator.md)** — covers all supported operators, functions, and constants.
+
+**Quick summary:**
+- Always precise — fixes the well-known LLM arithmetic unreliability
+- Supports: arithmetic, percentages, tips, trig, logarithms, factorials, floor/ceil, constants (pi, e, tau)
+- Shortcut patterns: `18% tip on 850` and `15% of 2499` are parsed directly before AST evaluation
+- Voice commands: *"What is 18% tip on 850?"*, *"Square root of 1764"*, *"2 to the power 10"*, *"42 miles in km"*
+
+---
+
+### Memory Skill
+
+Persists key-value notes to `apps/orchestrator/data/user_memory.json` — survives restarts.
+
+**→ [Full guide](agents/memory.md)** — covers storage format, recall search, deletion, and privacy notes.
+
+**Quick summary:**
+- Persistent across sessions, restarts, and browser refreshes
+- Three intents: **remember** (store), **recall** (retrieve), **forget** (delete)
+- Recall uses layered search: exact key → partial key match → keyword scan of keys + values
+- All data stays local — nothing sent to external services
+- Voice commands: *"Remember wife anniversary is June 15"*, *"What is my anniversary?"*, *"Forget parking spot"*, *"List all memories"*
+
+---
+
+### Briefing Skill
+
+Queries weather, calendar, news, and smart home in parallel and merges results into a single spoken summary.
+
+**→ [Full guide](agents/briefing.md)** — covers included agents, parallel fetch, and customisation.
+
+**Quick summary:**
+- Skips agents that are not configured — briefing adapts to whatever is connected
+- All agent queries run in parallel via `asyncio.gather()` — fast even with 4 agents
+- Each section capped at 300 characters for a speakable response
+- Voice commands: *"Give me my morning briefing"*, *"Morning summary"*, *"Dashboard status"*, *"What's happening today?"*
 
 ---
 

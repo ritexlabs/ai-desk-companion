@@ -214,6 +214,153 @@ export async function verifySmartHome(
   }
 }
 
+/* ── Portfolio (INDmoney MCP OAuth 2.0 + PKCE) ───────────────────── */
+
+export async function connectPortfolio(
+  portfolio: AgentConfig['portfolio'],
+  patch: Patcher,
+) {
+  const backendBase = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+  let { clientId, clientSecret } = portfolio;
+  const { authEndpoint: manualAuth, tokenEndpoint: manualToken } = portfolio;
+
+  patch('portfolio', { status: 'verifying', info: '' });
+
+  // ── Step 1: auto-register if we don't have a client_id yet ──────────
+  if (!clientId) {
+    try {
+      const redirectUri = window.location.origin + '/';
+      const res = await fetch(`${backendBase}/api/portfolio/oauth/register`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ redirect_uri: redirectUri }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? 'Registration failed');
+      }
+      const reg = await res.json();
+      clientId     = reg.client_id     ?? '';
+      clientSecret = reg.client_secret ?? '';
+      // Persist immediately so the user doesn't need to re-register next time
+      patch('portfolio', { clientId, clientSecret });
+    } catch (e: unknown) {
+      patch('portfolio', {
+        status: 'error',
+        info: (e instanceof Error ? e.message : 'Could not register with INDmoney'),
+      });
+      return;
+    }
+  }
+
+  // ── Step 2: use known endpoints (discovered earlier via curl) ────────
+  const meta = await fetch(`${backendBase}/api/portfolio/oauth/meta`).then(r => r.json()).catch(() => ({}));
+  const authEndpoint  = manualAuth.trim()  || meta.authorization_endpoint  || 'https://mcp.indmoney.com/authorize';
+  const tokenEndpoint = manualToken.trim() || meta.token_endpoint           || 'https://mcp.indmoney.com/token';
+
+  // ── Step 3: PKCE ─────────────────────────────────────────────────────
+  const codeVerifier  = randomBase64url(32);
+  const codeChallenge = await sha256Base64url(codeVerifier);
+  const redirectUri   = window.location.origin + '/';
+  const state         = randomBase64url(16);
+
+  const url = new URL(authEndpoint);
+  url.searchParams.set('client_id',             clientId);
+  url.searchParams.set('redirect_uri',          redirectUri);
+  url.searchParams.set('response_type',         'code');
+  url.searchParams.set('code_challenge',        codeChallenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('scope',                 'portfolio:read market:read');
+  url.searchParams.set('state',                 state);
+
+  // ── Step 4: open OAuth popup ─────────────────────────────────────────
+  const popup = window.open(url.toString(), 'indmoney-oauth', 'width=520,height=640,left=200,top=100');
+
+  const poll = setInterval(async () => {
+    try {
+      if (!popup || popup.closed) { clearInterval(poll); patch('portfolio', { status: 'idle' }); return; }
+      const qs         = new URLSearchParams(popup.location.search);
+      const oauthError = qs.get('error');
+      const code       = qs.get('code');
+
+      if (oauthError) {
+        clearInterval(poll);
+        popup.close();
+        patch('portfolio', { status: 'error', info: qs.get('error_description') ?? oauthError });
+        return;
+      }
+
+      if (!code) return;
+      clearInterval(poll);
+      popup.close();
+
+      // ── Step 5: exchange code for tokens ──────────────────────────────
+      const tokenParams: Record<string, string> = {
+        client_id:     clientId,
+        code,
+        code_verifier: codeVerifier,
+        grant_type:    'authorization_code',
+        redirect_uri:  redirectUri,
+      };
+      if (clientSecret) tokenParams['client_secret'] = clientSecret;
+
+      const tokenRes = await fetch(tokenEndpoint, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body:    new URLSearchParams(tokenParams),
+      });
+      const tokens = await tokenRes.json();
+      if (!tokenRes.ok) {
+        patch('portfolio', { status: 'error', info: tokens.error_description ?? 'Token exchange failed' });
+        return;
+      }
+
+      const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
+      patch('portfolio', {
+        accessToken:      tokens.access_token  ?? '',
+        refreshToken:     tokens.refresh_token ?? '',
+        tokenExpiresAt,
+        connectedAccount: 'INDmoney',
+        status:           'connected',
+        info:             '',
+      });
+    } catch {
+      // Cross-origin frame while popup is still on INDmoney — keep polling
+    }
+  }, 400);
+}
+
+export async function refreshPortfolioToken(
+  portfolio: AgentConfig['portfolio'],
+  patch: Patcher,
+) {
+  const { clientId, clientSecret, refreshToken, tokenEndpoint: manualToken } = portfolio;
+  if (!clientId || !refreshToken) return;
+
+  const token_endpoint = manualToken.trim() || 'https://mcp.indmoney.com/token';
+
+  try {
+    const refreshParams: Record<string, string> = {
+      client_id:     clientId,
+      refresh_token: refreshToken,
+      grant_type:    'refresh_token',
+    };
+    if (clientSecret) refreshParams['client_secret'] = clientSecret;
+
+    const res = await fetch(token_endpoint, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    new URLSearchParams(refreshParams),
+    });
+    const tokens = await res.json();
+    if (!res.ok) return;
+    const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
+    patch('portfolio', { accessToken: tokens.access_token, tokenExpiresAt });
+  } catch {
+    // silent — caller checks tokenExpiresAt to decide next step
+  }
+}
+
 /* ── News API verify (GNews) ─────────────────────────────────────── */
 
 export async function verifyNews(

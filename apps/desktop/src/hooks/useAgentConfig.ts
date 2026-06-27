@@ -21,6 +21,8 @@ import {
   verifyGitHub,
   verifySmartHome,
   verifyNews,
+  connectPortfolio,
+  refreshPortfolioToken,
 } from './agentVerify';
 
 export type ConnectionStatus = 'idle' | 'verifying' | 'connected' | 'error';
@@ -93,6 +95,22 @@ export interface SmartHomeCreds {
   notificationsEnabled: boolean;
 }
 
+export interface PortfolioCreds {
+  enabled:          boolean;
+  endpoint:         string;
+  clientId:         string;
+  clientSecret:     string;
+  /** Manual override — skip auto-discovery when set */
+  authEndpoint:     string;
+  tokenEndpoint:    string;
+  accessToken:      string;
+  refreshToken:     string;
+  tokenExpiresAt:   number;
+  connectedAccount: string;
+  status:           ConnectionStatus;
+  info:             string;
+}
+
 export interface WhatsAppCreds {
   enabled:            boolean;
   phoneNumberId:      string;
@@ -119,6 +137,7 @@ export interface AgentConfig {
   stock:      StockCreds;
   news:       NewsCreds;
   smarthome:  SmartHomeCreds;
+  portfolio:  PortfolioCreds;
   whatsapp:   WhatsAppCreds;
 }
 
@@ -182,6 +201,20 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     info: '',
     notificationsEnabled: false,
   },
+  portfolio: {
+    enabled:          false,
+    endpoint:         'https://mcp.indmoney.com/mcp',
+    clientId:         '',
+    clientSecret:     '',
+    authEndpoint:     '',
+    tokenEndpoint:    '',
+    accessToken:      '',
+    refreshToken:     '',
+    tokenExpiresAt:   0,
+    connectedAccount: '',
+    status:           'idle',
+    info:             '',
+  },
   whatsapp: {
     enabled:            false,
     phoneNumberId:      '',
@@ -210,6 +243,7 @@ function toPersist(cfg: AgentConfig): AgentConfig {
     stock:     { ...cfg.stock,     status: 'idle', info: '' },
     news:      { ...cfg.news,      status: 'idle', info: '' },
     smarthome: { ...cfg.smarthome, status: 'idle', info: '' },
+    portfolio: { ...cfg.portfolio, status: 'idle', info: '', tokenExpiresAt: cfg.portfolio.tokenExpiresAt },
     whatsapp:  {
       ...cfg.whatsapp,
       status:       'idle',
@@ -235,6 +269,7 @@ function load(): AgentConfig {
       stock:     { ...DEFAULT_AGENT_CONFIG.stock,     ...parsed.stock     },
       news:      { ...DEFAULT_AGENT_CONFIG.news,      ...parsed.news      },
       smarthome: { ...DEFAULT_AGENT_CONFIG.smarthome, ...parsed.smarthome },
+      portfolio: { ...DEFAULT_AGENT_CONFIG.portfolio, ...parsed.portfolio },
       whatsapp: {
         ...DEFAULT_AGENT_CONFIG.whatsapp,
         ...(parsed as any).whatsapp,
@@ -248,7 +283,8 @@ function load(): AgentConfig {
     if (cfg.google.connectedEmail)   cfg.google.status    = 'connected';
     if (cfg.github.username)         cfg.github.status    = 'connected';
     if (cfg.news.apiKey)             cfg.news.status      = 'connected';
-    if (cfg.smarthome.token)         cfg.smarthome.status = 'connected';
+    if (cfg.smarthome.token)              cfg.smarthome.status = 'connected';
+    if (cfg.portfolio.connectedAccount)   cfg.portfolio.status = 'connected';
     if (cfg.whatsapp.phoneNumberId)  cfg.whatsapp.status  = 'connected';
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
@@ -289,7 +325,8 @@ export function useAgentConfig() {
     if (config.github.enabled && config.github.username) ids.push('github');
     if (config.stock.enabled) ids.push('stock');
     if (config.news.enabled)  ids.push('news');
-    if (config.smarthome.enabled && config.smarthome.token) ids.push('smarthome');
+    if (config.smarthome.enabled && config.smarthome.token)            ids.push('smarthome');
+    if (config.portfolio.enabled && config.portfolio.connectedAccount) ids.push('portfolio');
     if (config.whatsapp.enabled && config.whatsapp.phoneNumberId) ids.push('whatsapp');
     return ids;
   }, [
@@ -301,6 +338,7 @@ export function useAgentConfig() {
     config.stock.enabled,
     config.news.enabled,
     config.smarthome.enabled, config.smarthome.token,
+    config.portfolio.enabled, config.portfolio.connectedAccount,
     config.whatsapp.enabled,  config.whatsapp.phoneNumberId,
   ]);
 
@@ -400,18 +438,28 @@ export function useAgentConfig() {
     patch('whatsapp', { tunnelStatus: 'idle', tunnelInfo: '', callbackUrl: '' });
   }, [patch]);
 
+  const disconnectPortfolio = useCallback(() => {
+    patch('portfolio', {
+      accessToken: '', refreshToken: '', tokenExpiresAt: 0,
+      connectedAccount: '', status: 'idle', info: '',
+    });
+  }, [patch]);
+
   return {
     config,
     patch,
     registeredAgentIds,
-    verifyWeather:      () => verifyWeather(config.weather, patch),
-    connectGoogle:      () => connectGoogle(config.google, patch),
+    verifyWeather:          () => verifyWeather(config.weather, patch),
+    connectGoogle:          () => connectGoogle(config.google, patch),
     disconnectGoogle,
-    refreshGoogleToken: () => refreshGoogleToken(config.google, patch),
-    verifyGitHub:       () => verifyGitHub(config.github, patch),
+    refreshGoogleToken:     () => refreshGoogleToken(config.google, patch),
+    verifyGitHub:           () => verifyGitHub(config.github, patch),
     disconnectGitHub,
-    verifyNews:         () => verifyNews(config.news, patch),
-    verifySmartHome:    () => verifySmartHome(config.smarthome, patch),
+    verifyNews:             () => verifyNews(config.news, patch),
+    verifySmartHome:        () => verifySmartHome(config.smarthome, patch),
+    connectPortfolio:       () => connectPortfolio(config.portfolio, patch),
+    disconnectPortfolio,
+    refreshPortfolioToken:  () => refreshPortfolioToken(config.portfolio, patch),
     verifyWhatsApp,
     checkTunnelStatus,
     startTunnel,

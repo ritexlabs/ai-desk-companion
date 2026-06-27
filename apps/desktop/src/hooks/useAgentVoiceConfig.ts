@@ -20,9 +20,14 @@ const DEFAULT_AGENT_VOICES: AgentVoiceMap = {
   github:    { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'onyx'    },
   stock:     { gender: 'male',   speed: 'slow',   voiceName: '', openaiVoice: 'fable'   },
   news:      { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'echo'    },
-  smarthome: { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
-  whatsapp:  { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
-  general:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
+  smarthome:  { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
+  portfolio:  { gender: 'male',   speed: 'slow',   voiceName: '', openaiVoice: 'fable'   },
+  whatsapp:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
+  websearch:  { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
+  calculator: { gender: 'male',   speed: 'normal', voiceName: '', openaiVoice: 'echo'    },
+  memory:     { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'shimmer' },
+  briefing:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
+  general:    { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
 };
 
 const STORAGE_KEY = 'robo-agent-voice-config';

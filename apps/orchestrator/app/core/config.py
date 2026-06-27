@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     myhome_mcp_endpoint: str = 'http://homeassistant.local:8123'
     myhome_mcp_token:    str = ''
 
+    # ── Portfolio agent (INDmoney Broker MCP) ──────────────────────────
+    # MCP server — default is INDmoney's public MCP endpoint
+    indmoney_mcp_endpoint: str = 'https://mcp.indmoney.com/mcp'
+    # Bearer token — obtain from your INDmoney account / developer settings
+    indmoney_token: str = ''
+
     # ── WhatsApp agent (Meta Cloud API) ────────────────────────────────
     # phone_number_id: from Meta Developer Console → WhatsApp → API Setup
     # access_token:    permanent system user token or temporary test token (24 h)

@@ -161,7 +161,12 @@ async def _handle_audio_chunk(ws: WebSocket, payload: dict, stt: STTProvider, tt
     await _send(ws, 'transcript_final', {'speaker': 'user', 'text': text})
 
 
-async def _handle_retry_agent(ws: WebSocket, agent_id: str, tts: TTSProvider) -> None:
+async def _handle_retry_agent(
+    ws: WebSocket,
+    agent_id: str,
+    tts: TTSProvider,
+    agent_voices: dict | None = None,
+) -> None:
     label = AGENT_LABELS.get(agent_id, agent_id.title())
     await _send(ws, 'agent_status_changed', {'agent': agent_id, 'status': 'starting'})
     boot_query = AGENT_BOOT_QUERY.get(agent_id, '')
@@ -176,7 +181,11 @@ async def _handle_retry_agent(ws: WebSocket, agent_id: str, tts: TTSProvider) ->
     else:
         status = 'online'
         msg    = f"{label} is ready."
-    await _speak_event(ws, 'boot_status', msg, {'agent_id': agent_id, 'agent_status': status}, tts=tts)
+    await _speak_event(
+        ws, 'boot_status', msg,
+        {'agent_id': agent_id, 'agent_status': status},
+        tts=agent_tts(tts, agent_id, agent_voices),
+    )
     await _send(ws, 'agent_status_changed', {'agent': agent_id, 'status': status})
 
 
@@ -252,6 +261,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     session_tts, session_stt,
                     llm_config, agent_config,
                     assistant_name,
+                    agent_voices=session_agent_voices,
                 )
 
             elif command == 'send_text_command':
@@ -278,7 +288,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             elif command == 'retry_agent':
                 agent_id = payload.get('agent', '')
                 if agent_id:
-                    await _handle_retry_agent(ws, agent_id, session_tts)
+                    await _handle_retry_agent(ws, agent_id, session_tts, session_agent_voices)
 
     except WebSocketDisconnect:
         pass

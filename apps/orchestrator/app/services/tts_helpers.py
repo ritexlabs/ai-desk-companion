@@ -10,16 +10,21 @@ from app.dependencies import (
 # Per-agent OpenAI TTS voice assignments.
 # Only applied when the session TTS provider is OpenAI — gives each agent a distinct voice.
 AGENT_VOICES: dict[str, str] = {
-    'system':    'echo',
-    'weather':   'nova',
-    'calendar':  'shimmer',
-    'email':     'alloy',
-    'github':    'onyx',
-    'stock':     'fable',
-    'news':      'echo',
-    'smarthome': 'alloy',
-    'whatsapp':  'nova',
-    'general':   'nova',
+    'system':     'echo',
+    'weather':    'nova',
+    'calendar':   'shimmer',
+    'email':      'alloy',
+    'github':     'onyx',
+    'stock':      'fable',
+    'news':       'echo',
+    'smarthome':  'alloy',
+    'whatsapp':   'nova',
+    'portfolio':  'fable',
+    'websearch':  'alloy',
+    'calculator': 'echo',
+    'memory':     'shimmer',
+    'briefing':   'nova',
+    'general':    'nova',
 }
 
 

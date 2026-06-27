@@ -205,6 +205,9 @@ export default function App() {
     disconnectGitHub,
     verifyNews,
     verifySmartHome,
+    connectPortfolio,
+    disconnectPortfolio,
+    refreshPortfolioToken,
     verifyWhatsApp,
     checkTunnelStatus,
     startTunnel,
@@ -359,6 +362,9 @@ export default function App() {
         onDisconnectGitHub={disconnectGitHub}
         onVerifyNews={verifyNews}
         onVerifySmartHome={verifySmartHome}
+        onConnectPortfolio={connectPortfolio}
+        onDisconnectPortfolio={disconnectPortfolio}
+        onRefreshPortfolio={refreshPortfolioToken}
         onVerifyWhatsApp={verifyWhatsApp}
         onCheckTunnel={checkTunnelStatus}
         onStartTunnel={startTunnel}

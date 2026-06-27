@@ -33,7 +33,10 @@ interface Props {
   onVerifyGitHub: () => void;
   onDisconnectGitHub: () => void;
   onVerifyNews: () => void;
-  onVerifySmartHome: () => void;
+  onVerifySmartHome:     () => void;
+  onConnectPortfolio:    () => void;
+  onDisconnectPortfolio: () => void;
+  onRefreshPortfolio:    () => void;
   onVerifyWhatsApp: () => void;
   onCheckTunnel: () => Promise<boolean>;
   onStartTunnel: () => void;
@@ -161,6 +164,9 @@ export function SettingsPanel(props: Props) {
                       onDisconnectGitHub={props.onDisconnectGitHub}
                       onVerifyNews={props.onVerifyNews}
                       onVerifySmartHome={props.onVerifySmartHome}
+                      onConnectPortfolio={props.onConnectPortfolio}
+                      onDisconnectPortfolio={props.onDisconnectPortfolio}
+                      onRefreshPortfolio={props.onRefreshPortfolio}
                       onVerifyWhatsApp={props.onVerifyWhatsApp}
                       onCheckTunnel={props.onCheckTunnel}
                       onStartTunnel={props.onStartTunnel}

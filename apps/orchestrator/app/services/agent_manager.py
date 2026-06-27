@@ -33,6 +33,10 @@ def _env_agent_defaults() -> dict:
             'endpoint': settings.myhome_mcp_endpoint,
             'token':    settings.myhome_mcp_token,
         },
+        'portfolio': {
+            'endpoint':     settings.indmoney_mcp_endpoint,
+            'access_token': settings.indmoney_token,
+        },
         'whatsapp': {
             'phone_number_id':      settings.whatsapp_phone_number_id,
             'access_token':         settings.whatsapp_access_token,
@@ -113,8 +117,10 @@ class AgentManager:
         self._session_calling_name  = calling_name    or 'Master'
         self._session_assistant_name = assistant_name or 'Robo'
         agents = list(enabled_agents or [])
-        if 'general' not in agents:
-            agents.append('general')
+        # Auto-add built-in skills and general AI if not already present
+        for always_on in ('websearch', 'calculator', 'memory', 'briefing', 'general'):
+            if always_on not in agents:
+                agents.append(always_on)
         self._session_enabled_agents = agents
 
     def clear_session(self) -> None:

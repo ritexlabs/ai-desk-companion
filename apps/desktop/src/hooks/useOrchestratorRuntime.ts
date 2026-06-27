@@ -26,7 +26,13 @@ const AGENT_CATALOGUE: AgentDefinition[] = [
   { id: 'stock',    label: 'Stock Market',    description: 'Prices, RSI, support/resistance.', example: 'What is the Nifty 50 price?',      status: 'offline', color: 'from-green-400 to-emerald-500'  },
   { id: 'news',     label: 'News',            description: 'Latest headlines by location.',    example: 'What are the top headlines?',      status: 'offline', color: 'from-sky-400 to-blue-500'       },
   { id: 'smarthome', label: 'Smart Home',     description: 'Control lights, switches, climate, scenes.', example: 'Turn on the living room lights.', status: 'offline', color: 'from-orange-400 to-amber-500' },
-  { id: 'whatsapp',  label: 'WhatsApp',       description: 'Send and receive WhatsApp messages by voice.', example: 'Send WhatsApp to Mom saying hello.', status: 'offline', color: 'from-green-400 to-emerald-600' },
+  { id: 'whatsapp',    label: 'WhatsApp',    description: 'Send and receive WhatsApp messages by voice.', example: 'Send WhatsApp to Mom saying hello.', status: 'offline', color: 'from-green-400 to-emerald-600' },
+  { id: 'portfolio',   label: 'Portfolio',   description: 'View holdings, P&L, mutual funds via INDmoney.', example: 'Show my portfolio holdings.', status: 'offline', color: 'from-rose-400 to-pink-600' },
+  // ── Built-in skills (always enabled) ──────────────────────────────────────
+  { id: 'websearch',  label: 'Web Search',  description: 'Live web search via DuckDuckGo — no API key.',  example: 'Search the web for latest iPhone specs.', status: 'offline', color: 'from-blue-400 to-indigo-600'  },
+  { id: 'calculator', label: 'Calculator',  description: 'Precise math, percentages, tip and unit calc.', example: 'What is 18% tip on 850?',               status: 'offline', color: 'from-amber-400 to-orange-600' },
+  { id: 'memory',     label: 'Memory',      description: 'Save and recall personal notes any time.',       example: 'Remember wife birthday is March 5.',    status: 'offline', color: 'from-purple-400 to-violet-600' },
+  { id: 'briefing',   label: 'Briefing',    description: 'Morning summary across all connected agents.',   example: 'Give me my morning briefing.',           status: 'offline', color: 'from-cyan-400 to-teal-600'    },
 ];
 
 function agentsFromIds(ids: string[]): AgentDefinition[] {

@@ -23,6 +23,9 @@ node_modules/
 apps/desktop/dist/
 apps/desktop/.vite/
 
+# ── Runtime data (user-generated, never commit) ───────────────────────────────
+apps/orchestrator/data/
+
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store
 .idea/

@@ -9,7 +9,10 @@
       "Bash(python3 scripts/gen_tests.py --list)",
       "Bash(bash scripts/test.sh)",
       "Bash(.venv/bin/python3 -m py_compile app/api/ws.py app/services/agent_manager.py app/services/orchestrator.py app/services/session.py app/services/tts_helpers.py app/agents/general_ai.py)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "Bash(python3 -m py_compile app/agents/websearch.py app/agents/calculator.py app/agents/memory.py app/agents/briefing.py app/agents/registry.py app/services/session.py app/services/agent_manager.py app/services/tts_helpers.py app/services/router.py)",
+      "Bash(python3 -m py_compile app/services/session.py app/api/ws.py)",
+      "Bash(python3 -m py_compile app/services/session.py)"
     ],
     "additionalDirectories": [
       "/tmp"

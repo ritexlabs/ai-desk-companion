@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home, MessageCircle, Loader2, RotateCw } from 'lucide-react';
+import { Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home, MessageCircle, Globe, Calculator, Brain, Layers, PieChart, Loader2, RotateCw } from 'lucide-react';
 import type { AgentDefinition } from '../types/runtime';
 
 const AGENT_META: Record<
@@ -77,6 +77,46 @@ const AGENT_META: Record<
     bg: 'bg-green-400/10',
     glow: 'shadow-green-400/25',
     dot: 'bg-green-400',
+  },
+  portfolio: {
+    icon: <PieChart className="h-3.5 w-3.5" />,
+    text: 'text-rose-400',
+    border: 'border-rose-400/35',
+    bg: 'bg-rose-400/10',
+    glow: 'shadow-rose-400/25',
+    dot: 'bg-rose-400',
+  },
+  websearch: {
+    icon: <Globe className="h-3.5 w-3.5" />,
+    text: 'text-blue-400',
+    border: 'border-blue-400/35',
+    bg: 'bg-blue-400/10',
+    glow: 'shadow-blue-400/25',
+    dot: 'bg-blue-400',
+  },
+  calculator: {
+    icon: <Calculator className="h-3.5 w-3.5" />,
+    text: 'text-amber-400',
+    border: 'border-amber-400/35',
+    bg: 'bg-amber-400/10',
+    glow: 'shadow-amber-400/25',
+    dot: 'bg-amber-400',
+  },
+  memory: {
+    icon: <Brain className="h-3.5 w-3.5" />,
+    text: 'text-purple-400',
+    border: 'border-purple-400/35',
+    bg: 'bg-purple-400/10',
+    glow: 'shadow-purple-400/25',
+    dot: 'bg-purple-400',
+  },
+  briefing: {
+    icon: <Layers className="h-3.5 w-3.5" />,
+    text: 'text-cyan-400',
+    border: 'border-cyan-400/35',
+    bg: 'bg-cyan-400/10',
+    glow: 'shadow-cyan-400/25',
+    dot: 'bg-cyan-400',
   },
 };
 

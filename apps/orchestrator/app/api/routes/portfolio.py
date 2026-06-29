@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import re
-from urllib.parse import urlparse
-
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from app.services.indmoney_mcp import get_indmoney_client, clear_client
+from app.services import indmoney_mcp
 
 router = APIRouter(prefix='/api/portfolio', tags=['portfolio'])
 
@@ -91,15 +88,44 @@ async def oauth_register(redirect_uri: str = Body(..., embed=True)):
 
 
 @router.get('/ping')
-async def ping(
-    token:    str = Query(..., description='INDmoney OAuth access token'),
-    endpoint: str = Query(_DEFAULT_ENDPOINT, description='MCP server endpoint'),
-):
+async def ping(token: str = Query(..., description='INDmoney OAuth access token')):
     """Verify connectivity to the INDmoney MCP server with an OAuth access token."""
-    clear_client(token, endpoint)
+    indmoney_mcp.clear_cache(_DEFAULT_ENDPOINT, token)
     try:
-        client = get_indmoney_client(endpoint, token)
-        status = await client.ping()
-        return {'ok': True, 'detail': status}
+        tools = await indmoney_mcp.list_tools(_DEFAULT_ENDPOINT, token, force=True)
+        n = len(tools)
+        return {'ok': True, 'detail': f'Connected — {n} tool{"s" if n != 1 else ""} available'}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200])
+
+
+@router.get('/summary')
+async def portfolio_summary(token: str = Query(..., description='INDmoney OAuth access token')):
+    """Fetch portfolio summary / net-worth data via INDmoney MCP."""
+    try:
+        tools = await indmoney_mcp.list_tools(_DEFAULT_ENDPOINT, token)
+        tool_map = {t['name'].lower(): t['name'] for t in tools}
+
+        for keyword in ['networth', 'net_worth', 'summary', 'overview', 'portfolio', 'holding']:
+            matched = next(
+                (real for lower, real in tool_map.items() if keyword in lower),
+                None,
+            )
+            if matched:
+                data = await indmoney_mcp.call_tool(_DEFAULT_ENDPOINT, token, matched)
+                return {
+                    'ok':              True,
+                    'tool':            matched,
+                    'data':            data,
+                    'available_tools': [t['name'] for t in tools],
+                }
+
+        return {
+            'ok':              False,
+            'detail':          'No summary tool available',
+            'available_tools': [t['name'] for t in tools],
+        }
+    except PermissionError:
+        raise HTTPException(status_code=401, detail='Access token expired. Please reconnect in Settings.')
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc)[:200])

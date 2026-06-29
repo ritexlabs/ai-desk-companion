@@ -30,7 +30,8 @@ const COLORS: Record<string, { text: string; border: string; bg: string; dot: st
   github:   { text: 'text-amber-300',   border: 'border-amber-400/30',   bg: 'bg-amber-400/8',   dot: 'bg-amber-400',   glow: 'rgba(251,191,36,0.12)' },
   stock:    { text: 'text-green-300',   border: 'border-green-400/30',   bg: 'bg-green-400/8',   dot: 'bg-green-400',   glow: 'rgba(74,222,128,0.12)' },
   news:     { text: 'text-sky-300',     border: 'border-sky-400/30',     bg: 'bg-sky-400/8',     dot: 'bg-sky-400',     glow: 'rgba(56,189,248,0.12)' },
-  smarthome:{ text: 'text-orange-300',  border: 'border-orange-400/30',  bg: 'bg-orange-400/8',  dot: 'bg-orange-400',  glow: 'rgba(251,146,60,0.12)' },
+  smarthome:{ text: 'text-orange-300',  border: 'border-orange-400/30',  bg: 'bg-orange-400/8',  dot: 'bg-orange-400',  glow: 'rgba(251,146,60,0.12)'  },
+  portfolio:{ text: 'text-teal-300',    border: 'border-teal-400/30',    bg: 'bg-teal-400/8',    dot: 'bg-teal-400',    glow: 'rgba(20,184,166,0.12)'  },
   general:  { text: 'text-violet-300',  border: 'border-violet-400/30',  bg: 'bg-violet-400/8',  dot: 'bg-violet-400',  glow: 'rgba(167,139,250,0.12)' },
 };
 

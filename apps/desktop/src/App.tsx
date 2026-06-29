@@ -4,6 +4,7 @@ import {
   Activity,
   AlertTriangle,
   BarChart2,
+  Briefcase,
   Calendar,
   Cloud,
   Cpu,
@@ -26,6 +27,7 @@ import { WaveVisualizer } from './components/WaveVisualizer';
 import { AgentBootList } from './components/AgentBootList';
 import { AgentDetailModal } from './components/AgentDetailModal';
 import { SmartHomeDashboard } from './components/SmartHomeDashboard';
+import { PortfolioDashboard } from './components/PortfolioDashboard';
 import { ParticleField } from './components/ParticleField';
 import { TypingText } from './components/TypingText';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -185,6 +187,8 @@ const AGENT_PILL_META: Record<string, { icon: LucideIcon; text: string; bg: stri
   stock:     { icon: TrendingUp, text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
   news:      { icon: Newspaper,  text: 'text-sky-400',     bg: 'bg-sky-400/10',     border: 'border-sky-400/20' },
   smarthome: { icon: Home,       text: 'text-orange-400',  bg: 'bg-orange-400/10',  border: 'border-orange-400/20' },
+  portfolio: { icon: Briefcase,  text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
+  whatsapp:  { icon: Send,       text: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/20' },
   general:   { icon: Zap,        text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
 };
 
@@ -226,7 +230,7 @@ export default function App() {
     disconnect: disconnectProviders,
   } = useVoiceProviderConfig();
   const { agentVoices, updateAgentVoice, resetAgentVoice } = useAgentVoiceConfig();
-  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken, agentVoices);
+  const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken, agentVoices, refreshPortfolioToken);
   const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -282,10 +286,15 @@ export default function App() {
   const onlineAgents = rt.agents.filter((a) => a.id !== 'system' && a.status === 'online');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const selectedAgent = selectedAgentId ? rt.agents.find((a) => a.id === selectedAgentId) : null;
-  const [smartHomeDashboardOpen, setSmartHomeDashboardOpen] = useState(false);
+  const [smartHomeDashboardOpen,  setSmartHomeDashboardOpen]  = useState(false);
+  const [portfolioDashboardOpen, setPortfolioDashboardOpen] = useState(false);
 
   const handleAgentClick = (agentId: string) => {
-    setSelectedAgentId(agentId);
+    if (agentId === 'portfolio') {
+      setPortfolioDashboardOpen(true);
+    } else {
+      setSelectedAgentId(agentId);
+    }
   };
 
   return (
@@ -993,6 +1002,21 @@ export default function App() {
             onClose={() => setSmartHomeDashboardOpen(false)}
             onVoice={(text) => {
               setSmartHomeDashboardOpen(false);
+              rt.ask(text);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Portfolio dashboard modal */}
+      <AnimatePresence>
+        {portfolioDashboardOpen && (
+          <PortfolioDashboard
+            token={agentConfig.portfolio.accessToken}
+            backendBase={import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787'}
+            onClose={() => setPortfolioDashboardOpen(false)}
+            onVoice={(text) => {
+              setPortfolioDashboardOpen(false);
               rt.ask(text);
             }}
           />

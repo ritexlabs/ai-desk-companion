@@ -12,7 +12,14 @@
       "Bash(git show *)",
       "Bash(python3 -m py_compile app/agents/websearch.py app/agents/calculator.py app/agents/memory.py app/agents/briefing.py app/agents/registry.py app/services/session.py app/services/agent_manager.py app/services/tts_helpers.py app/services/router.py)",
       "Bash(python3 -m py_compile app/services/session.py app/api/ws.py)",
-      "Bash(python3 -m py_compile app/services/session.py)"
+      "Bash(python3 -m py_compile app/services/session.py)",
+      "Bash(curl -s http://127.0.0.1:8080/)",
+      "Bash(curl -s https://raw.githubusercontent.com/punkpeye/awesome-mcp-servers/main/README.md)",
+      "Bash(curl -s \"https://registry.modelcontextprotocol.io/\")",
+      "Bash(curl -s https://api.github.com/search/repositories?q=\"mcp-server\" \"github\" language:typescript sort:stars)",
+      "Bash(curl -s https://raw.githubusercontent.com/modelcontextprotocol/servers/main/README.md)",
+      "Bash(curl -s \"https://api.github.com/repos/modelcontextprotocol/servers/contents/src\")",
+      "Bash(curl -s \"https://raw.githubusercontent.com/modelcontextprotocol/servers-archived/main/src/github/README.md\")"
     ],
     "additionalDirectories": [
       "/tmp"

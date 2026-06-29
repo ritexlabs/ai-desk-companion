@@ -318,7 +318,7 @@ export function useAgentConfig() {
     const ids: string[] = [];
     if (config.system.enabled)  ids.push('system');
     if (config.weather.enabled) ids.push('weather');
-    if (config.google.connectedEmail) {
+    if (config.google.connectedEmail && config.google.accessToken) {
       if (config.google.calendarEnabled && config.google.scopes.includes('calendar')) ids.push('calendar');
       if (config.google.emailEnabled    && config.google.scopes.includes('gmail'))    ids.push('email');
     }
@@ -332,8 +332,8 @@ export function useAgentConfig() {
   }, [
     config.system.enabled,
     config.weather.enabled,
-    config.google.connectedEmail, config.google.calendarEnabled,
-    config.google.emailEnabled,   config.google.scopes,
+    config.google.connectedEmail, config.google.accessToken,
+    config.google.calendarEnabled, config.google.emailEnabled, config.google.scopes,
     config.github.enabled,        config.github.username,
     config.stock.enabled,
     config.news.enabled,
@@ -440,8 +440,9 @@ export function useAgentConfig() {
 
   const disconnectPortfolio = useCallback(() => {
     patch('portfolio', {
-      accessToken: '', refreshToken: '', tokenExpiresAt: 0,
+      enabled: false, accessToken: '', refreshToken: '', tokenExpiresAt: 0,
       connectedAccount: '', status: 'idle', info: '',
+      clientId: '', clientSecret: '',
     });
   }, [patch]);
 

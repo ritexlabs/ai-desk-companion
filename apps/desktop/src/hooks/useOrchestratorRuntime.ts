@@ -93,6 +93,7 @@ export function useOrchestratorRuntime(
   agentConfig?: AgentConfig,
   refreshGoogleToken?: () => Promise<void>,
   agentVoiceConfig?: AgentVoiceMap,
+  refreshPortfolioToken?: () => Promise<void>,
 ) {
   const wakeWord      = appConfig?.wakeWord      ?? 'Robo';
   const callingName   = appConfig?.callingName   ?? 'Master';
@@ -146,6 +147,10 @@ export function useOrchestratorRuntime(
   llmConfigRef.current     = llmConfig;
   const agentConfigRef     = useRef(agentConfig);
   agentConfigRef.current   = agentConfig;
+  const refreshGoogleTokenRef = useRef(refreshGoogleToken);
+  refreshGoogleTokenRef.current = refreshGoogleToken;
+  const refreshPortfolioTokenRef = useRef(refreshPortfolioToken);
+  refreshPortfolioTokenRef.current = refreshPortfolioToken;
   const orchestratorCapsRef = useRef<OrchestratorCaps>({ tts: false, stt: false, wakeWord: false });
 
   /* ── TTS serial queue ───────────────────────────────────────────── */
@@ -569,16 +574,30 @@ export function useOrchestratorRuntime(
       const llm = llmConfigRef.current;
       let ac  = agentConfigRef.current;
 
-      // Refresh Google token silently before boot if it has expired or expires within 90 s.
-      // This prevents the Calendar/Email agents from getting a stale token on every cold start.
+      // Refresh Google and Portfolio tokens silently before boot if expired or expiring within 90 s.
+      // Uses refs so the callback always calls the latest version, not a stale closure.
+      const refreshes: Promise<void>[] = [];
       if (
-        refreshGoogleToken &&
+        refreshGoogleTokenRef.current &&
         ac?.google.accessToken &&
         ac.google.tokenExpiresAt > 0 &&
         ac.google.tokenExpiresAt < Date.now() + 90_000
       ) {
-        await refreshGoogleToken();
-        ac = agentConfigRef.current; // re-read after refresh so start_session gets the new token
+        refreshes.push(refreshGoogleTokenRef.current());
+      }
+      if (
+        refreshPortfolioTokenRef.current &&
+        ac?.portfolio.refreshToken &&
+        ac.portfolio.tokenExpiresAt > 0 &&
+        ac.portfolio.tokenExpiresAt < Date.now() + 90_000
+      ) {
+        refreshes.push(refreshPortfolioTokenRef.current());
+      }
+      if (refreshes.length > 0) {
+        await Promise.allSettled(refreshes);
+        // Yield to event loop so React can flush the patch() state updates before we read the ref
+        await pause(50);
+        ac = agentConfigRef.current;
       }
 
       wsSend('start_session', {
@@ -633,6 +652,10 @@ export function useOrchestratorRuntime(
           smarthome: {
             endpoint: ac.smarthome.endpoint,
             token:    ac.smarthome.token,
+          },
+          portfolio: {
+            endpoint:     ac.portfolio.endpoint,
+            access_token: ac.portfolio.accessToken,
           },
           whatsapp: {
             phone_number_id:      ac.whatsapp.phoneNumberId,
@@ -804,7 +827,9 @@ export function useOrchestratorRuntime(
       if (phaseRef.current !== 'ready' || !voiceEnabledRef.current || !autoListenRef.current) return;
       const cmd = pendingCmdRef.current;
       pendingCmdRef.current = null;
-      askRef.current(cmd ?? undefined);
+      // Pass '' (not undefined) when no pending command so ask() opens the mic
+      // instead of submitting whatever the user has typed in the input field.
+      askRef.current(cmd ?? '');
     }, 300); // 300 ms gap lets TTS settle before mic opens
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -317,6 +317,7 @@ export async function connectPortfolio(
 
       const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
       patch('portfolio', {
+        enabled:          true,
         accessToken:      tokens.access_token  ?? '',
         refreshToken:     tokens.refresh_token ?? '',
         tokenExpiresAt,
@@ -335,16 +336,16 @@ export async function refreshPortfolioToken(
   patch: Patcher,
 ) {
   const { clientId, clientSecret, refreshToken, tokenEndpoint: manualToken } = portfolio;
-  if (!clientId || !refreshToken) return;
+  if (!refreshToken) return;
 
   const token_endpoint = manualToken.trim() || 'https://mcp.indmoney.com/token';
 
   try {
     const refreshParams: Record<string, string> = {
-      client_id:     clientId,
       refresh_token: refreshToken,
       grant_type:    'refresh_token',
     };
+    if (clientId)     refreshParams['client_id']     = clientId;
     if (clientSecret) refreshParams['client_secret'] = clientSecret;
 
     const res = await fetch(token_endpoint, {

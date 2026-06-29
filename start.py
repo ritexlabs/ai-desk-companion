@@ -179,11 +179,19 @@ def setup_orchestrator(py_exe: str) -> None:
     else:
         ok(f'Virtual environment ready  {dim(str(VENV))}')
 
-    # Check if uvicorn (proxy for all deps) is installed
-    if not VENV_UV.exists():
+    # Check if uvicorn is importable via our venv's Python.
+    # We always use "python -m pip" and "python -m uvicorn" so that our venv's
+    # own python binary is used (the script wrappers in .venv/bin/ may have
+    # stale shebangs pointing to an unrelated path on the developer's machine).
+    r = subprocess.run(
+        [str(VENV_PY), '-c', 'import uvicorn'],
+        capture_output=True,
+    )
+    if r.returncode != 0:
         step('Installing orchestrator dependencies')
         subprocess.run(
-            [str(VENV_PIP), 'install', '-r', str(ORCHESTRATOR / 'requirements.txt'), '-q'],
+            [str(VENV_PY), '-m', 'pip', 'install',
+             '-r', str(ORCHESTRATOR / 'requirements.txt'), '-q'],
             check=True,
         )
         ok('Orchestrator dependencies installed')
@@ -266,7 +274,7 @@ def start_orchestrator() -> subprocess.Popen:
     env = {'PYTHONUNBUFFERED': '1'}
     # Add .env to the process environment (uvicorn will load it via pydantic-settings)
     return launch(
-        [str(VENV_UV), 'app.main:app', '--host', '0.0.0.0',
+        [str(VENV_PY), '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0',
          '--port', str(BACKEND_PORT), '--reload', '--log-level', 'warning'],
         cwd=ORCHESTRATOR,
         tag=ORCH_TAG,

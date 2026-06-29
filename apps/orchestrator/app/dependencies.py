@@ -2,7 +2,7 @@ from app.services.agent_manager import AgentManager
 from app.services.event_bus import EventBus
 from app.services.router import IntentRouter
 from app.services.auth import AuthManager
-from app.services.mcp import MCPManager
+from app.services.gateway_client import GatewayClient
 from app.voice.stt import STTProvider, BrowserSTTProvider, OpenAISTTProvider
 from app.voice.tts import TTSProvider, BrowserTTSProvider, OpenAITTSProvider, ElevenLabsTTSProvider
 from app.voice.wake_word import wake_word_service
@@ -32,6 +32,6 @@ agent_manager   = AgentManager()
 event_bus       = EventBus()
 router_service  = IntentRouter()
 auth_manager    = AuthManager()
-mcp_manager     = MCPManager()
+gateway_client  = GatewayClient(settings.gateway_url)
 tts_provider: TTSProvider = _build_tts()
 stt_provider: STTProvider = _build_stt()

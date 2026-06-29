@@ -23,14 +23,25 @@ python start.py           # Windows
 ```
 
 The launcher:
-1. Creates a Python virtual environment in `apps/orchestrator/.venv`
-2. Installs Python dependencies from `requirements.txt`
-3. Runs `npm install` in `apps/desktop`
-4. Starts both services and opens the browser
+1. Creates a Python virtual environment in `apps/mcp-gateway/.venv`
+2. Installs MCP Gateway Python dependencies from `apps/mcp-gateway/requirements.txt`
+3. Creates a Python virtual environment in `apps/orchestrator/.venv`
+4. Installs orchestrator Python dependencies from `apps/orchestrator/requirements.txt`
+5. Runs `npm install` in `apps/desktop`
+6. Starts all three services (gateway → orchestrator → desktop) and opens the browser
 
-### Manual setup (two terminals)
+### Manual setup (three terminals)
 
-**Terminal 1 — Orchestrator**
+**Terminal 1 — MCP Gateway**
+```bash
+cd apps/mcp-gateway
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8788
+```
+
+**Terminal 2 — Orchestrator**
 ```bash
 cd apps/orchestrator
 python3 -m venv .venv
@@ -40,7 +51,7 @@ cp .env.sample .env              # then edit with your keys
 uvicorn app.main:app --reload --port 8787
 ```
 
-**Terminal 2 — Desktop UI**
+**Terminal 3 — Desktop UI**
 ```bash
 cd apps/desktop
 npm install
@@ -92,10 +103,6 @@ cd apps/orchestrator
 
 | Module | File | Tests |
 |--------|------|-------|
-| WeatherAgent | `test_agents/test_weather.py` | 17 — `_extract_city`, OWM, WeatherAPI, Open-Meteo, 401/404 |
-| SystemAgent | `test_agents/test_system.py` | 13 — boot format, metrics fields, battery, top-procs |
-| GitHubAgent | `test_agents/test_github.py` | 11 — no token, routing (PR/workflow/notification/issue), 401/403 |
-| NewsAgent | `test_agents/test_news.py` | 20 — `_extract_topic`, boot, headlines, topic search, API errors |
 | session.py | `test_services/test_session.py` | 26 — `strip_agent_prefix`, `is_agent_error`, `make_greeting`, `pick_farewell` |
 | tts_helpers.py | `test_services/test_tts_helpers.py` | 10 — `settings_label`, `agent_tts` voice assignment |
 | agent_manager.py | `test_services/test_agent_manager.py` | 20 — `_merge`, `_merge_llm`, configure/clear, `llm_configured` |
@@ -142,11 +149,30 @@ Stubs are created in `tests/test_agents/` or `tests/test_services/` matching the
 
 ---
 
-## Adding a New Agent
+## Adding a New Service
 
-Follow these eight steps in order. Each one is required — skipping any causes the agent to be invisible in the roster, missing from voice config, or silently ignored by the router.
+There are two cases depending on where the service runs.
 
-### Step 1 — Backend Python class
+### Case A — New MCP Gateway tool (recommended for external APIs)
+
+This is the right path for services like stocks, weather, news, GitHub — any service that makes HTTP calls to an external API. No orchestrator changes needed.
+
+See the full guide: [docs/mcp-gateway.md](mcp-gateway.md)
+
+**Short version — 4 steps:**
+
+1. Create `apps/mcp-gateway/app/servers/myservice_server.py` implementing `BaseMCPServer` (see any existing server as a template).
+2. Register it in `apps/mcp-gateway/app/main.py` → `_register_servers()`.
+3. Add its credential key to `apps/orchestrator/app/services/agent_manager.py` → `_session_credentials()`.
+4. Add the frontend credential field in `apps/desktop/src/hooks/useAgentConfig.ts` and a settings panel.
+
+The LLM discovers the tool automatically from its description. No keyword rules, no boot query, no agent class.
+
+### Case B — New local agent (for agents that need persistent connections or side-channel webhooks)
+
+Use this for agents like Smart Home (Docker subprocess) or WhatsApp (webhook receiver). Follow these steps in order — skipping any makes the agent invisible in the roster or silently ignored by the router.
+
+#### Step 1 — Backend Python class
 
 Create `apps/orchestrator/app/agents/<name>.py`:
 
@@ -155,9 +181,9 @@ from app.agents.base import AssistantAgent
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, AgentStatus
 
 class MyAgent(AssistantAgent):
-    id         = 'myagent'        # unique snake_case — used everywhere as the key
-    name       = 'My Agent'       # display label
-    config_key = 'myagent'        # matches key in agent_config dict; set None if no credentials
+    id         = 'myagent'
+    name       = 'My Agent'
+    config_key = 'myagent'   # key in agent_config dict; None if no credentials
     tool_meta  = {
         'description': 'One sentence describing what this agent can answer.',
         'query_hint':  'The user query passed to this tool.',
@@ -171,26 +197,26 @@ class MyAgent(AssistantAgent):
 
 Use `request.context['agent_config']` for credentials and `request.context['llm_config']` for LLM access.
 
-### Step 2 — Register
+#### Step 2 — Register
 
 `apps/orchestrator/app/agents/registry.py` — add `MyAgent` to the `AGENTS` list.
 
-### Step 3 — Keyword routing
+#### Step 3 — Keyword routing
 
 `apps/orchestrator/app/services/router.py` → `_keyword_route()` — add keyword patterns that route to `'myagent'`.
 
-### Step 4 — Boot labels + health query
+#### Step 4 — Boot labels + health query
 
 `apps/orchestrator/app/services/session.py`:
 
 ```python
 AGENT_LABELS['myagent']     = 'My Agent'
-AGENT_BOOT_QUERY['myagent'] = 'boot'   # any string triggers a health check on session start
+AGENT_BOOT_QUERY['myagent'] = '__boot__'   # triggers health check on session start
 ```
 
-Omit `AGENT_BOOT_QUERY` entry if the agent needs no meaningful health check.
+Omit `AGENT_BOOT_QUERY` entry if no health check is needed.
 
-### Step 5 — Default OpenAI TTS voice
+#### Step 5 — Default OpenAI TTS voice
 
 `apps/orchestrator/app/services/tts_helpers.py` → `AGENT_VOICES`:
 
@@ -198,7 +224,7 @@ Omit `AGENT_BOOT_QUERY` entry if the agent needs no meaningful health check.
 AGENT_VOICES['myagent'] = 'nova'   # alloy | echo | fable | nova | onyx | shimmer
 ```
 
-### Step 6 — Frontend roster catalogue
+#### Step 6 — Frontend roster catalogue
 
 `apps/desktop/src/hooks/useOrchestratorRuntime.ts` → `AGENT_CATALOGUE`:
 
@@ -207,9 +233,7 @@ AGENT_VOICES['myagent'] = 'nova'   # alloy | echo | fable | nova | onyx | shimme
   example: 'Ask me about X', status: 'offline', color: 'from-X-400 to-Y-500' }
 ```
 
-The roster panel (left column) shows/hides, enables/disables, and displays boot status for every entry here automatically.
-
-### Step 7 — Default per-agent browser voice
+#### Step 7 — Default per-agent browser voice
 
 `apps/desktop/src/hooks/useAgentVoiceConfig.ts` → `DEFAULT_AGENT_VOICES`:
 
@@ -217,11 +241,9 @@ The roster panel (left column) shows/hides, enables/disables, and displays boot 
 myagent: { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova' },
 ```
 
-Users can override any field in **Settings → Agents → My Agent → Voice**.
+#### Step 8 — Settings accordion + credentials
 
-### Step 8 — Settings accordion + credentials
-
-**If the agent has credentials**, create `apps/desktop/src/components/settings/MyAgentSettings.tsx` (see any existing settings component as a template) and add `myagent` to `AgentConfig` in `useAgentConfig.ts`.
+If the agent has credentials, create `apps/desktop/src/components/settings/MyAgentSettings.tsx` and add `myagent` to `AgentConfig` in `useAgentConfig.ts`.
 
 Then in `apps/desktop/src/components/settings/AgentsSettings.tsx`:
 
@@ -237,10 +259,6 @@ Then in `apps/desktop/src/components/settings/AgentsSettings.tsx`:
   {voiceRow('myagent', 'My Agent')}
 </AgentAccordion>
 ```
-
-`voiceRow(id, label)` is a helper already defined in `AgentsSettings.tsx` — it renders the full gender/speed/OpenAI/browser voice config row with reset and test buttons.
-
-**Enable/disable flow:** The accordion toggle calls `onPatch` → `useAgentConfig` → `registeredAgentIds` (computed from all enabled agents) → sent to backend as `registered_agents` in `start_session` → backend only boots and routes to listed agents.
 
 ---
 
@@ -286,37 +304,41 @@ ai-desk-companion/
 │   ├── desktop/
 │   │   ├── src/
 │   │   │   ├── __tests__/        Unit tests (vitest)
-│   │   │   │   ├── hooks/        agentVerify.test.ts, voiceLoop.patterns.test.ts
-│   │   │   │   └── lib/          utils.test.ts
 │   │   │   ├── components/       UI components (RobotAvatar, AgentBootList, …)
-│   │   │   │   └── settings/     Per-module settings panels (12 components)
+│   │   │   │   └── settings/     Per-module settings panels
 │   │   │   ├── hooks/            React hooks (useOrchestratorRuntime, useVoiceLoop, …)
 │   │   │   ├── types/            Shared TypeScript types (runtime.ts)
 │   │   │   └── App.tsx           Root component
 │   │   ├── src-tauri/            Tauri native wrapper (Rust)
 │   │   ├── vitest.config.ts      Vitest configuration
 │   │   └── package.json
-│   └── orchestrator/
+│   ├── orchestrator/
+│   │   ├── app/
+│   │   │   ├── agents/           Local agent implementations (smarthome, whatsapp, built-in skills)
+│   │   │   ├── api/              FastAPI routes and WebSocket endpoint (ws.py)
+│   │   │   ├── core/             Config and settings (reads .env)
+│   │   │   ├── models/           Pydantic contracts
+│   │   │   └── services/         LLM, TTS, STT, routing, gateway client, session
+│   │   ├── tests/                Pytest test suite
+│   │   │   ├── conftest.py       Shared fixtures
+│   │   │   ├── test_services/    Service-layer tests
+│   │   │   └── test_api/         API / security tests
+│   │   ├── .env.sample           Template — copy to .env and fill in keys
+│   │   ├── pytest.ini            Pytest configuration
+│   │   ├── requirements.txt      Runtime dependencies
+│   │   └── requirements-dev.txt  Test-only dependencies
+│   └── mcp-gateway/
 │       ├── app/
-│       │   ├── agents/           Individual agent implementations
-│       │   ├── api/              FastAPI routes and WebSocket endpoint (ws.py)
-│       │   ├── core/             Config and settings (reads .env)
-│       │   ├── models/           Pydantic contracts
-│       │   └── services/         LLM, TTS, STT, routing, metrics
-│       ├── tests/                Pytest test suite
-│       │   ├── conftest.py       Shared fixtures
-│       │   ├── test_agents/      Per-agent tests
-│       │   ├── test_services/    Service-layer tests
-│       │   └── test_api/         API / security tests
-│       ├── .env.sample           Template — copy to .env and fill in keys
-│       ├── pytest.ini            Pytest configuration
-│       ├── requirements.txt      Runtime dependencies
-│       └── requirements-dev.txt  Test-only dependencies
+│       │   ├── main.py           FastAPI app (/health /tools /tools/{name})
+│       │   ├── aggregator.py     MCPAggregator — register, merge, route
+│       │   ├── config.py         GatewaySettings
+│       │   └── servers/          BaseMCPServer + 7 server adapters
+│       └── requirements.txt
 ├── docs/                         All documentation
 ├── scripts/
 │   ├── test.sh                   Master test runner (backend + frontend + report)
 │   └── gen_tests.py              Auto-generate test stubs for new modules
-├── start.py                      Cross-platform dev launcher
+├── start.py                      Cross-platform dev launcher (3 services)
 ├── start.sh                      macOS/Linux shell wrapper
 └── start.bat                     Windows wrapper
 ```

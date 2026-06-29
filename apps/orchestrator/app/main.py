@@ -14,7 +14,7 @@ from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.agent_data import router as agent_data_router
 from app.api.routes.whatsapp import router as whatsapp_router
 from app.api.routes.tunnel import router as tunnel_router
-from app.services.hass_mcp import close_all as close_hass_clients
+from app.services.hass_mcp_client import close_all as close_hass_clients
 from app.services.tunnel import tunnel_service
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings

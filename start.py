@@ -68,6 +68,7 @@ def dim(t: str)     -> str: return _c('2',  t)
 def magenta(t: str) -> str: return _c('95', t)
 
 ORCH_TAG = cyan(  '[ORCH]') + ' '
+GW_TAG   = yellow('[GW  ]') + ' '
 UI_TAG   = magenta('[ UI ]') + ' '
 SYS_TAG  = dim(   '[ ** ]') + ' '
 
@@ -82,15 +83,20 @@ def hr()           -> None: print(dim('  ' + '─' * 60),    flush=True)
 IS_WIN       = sys.platform == 'win32'
 ROOT         = Path(__file__).parent.resolve()
 ORCHESTRATOR = ROOT / 'apps' / 'orchestrator'
+MCP_GATEWAY  = ROOT / 'apps' / 'mcp-gateway'
 DESKTOP      = ROOT / 'apps' / 'desktop'
 VENV         = ORCHESTRATOR / '.venv'
 BIN          = VENV / ('Scripts' if IS_WIN else 'bin')
 VENV_PY      = BIN / ('python.exe' if IS_WIN else 'python')
 VENV_PIP     = BIN / ('pip.exe'    if IS_WIN else 'pip')
 VENV_UV      = BIN / ('uvicorn.exe' if IS_WIN else 'uvicorn')
+GW_VENV      = MCP_GATEWAY / '.venv'
+GW_BIN       = GW_VENV / ('Scripts' if IS_WIN else 'bin')
+GW_PY        = GW_BIN / ('python.exe' if IS_WIN else 'python')
 
 DESKTOP_PORT = 5173
 BACKEND_PORT = 8787
+GATEWAY_PORT = 8788
 DESKTOP_URL  = f'http://localhost:{DESKTOP_PORT}'
 
 # ── Banner ────────────────────────────────────────────────────────────────────
@@ -99,7 +105,7 @@ def banner() -> None:
         '',
         cyan(bold('  ┌─────────────────────────────────────────────────────┐')),
         cyan(bold('  │') + bold('       🤖  Personal AI Agent  —  Dev Launcher         ') + cyan(bold('│'))),
-        cyan(bold('  │') + dim( '    Orchestrator :8787  ·  UI :5173  ·  WebSocket    ') + cyan(bold('│'))),
+        cyan(bold('  │') + dim( ' Gateway :8788  ·  Orch :8787  ·  UI :5173  ·  WS   ') + cyan(bold('│'))),
         cyan(bold('  └─────────────────────────────────────────────────────┘')),
         '',
     ]
@@ -216,6 +222,34 @@ def setup_desktop(npm_exe: str) -> None:
     else:
         ok(f'Desktop dependencies ready  {dim(str(node_modules))}')
 
+
+def setup_gateway(py_exe: str) -> None:
+    if not GW_PY.exists():
+        step('Creating MCP Gateway virtual environment')
+        subprocess.run([py_exe, '-m', 'venv', str(GW_VENV)], check=True)
+        ok(f'Gateway venv created at  {dim(str(GW_VENV))}')
+    else:
+        ok(f'Gateway venv ready  {dim(str(GW_VENV))}')
+
+    r = subprocess.run([str(GW_PY), '-c', 'import fastapi'], capture_output=True)
+    if r.returncode != 0:
+        step('Installing MCP Gateway dependencies')
+        subprocess.run(
+            [str(GW_PY), '-m', 'pip', 'install',
+             '-r', str(MCP_GATEWAY / 'requirements.txt'), '-q'],
+            check=True,
+        )
+        ok('Gateway dependencies installed')
+    else:
+        ok('Gateway dependencies ready')
+
+    env_file    = MCP_GATEWAY / '.env'
+    env_example = MCP_GATEWAY / '.env.example'
+    if not env_file.exists() and env_example.exists():
+        import shutil as _sh
+        _sh.copy(env_example, env_file)
+        ok(f'.env created from .env.example — {dim(str(env_file))}')
+
 # ── Port helpers ──────────────────────────────────────────────────────────────
 def port_in_use(port: int) -> bool:
     try:
@@ -269,6 +303,17 @@ def launch(cmd: list[str], cwd: Path, tag: str, env: dict | None = None) -> subp
     return proc
 
 
+def start_gateway() -> subprocess.Popen:
+    step('Starting MCP Gateway  ' + dim(f'→  http://localhost:{GATEWAY_PORT}'))
+    return launch(
+        [str(GW_PY), '-m', 'uvicorn', 'app.main:app', '--host', '0.0.0.0',
+         '--port', str(GATEWAY_PORT), '--reload', '--log-level', 'warning'],
+        cwd=MCP_GATEWAY,
+        tag=GW_TAG,
+        env={'PYTHONUNBUFFERED': '1'},
+    )
+
+
 def start_orchestrator() -> subprocess.Popen:
     step('Starting orchestrator  ' + dim(f'→  ws://localhost:{BACKEND_PORT}/ws'))
     env = {'PYTHONUNBUFFERED': '1'}
@@ -315,7 +360,7 @@ def _kill_port(port: int) -> None:
 def _free_ports() -> None:
     """Kill any stale processes occupying our ports, then wait for them to release."""
     freed: list[int] = []
-    for port in (BACKEND_PORT, DESKTOP_PORT):
+    for port in (GATEWAY_PORT, BACKEND_PORT, DESKTOP_PORT):
         if port_in_use(port):
             _kill_port(port)
             freed.append(port)
@@ -374,6 +419,7 @@ def main() -> None:
 
     # Setup
     step('Setting up services')
+    setup_gateway(py_exe)
     setup_orchestrator(py_exe)
     setup_desktop(npm_exe)
     hr()
@@ -385,7 +431,15 @@ def main() -> None:
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    # Launch processes
+    # Launch gateway first — orchestrator health-checks it on boot
+    gw_proc   = start_gateway()
+    gw_ready  = wait_for_port(GATEWAY_PORT, timeout=20, label='MCP Gateway')
+    if gw_ready:
+        ok(f'MCP Gateway ready    {cyan(f"http://localhost:{GATEWAY_PORT}")}')
+    else:
+        warn('MCP Gateway did not start in time — orchestrator will retry tool calls.')
+
+    # Launch remaining processes
     orch_proc = start_orchestrator()
     ui_proc   = start_desktop(npm_exe)
 
@@ -409,6 +463,7 @@ def main() -> None:
     print(f'\n  {bold(green("✦  Personal AI Agent is running"))}\n')
     print(f'  {bold("UI")}             {cyan(DESKTOP_URL)}  {dim(f"→ {browser_label}")}')
     print(f'  {bold("Orchestrator")}   {cyan(f"http://localhost:{BACKEND_PORT}")}')
+    print(f'  {bold("MCP Gateway")}    {cyan(f"http://localhost:{GATEWAY_PORT}")}')
     print(f'  {bold("WebSocket")}      {cyan(f"ws://localhost:{BACKEND_PORT}/ws")}')
     print(f'\n  {dim("Press Ctrl+C to stop all services.")}\n')
     hr()
@@ -427,6 +482,10 @@ def main() -> None:
     # Keep alive — relay output until a process exits or the user hits Ctrl+C
     try:
         while True:
+            if gw_proc.poll() is not None:
+                print(f'\n  {yellow("⚠")}  MCP Gateway exited (code {gw_proc.returncode}).',
+                      flush=True)
+                break
             if orch_proc.poll() is not None:
                 print(f'\n  {yellow("⚠")}  Orchestrator exited (code {orch_proc.returncode}).',
                       flush=True)
@@ -511,6 +570,7 @@ def clean() -> None:
 
     targets = [
         ORCHESTRATOR / '.venv',
+        MCP_GATEWAY  / '.venv',
         DESKTOP      / 'node_modules',
         DESKTOP      / 'dist',
         DESKTOP      / '.vite',

@@ -1,8 +1,10 @@
-# Weather Agent
+# Weather — MCP Gateway Tool
+
+> **Gateway tool** — served by the MCP Gateway (`apps/mcp-gateway/`, port 8788), namespace `weather`. Tool name: `weather__get_current_weather`.
 
 Get current weather and forecasts for any city by voice — works out of the box with no API key, or with a free account for richer data.
 
-**Navigation:** [← All Agents](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [MCP Gateway](../mcp-gateway.md) | [Setup](../setup.md)
 
 ---
 

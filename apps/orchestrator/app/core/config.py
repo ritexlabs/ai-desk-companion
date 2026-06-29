@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     whatsapp_app_secret:           str = ''
     whatsapp_contacts:             str = ''
 
+    # ── MCP Gateway ────────────────────────────────────────────────────
+    gateway_url: str = 'http://localhost:8788'
+
     # ── Cloudflare Tunnel ───────────────────────────────────────────────
     # Base domain for the WhatsApp webhook tunnel.
     # If set, callback URL becomes https://whatsapp.<CLOUDFLARE_DOMAIN>.

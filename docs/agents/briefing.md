@@ -1,8 +1,8 @@
 # Briefing Skill
 
-One command to get a full morning summary — weather, calendar, news, and smart home status fetched in parallel from all connected agents.
+One command to get a full morning summary — weather, calendar, news, and smart home status fetched in parallel via the MCP Gateway and local agents.
 
-**Navigation:** [← All Agents](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
 
 ---
 
@@ -44,13 +44,14 @@ Your voice command
        │
        ▼
  BriefingAgent
-  Checks which of these agents are enabled in the current session:
-  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
-  │ Weather  │  │ Calendar │  │  News    │  │SmartHome │
-  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘
-       │              │              │              │
-       └──────────────┴──────────────┴──────────────┘
-                  asyncio.gather() — all parallel
+  Calls MCP Gateway tools + local SmartHome agent in parallel:
+  ┌───────────────────┐  ┌───────────────────┐  ┌───────────────┐  ┌──────────┐
+  │weather__get_       │  │google__get_        │  │news__get_news │  │SmartHome │
+  │current_weather    │  │calendar_events    │  │(gateway)      │  │(local)   │
+  └────────┬──────────┘  └────────┬──────────┘  └──────┬────────┘  └────┬─────┘
+           │                       │                    │                 │
+           └───────────────────────┴────────────────────┴─────────────────┘
+                               asyncio.gather() — all parallel
                               │
                               ▼
                     Merge non-empty results
@@ -60,7 +61,7 @@ Your voice command
                  LLM synthesises into natural spoken response
 ```
 
-Agents not connected or not configured are silently skipped — the briefing adapts to whatever is available.
+Gateway tools not configured are silently skipped — the briefing adapts to whatever is available. SmartHome is included only if it is in the registered agent list for the current session.
 
 ---
 

@@ -1,8 +1,10 @@
-# Google Calendar Agent
+# Google Calendar — MCP Gateway Tool
+
+> **Gateway tool** — served by the MCP Gateway (`apps/mcp-gateway/`, port 8788), namespace `google`. Tool name: `google__get_calendar_events`. Shares the Google OAuth token with Gmail.
 
 Check today's schedule, find your next meeting, and stay on top of upcoming events — all by voice.
 
-**Navigation:** [← All Agents](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [MCP Gateway](../mcp-gateway.md) | [Setup](../setup.md)
 
 ---
 

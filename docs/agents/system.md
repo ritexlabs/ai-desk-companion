@@ -1,8 +1,10 @@
-# System Agent
+# System Info — MCP Gateway Tool
+
+> **Gateway tool** — served by the MCP Gateway (`apps/mcp-gateway/`, port 8788), namespace `system`. Tool name: `system__get_system_info`. Uses `psutil` — no credentials required.
 
 Monitor your machine's health in real time — CPU, memory, disk, battery, temperature, and running processes — all by voice.
 
-**Navigation:** [← All Agents](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [MCP Gateway](../mcp-gateway.md) | [Setup](../setup.md)
 
 ---
 

@@ -6,7 +6,7 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 
-from app.dependencies import agent_manager, router_service, metrics_service, wake_word_service
+from app.dependencies import agent_manager, gateway_client, router_service, metrics_service, wake_word_service
 from app.core.config import settings
 from app.models.contracts import AgentRequest
 from app.services.llm import llm_service
@@ -17,16 +17,8 @@ from app.services.tts_helpers import settings_label, agent_tts
 # ── Agent protocol constants ──────────────────────────────────────────────────
 
 AGENT_LABELS: dict[str, str] = {
-    'weather':    'Weather',
-    'system':     'System',
-    'calendar':   'Google Calendar',
-    'email':      'Google Email',
-    'github':     'GitHub',
-    'stock':      'Stock Market',
-    'news':       'News',
     'smarthome':  'Smart Home',
     'whatsapp':   'WhatsApp',
-    'portfolio':  'Portfolio',
     'websearch':  'Web Search',
     'calculator': 'Calculator',
     'memory':     'Memory',
@@ -34,24 +26,92 @@ AGENT_LABELS: dict[str, str] = {
     'general':    'General AI',
 }
 
-# '__boot__' triggers the agent's built-in boot summary; '' skips the test call
+# '__boot__' triggers the agent's built-in boot summary; '' skips the test call.
+# Only local agents that still run in the orchestrator are listed here.
 AGENT_BOOT_QUERY: dict[str, str] = {
-    'weather':    '__boot__',
-    'system':     '__boot__',
-    'github':     '__boot__',
-    'calendar':   '__boot__',
-    'email':      '__boot__',
-    'stock':      '__boot__',
-    'news':       '__boot__',
     'smarthome':  '__boot__',
     'whatsapp':   '__boot__',
-    'portfolio':  '__boot__',
     # Built-in skills — always online, no boot health-check needed
     'websearch':  '',
     'calculator': '',
     'memory':     '',
     'briefing':   '',
     'general':    '',
+}
+
+# Old agent IDs that are now served by the MCP Gateway.
+# Key: frontend agent ID  →  Value: gateway server namespace
+_GATEWAY_AGENT_MAP: dict[str, str] = {
+    'weather':   'weather',
+    'system':    'system',
+    'calendar':  'google',
+    'email':     'google',
+    'github':    'github',
+    'stock':     'stocks',
+    'news':      'news',
+    'portfolio': 'indmoney',
+}
+
+# Human-readable labels for gateway-served agents (used in boot messages)
+_GATEWAY_LABELS: dict[str, str] = {
+    'weather':   'Weather',
+    'system':    'System',
+    'calendar':  'Google Calendar',
+    'email':     'Google Email',
+    'github':    'GitHub',
+    'stock':     'Stock Market',
+    'news':      'News',
+    'portfolio': 'Portfolio',
+}
+
+# Randomised phrases for gateway-level events
+_GW_CONNECT_PHRASES = [
+    'MCP gateway link established — tool matrix online.',
+    'Secure tunnel to tool gateway confirmed — all channels open.',
+    'Gateway handshake complete — external services armed.',
+    'MCP bridge authenticated — routing layer active.',
+    'Tool aggregator online — gateway API responding.',
+    'Gateway protocol negotiated — data pipelines hot.',
+    'Control plane connected — gateway ready to route.',
+    'MCP transport layer up — tool mesh online.',
+]
+
+_GW_FAIL_PHRASES = [
+    'MCP gateway unreachable — tool network dark.',
+    'Gateway link failed — external tools suspended.',
+    'No response from MCP gateway — tool services offline.',
+    'Gateway connection dropped — reverting to local agents.',
+    'MCP bridge down — gateway tools unavailable.',
+    'Handshake timeout — gateway unreachable on port 8788.',
+    'Tool aggregator not responding — gateway circuit open.',
+    'MCP control plane silent — external services suspended.',
+]
+
+# Per-agent phrases when gateway is online — {label} is substituted at runtime.
+# Kept dash-free so a live snippet can be appended as "— {data}."
+_GW_AGENT_ONLINE_PHRASES = [
+    '{label} module synchronized and online.',
+    '{label} integration confirmed, link active.',
+    '{label} service handshake complete.',
+    '{label} pipeline connected and streaming.',
+    '{label} bridge authenticated, ready to serve.',
+    '{label} online, endpoints responding.',
+    '{label} channel open and standing by.',
+    '{label} node connected, live feed established.',
+    '{label} interface wired and ready.',
+    '{label} subsystem nominal, stream open.',
+]
+
+# Per-agent boot call: (gateway tool name, arguments)
+_GW_BOOT_CALLS: dict[str, tuple[str, dict]] = {
+    'weather':   ('weather__get_current_weather', {'query': 'current weather'}),
+    'stock':     ('stocks__get_quote',            {'query': 'Nifty 50'}),
+    'news':      ('news__get_news',               {'query': 'top news today'}),
+    'github':    ('github__get_summary',          {}),
+    'calendar':  ('google__get_calendar_events',  {'query': 'next event'}),
+    'email':     ('google__get_emails',           {'query': 'unread emails'}),
+    'system':    ('system__get_system_info',      {'query': 'system status'}),
+    'portfolio': ('indmoney__query_portfolio',    {'query': 'portfolio overview'}),
 }
 
 GREETING_SUFFIXES = [
@@ -90,6 +150,7 @@ _AGENT_PREFIX_RE = re.compile(r'^[A-Za-z\s]{2,25}\s+(?:agent|summary)[,:\s]+\s*'
 _ERROR_MARKERS = (
     'no api key', 'not configured', 'not connected',
     'could not', 'error', 'no token', 'expired', 'could not reach',
+    'connection lost', 'unreachable', 'failed',
 )
 
 
@@ -102,6 +163,104 @@ def strip_agent_prefix(text: str) -> str:
 def is_agent_error(text: str) -> bool:
     t = text.lower()
     return any(m in t for m in _ERROR_MARKERS)
+
+
+# ── Boot snippet extractors (one per gateway agent) ───────────────────────────
+
+def _snip_weather(raw: str) -> str:
+    # "In Mumbai, India: partly cloudy, 32°C. Humidity 72%, wind 20 km/h."
+    m = re.search(r'In ([^:]+):\s*([^,]+),\s*(\d+)°C', raw)
+    if m:
+        city = m.group(1).split(',')[0].strip()
+        return f'{city} {m.group(3)}°C, {m.group(2).strip()}'
+    return raw.split('.')[0][:55]
+
+def _snip_stock(raw: str) -> str:
+    # "NIFTY 50 — ₹24,100.50  +₹150.20 (+0.62%)"
+    first = raw.split('\n')[0]
+    m = re.search(r'—\s*(\S+)\s+.*?(\([+-][\d.]+%\))', first)
+    if m:
+        return f'Nifty {m.group(1)} {m.group(2)}'
+    return first[:55]
+
+def _snip_news(raw: str) -> str:
+    # "Top headlines from India:\n1. Headline (Source · date)\n   desc"
+    for line in raw.split('\n')[1:]:
+        line = line.strip()
+        if line and line[0].isdigit():
+            text = re.sub(r'^\d+\.\s*', '', line)
+            text = re.sub(r'\s*\([^)]+\)\s*$', '', text)
+            return text[:65]
+    return raw[:55]
+
+def _snip_github(raw: str) -> str:
+    # "3 pull requests awaiting your review and 5 unread notifications."
+    return raw.split('.')[0][:75]
+
+def _snip_calendar(raw: str) -> str:
+    # "Next event: 'Team standup' at 10:00 AM." or "No upcoming events."
+    return raw.split('\n')[0][:75]
+
+def _snip_email(raw: str) -> str:
+    # "12 unread emails — 'Sub1', ..."
+    m = re.match(r'(\d+ (?:unread|important) emails?)', raw)
+    if m:
+        return m.group(1)
+    if 'no unread' in raw.lower() or 'inbox is clear' in raw.lower():
+        return 'inbox clear'
+    return raw.split('.')[0][:55]
+
+def _snip_system(raw: str) -> str:
+    # Multi-line — extract CPU % and RAM %
+    cpu = re.search(r'CPU usage:\s*([\d.]+)%', raw)
+    ram = re.search(r'\((\d+)% used', raw)
+    parts = []
+    if cpu: parts.append(f'CPU {cpu.group(1)}%')
+    if ram: parts.append(f'RAM {ram.group(1)}%')
+    return ' · '.join(parts) if parts else raw.split('\n')[0][:50]
+
+def _snip_portfolio(raw: str) -> str:
+    text = str(raw).strip()
+    if text.startswith(('{', '[')):
+        return ''
+    for line in text.split('\n'):
+        line = line.strip()
+        if line and not is_agent_error(line):
+            return line[:70]
+    return ''
+
+_GW_SNIP_FN: dict[str, Callable[[str], str]] = {
+    'weather':   _snip_weather,
+    'stock':     _snip_stock,
+    'news':      _snip_news,
+    'github':    _snip_github,
+    'calendar':  _snip_calendar,
+    'email':     _snip_email,
+    'system':    _snip_system,
+    'portfolio': _snip_portfolio,
+}
+
+
+async def _fetch_boot_snippet(agent_id: str, creds: dict) -> str:
+    """Call the agent's boot tool and return a short live-data snippet, or '' on any failure."""
+    call = _GW_BOOT_CALLS.get(agent_id)
+    if not call:
+        return ''
+    tool_name, args = call
+    try:
+        raw = await asyncio.wait_for(
+            gateway_client.call_tool(tool_name, args, creds),
+            timeout=5.0,
+        )
+        if not raw:
+            return ''
+        text = str(raw)
+        if is_agent_error(text):
+            return ''
+        fn = _GW_SNIP_FN.get(agent_id)
+        return fn(text) if fn else text[:55]
+    except Exception:
+        return ''
 
 
 def _time_of_day() -> str:
@@ -191,12 +350,6 @@ async def boot_sequence(
     assistant_name: str = 'Robo',
     agent_voices: dict | None = None,
 ) -> None:
-    # System agent always initialises first — it seeds the live clock
-    if 'system' not in registered_agents:
-        registered_agents = ['system'] + registered_agents
-    elif registered_agents[0] != 'system':
-        registered_agents = ['system'] + [a for a in registered_agents if a != 'system']
-
     # Auto-inject built-in skills at the end
     for skill in _ALWAYS_ON_SKILLS:
         if skill not in registered_agents:
@@ -220,24 +373,63 @@ async def boot_sequence(
     await greeting_task
     await init_task
 
-    # Split: configurable agents get tested and spoken; built-in skills update silently
-    skill_ids     = set(_ALWAYS_ON_SKILLS)
-    to_announce   = [a for a in registered_agents if a not in skill_ids]
+    skill_ids = set(_ALWAYS_ON_SKILLS)
+
+    # Separate registered agents into gateway-served vs locally-managed
+    gateway_ids = [a for a in registered_agents if a in _GATEWAY_AGENT_MAP and a not in skill_ids]
+    local_ids   = [a for a in registered_agents if a not in _GATEWAY_AGENT_MAP and a not in skill_ids]
     silent_skills = [a for a in registered_agents if a in skill_ids]
 
+    # Broadcast 'starting' for every agent the frontend knows about
     for agent_id in registered_agents:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'starting'})
 
-    # Test configurable agents in parallel
+    # Check gateway health once
+    gw_ok = False
+    try:
+        gw_health = await gateway_client.health()
+        gw_ok = gw_health.get('status') == 'ok'
+    except Exception:
+        pass
+
+    # ── Gateway-served agents ─────────────────────────────────────────────────
+    gw_online = 0
+    if gateway_ids:
+        gw_phrase = random.choice(_GW_CONNECT_PHRASES if gw_ok else _GW_FAIL_PHRASES)
+        await speak_fn('boot_status', gw_phrase, None, agent_tts(tts, 'general', agent_voices))
+
+    # Fetch live snippets for all online gateway agents in parallel
+    if gw_ok and gateway_ids:
+        creds = agent_manager._session_credentials()
+        snippets = await asyncio.gather(*[_fetch_boot_snippet(a, creds) for a in gateway_ids])
+        snippet_map = dict(zip(gateway_ids, snippets))
+    else:
+        snippet_map = {}
+
+    for agent_id in gateway_ids:
+        status = 'online' if gw_ok else 'degraded'
+        if gw_ok:
+            gw_online += 1
+            label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
+            base  = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
+            snip  = snippet_map.get(agent_id, '')
+            msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
+            await speak_fn(
+                'boot_status', msg,
+                {'agent_id': agent_id, 'agent_status': status},
+                agent_tts(tts, agent_id, agent_voices),
+            )
+        await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
+
+    # ── Local agents (smarthome, whatsapp) ────────────────────────────────────
     results: list[tuple[str, str, str]] = await asyncio.gather(
-        *[test_agent(agent_id) for agent_id in to_announce]
+        *[test_agent(agent_id) for agent_id in local_ids]
     )
 
-    # Speak each configurable agent result in its own voice
-    online_count = 0
+    local_online = 0
     for agent_id, status, msg in results:
         if status == 'online':
-            online_count += 1
+            local_online += 1
         await speak_fn(
             'boot_status', msg,
             {'agent_id': agent_id, 'agent_status': status},
@@ -245,14 +437,16 @@ async def boot_sequence(
         )
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
 
-    # Mark skills online silently — no test call, no voice announcement
+    # Mark built-in skills online silently
     for agent_id in silent_skills:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
 
-    n = len(to_announce)
+    # Final summary
+    total_online = gw_online + local_online
+    total_configured = len(gateway_ids) + len(local_ids)
     await speak_fn(
         'boot_status',
-        f'{online_count} of {n} agent{"s" if n != 1 else ""} online and ready for your command.',
+        f'{total_online} of {total_configured} service{"s" if total_configured != 1 else ""} online and ready for your command.',
         None,
         agent_tts(tts, 'general', agent_voices),
     )

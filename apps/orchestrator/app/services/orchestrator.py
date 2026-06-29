@@ -69,13 +69,21 @@ def _gemini_tool(agent_id: str, meta: dict) -> dict:
     }
 
 
-def _build_tools(enabled_agents: list[str], agents: dict) -> dict:
-    """Return {agent_id: tool_meta} for agents that are enabled and have tool_meta defined."""
-    return {
-        aid: agents[aid].tool_meta
-        for aid in enabled_agents
-        if aid in agents and agents[aid].tool_meta is not None
-    }
+def _build_tools(
+    enabled_agents: list[str],
+    agents: dict,
+    gateway_tools: dict | None = None,
+) -> dict:
+    """Return {tool_id: tool_meta} merging local agents and gateway tools."""
+    local: dict = {}
+    for aid in enabled_agents:
+        if aid not in agents or agents[aid].tool_meta is None:
+            continue
+        local[aid] = agents[aid].tool_meta
+
+    if gateway_tools:
+        local.update(gateway_tools)
+    return local
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -101,13 +109,14 @@ class LLMOrchestrator:
         agents: dict,
         call_agent: object,
         assistant_name: str = 'Robo',
+        gateway_tools: dict | None = None,
     ) -> tuple[str, str]:
         provider = (llm_config.get('provider') or 'openai').lower()
         api_key  = (llm_config.get('api_key')  or '').strip()
         model    = (llm_config.get('model')     or '').strip()
         base_url = (llm_config.get('base_url')  or '').strip().rstrip('/')
 
-        tools_available = _build_tools(enabled_agents, agents)
+        tools_available = _build_tools(enabled_agents, agents, gateway_tools)
 
         if provider in ('openai', 'ollama'):
             return await self._openai_handle(

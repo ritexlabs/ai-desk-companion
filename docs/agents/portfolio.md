@@ -1,8 +1,10 @@
-# Portfolio Agent
+# Portfolio — MCP Gateway Tool
+
+> **Gateway tool** — served by the MCP Gateway (`apps/mcp-gateway/`, port 8788), namespace `indmoney`. Tool name: `indmoney__query_portfolio`. Connects to `https://mcp.indmoney.com/mcp` via Streamable HTTP using a per-call Bearer token.
 
 Connect to your INDmoney account via MCP and query your investments by voice.
 
-**Navigation:** [← Agents index](../agents.md) | [Setup guide](../setup.md) | [Architecture](../architecture.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [MCP Gateway](../mcp-gateway.md) | [Setup](../setup.md)
 
 ---
 

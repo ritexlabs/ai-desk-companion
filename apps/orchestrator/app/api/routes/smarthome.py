@@ -5,7 +5,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.services.hass_mcp import get_hass_client
+from app.services.hass_mcp_client import get_hass_client
 
 router = APIRouter(prefix='/api/smarthome', tags=['smarthome'])
 

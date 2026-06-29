@@ -47,11 +47,26 @@ Press **Ctrl+C** to stop both services cleanly.
 
 ---
 
-## Option B — Manual start (two terminals)
+## Option B — Manual start (three terminals)
 
-Use this when you want to restart one service independently, attach a debugger, or see raw logs.
+Use this when you want to restart one service independently, attach a debugger, or see raw logs.  
+Start services in this order: Gateway → Orchestrator → Desktop.
 
-**Terminal 1 — Orchestrator (Python FastAPI, port 8787)**
+**Terminal 1 — MCP Gateway (Python FastAPI, port 8788)**
+```bash
+cd apps/mcp-gateway
+
+# First time only
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Every time
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8788
+```
+
+**Terminal 2 — Orchestrator (Python FastAPI, port 8787)**
 ```bash
 cd apps/orchestrator
 
@@ -65,7 +80,7 @@ source .venv/bin/activate
 uvicorn app.main:app --reload --port 8787
 ```
 
-**Terminal 2 — Desktop UI (React + Vite, port 5173)**
+**Terminal 3 — Desktop UI (React + Vite, port 5173)**
 ```bash
 cd apps/desktop
 
@@ -135,10 +150,11 @@ Install Python 3.10+ from python.org. On Windows use `python` instead of `python
 **"node: command not found"**  
 Install Node.js 20+ from nodejs.org.
 
-**Port 8787 or 5173 already in use**  
+**Port 8788, 8787, or 5173 already in use**  
 Find and kill the existing process:
 ```bash
 # macOS / Linux
+lsof -ti:8788 | xargs kill
 lsof -ti:8787 | xargs kill
 lsof -ti:5173 | xargs kill
 ```

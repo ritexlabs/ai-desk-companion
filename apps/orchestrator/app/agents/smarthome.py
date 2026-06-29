@@ -5,7 +5,7 @@ from typing import Any
 
 from app.agents.base import AssistantAgent
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, AgentStatus
-from app.services.hass_mcp import get_hass_client
+from app.services.hass_mcp_client import get_hass_client
 
 # ── Patterns ──────────────────────────────────────────────────────────────────
 
@@ -125,7 +125,7 @@ class SmartHomeAgent(AssistantAgent):
                 return AgentResponse(agent=self.id, text=overview.split('.')[0] + '.')
             return AgentResponse(agent=self.id, text='Smart Home connected.')
         except Exception as e:
-            return AgentResponse(agent=self.id, text=f'Smart Home connected. ({str(e)[:60]})')
+            return AgentResponse(agent=self.id, text=f'Smart Home unreachable: {str(e)[:60]}')
 
     # ── Top-level dispatch ────────────────────────────────────────────
 

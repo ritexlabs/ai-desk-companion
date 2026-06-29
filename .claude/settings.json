@@ -19,7 +19,8 @@
       "Bash(curl -s https://api.github.com/search/repositories?q=\"mcp-server\" \"github\" language:typescript sort:stars)",
       "Bash(curl -s https://raw.githubusercontent.com/modelcontextprotocol/servers/main/README.md)",
       "Bash(curl -s \"https://api.github.com/repos/modelcontextprotocol/servers/contents/src\")",
-      "Bash(curl -s \"https://raw.githubusercontent.com/modelcontextprotocol/servers-archived/main/src/github/README.md\")"
+      "Bash(curl -s \"https://raw.githubusercontent.com/modelcontextprotocol/servers-archived/main/src/github/README.md\")",
+      "Bash(python3 -c ' *)"
     ],
     "additionalDirectories": [
       "/tmp"

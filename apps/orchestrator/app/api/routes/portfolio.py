@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from app.services import indmoney_mcp
+from app.services import indmoney_mcp_client as indmoney_mcp
 
 router = APIRouter(prefix='/api/portfolio', tags=['portfolio'])
 

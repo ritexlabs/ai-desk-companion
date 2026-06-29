@@ -1,6 +1,6 @@
 # AI Desk Companion
 
-A desktop-first AI voice assistant with always-on wake-word detection, Alexa-style continuous conversation, and 9 real-data agents — all inside a futuristic real-time dashboard UI.
+A desktop-first AI voice assistant with always-on wake-word detection, Alexa-style continuous conversation, and real-data integrations — all inside a futuristic real-time dashboard UI.
 
 ---
 
@@ -9,8 +9,8 @@ A desktop-first AI voice assistant with always-on wake-word detection, Alexa-sty
 - Wakes on voice command ("Hey Robo" / "Robo, Wake-Up") or the Wake Up button, with a personalised greeting
 - Listens for the next command automatically after each response — no button press needed (Alexa-style)
 - Understands inline commands: say "Hey Robo, what's the weather?" in one breath, it wakes and answers immediately
-- Routes intents to 9 built-in agents: Weather, System, Google Calendar, Gmail, GitHub, Stock Market, News, Smart Home, General AI
-- LLM-powered orchestration — the model decides which agents to call, fetches live data, and synthesises a spoken response
+- Routes intents via an LLM to a unified **MCP Gateway** (weather, system, GitHub, Google Calendar, Gmail, stocks, news, portfolio) and local agents (smart home, WhatsApp, web search, calculator, memory, briefing, general AI)
+- LLM-powered tool-calling — the model picks the right tool, fetches live data, and synthesises a spoken response
 - Responds in the same language the user spoke — no language switching
 - Speaks with distinct voice modulations per agent (different pitch and pace for each agent)
 - Handles farewells naturally ("Robo, Good Night", "bye bye") and enters standby mode
@@ -27,7 +27,7 @@ A desktop-first AI voice assistant with always-on wake-word detection, Alexa-sty
 | Python | 3.10 – 3.13 | 3.13 recommended; 3.14 not yet supported |
 | Node.js | 20+ | |
 | npm | any recent | pnpm also supported |
-| Docker | 20+ | Required for Smart Home agent (voska/hass-mcp) |
+| Docker | 20+ | Required only for Smart Home agent (voska/hass-mcp) |
 
 No API keys are required to run the app in browser-TTS / browser-STT mode.
 
@@ -92,8 +92,10 @@ Say any farewell phrase and the app speaks a goodbye and returns to standby:
 ai-desk-companion/
 ├── apps/
 │   ├── desktop/          React + Vite frontend (port 5173)
-│   └── orchestrator/     Python FastAPI backend (port 8787)
-├── docs/                 Configuration guides and API reference
+│   ├── orchestrator/     Python FastAPI orchestrator (port 8787)
+│   └── mcp-gateway/      Python FastAPI MCP tool aggregator (port 8788)
+├── docs/                 Architecture, API contracts, setup guides
+├── scripts/              test.sh, gen_tests.py
 ├── start.py              Cross-platform dev launcher
 ├── start.sh              macOS/Linux wrapper
 └── start.bat             Windows wrapper
@@ -117,11 +119,20 @@ The app works out of the box with no configuration. Add API keys to unlock real 
 
 ---
 
-## Manual Start (two terminals)
+## Manual Start (three terminals)
 
 If you prefer to run services independently:
 
-**Terminal 1 — Orchestrator**
+**Terminal 1 — MCP Gateway**
+```bash
+cd apps/mcp-gateway
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8788
+```
+
+**Terminal 2 — Orchestrator**
 ```bash
 cd apps/orchestrator
 python3 -m venv .venv
@@ -130,7 +141,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8787
 ```
 
-**Terminal 2 — Desktop UI**
+**Terminal 3 — Desktop UI**
 ```bash
 cd apps/desktop
 npm install
@@ -182,7 +193,9 @@ See [docs/development.md](docs/development.md#testing) for full details.
 
 ## Reference Docs
 
-- [Architecture overview](docs/architecture.md) — system design, WebSocket protocol, agent pipeline, voice interaction model
+- [Architecture overview](docs/architecture.md) — system design, 3-service architecture, WebSocket protocol, data flow
+- [MCP Gateway guide](docs/mcp-gateway.md) — how the gateway works, adding new servers
+- [Agents & tools](docs/agents.md) — local agents, gateway tools, built-in skills
 - [API contracts](docs/api-contracts.md) — full WebSocket message schema reference
 - [Development guide](docs/development.md) — local setup, commands, branching strategy
 - [Setup guide](docs/setup.md) — detailed installation and phase checklist

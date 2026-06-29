@@ -1,8 +1,10 @@
-# Gmail Agent
+# Gmail — MCP Gateway Tool
+
+> **Gateway tool** — served by the MCP Gateway (`apps/mcp-gateway/`, port 8788), namespace `google`. Tool name: `google__get_emails`. Shares the Google OAuth token with Google Calendar.
 
 Check unread emails and important messages by voice — without opening your inbox.
 
-**Navigation:** [← All Agents](../agents.md) | [Architecture](../architecture.md) | [Setup](../setup.md)
+**Navigation:** [← All tools](../agents.md) | [Architecture](../architecture.md) | [MCP Gateway](../mcp-gateway.md) | [Setup](../setup.md)
 
 ---
 

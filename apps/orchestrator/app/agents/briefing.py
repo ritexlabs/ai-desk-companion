@@ -6,29 +6,14 @@ from app.agents.base import AssistantAgent
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, AgentStatus
 
 
-_AGENT_QUERIES: dict[str, str] = {
-    'weather':   'Give me a one-sentence current weather summary.',
-    'calendar':  'What events or meetings do I have scheduled today?',
-    'news':      'Give me exactly 3 top news headlines right now.',
-    'smarthome': 'Give me a brief status summary of my home devices.',
-}
-
-_AGENT_LABELS: dict[str, str] = {
-    'weather':   'Weather',
-    'calendar':  'Calendar',
-    'news':      'News',
-    'smarthome': 'Home',
-}
-
-
 class BriefingAgent(AssistantAgent):
     id = 'briefing'
     name = 'Briefing'
     config_key = None
     tool_meta = {
         'description': (
-            'Compile a full morning briefing or status dashboard by querying all connected '
-            'agents in parallel — weather, calendar, news, and smart home. '
+            'Compile a full morning briefing or status dashboard — '
+            'weather, calendar, news, and smart home — all in one response. '
             'Use when the user asks for a briefing, morning summary, dashboard, '
             'or "what\'s happening today".'
         ),
@@ -45,44 +30,53 @@ class BriefingAgent(AssistantAgent):
         return None
 
     async def handle(self, request: AgentRequest) -> AgentResponse:
-        from app.dependencies import agent_manager
+        from app.dependencies import agent_manager, gateway_client
 
-        enabled  = set(agent_manager._session_enabled_agents)
-        targets  = [(aid, q) for aid, q in _AGENT_QUERIES.items() if aid in enabled]
+        creds   = agent_manager._session_credentials()
+        enabled = set(agent_manager._session_enabled_agents)
 
-        if not targets:
-            return AgentResponse(
-                agent=self.id,
-                text=(
-                    'No agents are connected for a briefing. '
-                    'Enable Weather, Calendar, News, or Smart Home in Settings to get a full summary.'
-                ),
+        tasks = [
+            ('Weather',  self._gw('weather__get_current_weather',   {'query': 'current weather'}, creds)),
+            ('Calendar', self._gw('google__get_calendar_events',     {'query': 'events today'},    creds)),
+            ('News',     self._gw('news__get_news',                  {'query': 'top 3 headlines'}, creds)),
+        ]
+
+        if 'smarthome' in enabled:
+            tasks.append(
+                ('Home', self._local('smarthome', 'Give me a brief status of my home devices.', request.context))
             )
 
-        results = await asyncio.gather(*[
-            self._query(aid, q, request.context) for aid, q in targets
-        ])
+        labels, coros = zip(*tasks)
+        results = await asyncio.gather(*coros, return_exceptions=True)
 
-        parts = [f'{label}: {text}' for label, text in results if text]
+        parts = []
+        for label, result in zip(labels, results):
+            text = result if isinstance(result, str) else ''
+            if text and 'not configured' not in text.lower() and 'error' not in text.lower():
+                parts.append(f'{label}: {text[:300]}')
+
         if not parts:
             return AgentResponse(
                 agent=self.id,
-                text='Could not reach any agents for a briefing right now. Please try again.',
+                text=(
+                    'No services are connected for a briefing. '
+                    'Enable Weather, Calendar, News, or Smart Home in Settings.'
+                ),
             )
         return AgentResponse(agent=self.id, text=' | '.join(parts))
 
-    async def _query(self, agent_id: str, query: str, context: dict) -> tuple[str, str]:
-        from app.dependencies import agent_manager
-
-        label = _AGENT_LABELS.get(agent_id, agent_id.title())
+    async def _gw(self, tool_name: str, arguments: dict, credentials: dict) -> str:
+        from app.dependencies import gateway_client
         try:
-            resp = await agent_manager.handle(
-                agent_id,
-                AgentRequest(text=query, context=context),
-            )
-            text = resp.text.strip()
-            if not text or 'error' in text.lower() or 'not configured' in text.lower():
-                return label, ''
-            return label, text[:300]
+            result = await gateway_client.call_tool(tool_name, arguments, credentials)
+            return str(result).strip() if result else ''
         except Exception:
-            return label, ''
+            return ''
+
+    async def _local(self, agent_id: str, query: str, context: dict) -> str:
+        from app.dependencies import agent_manager
+        try:
+            resp = await agent_manager.handle(agent_id, AgentRequest(text=query, context=context))
+            return resp.text.strip()[:300]
+        except Exception:
+            return ''

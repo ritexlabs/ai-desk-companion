@@ -1,17 +1,34 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+
 from app.agents.registry import AGENTS
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 
 def _env_agent_defaults() -> dict:
+    """Env-level defaults for remaining local agents and credential sources."""
     return {
-        'weather': {
-            'api_key':      settings.weather_api_key,
-            'provider':     settings.weather_provider,
-            'default_city': settings.weather_default_city,
+        # Still local
+        'smarthome': {
+            'endpoint': settings.myhome_mcp_endpoint,
+            'token':    settings.myhome_mcp_token,
+        },
+        'whatsapp': {
+            'phone_number_id':      settings.whatsapp_phone_number_id,
+            'access_token':         settings.whatsapp_access_token,
+            'webhook_verify_token': settings.whatsapp_webhook_verify_token,
+            'contacts':             settings.whatsapp_contacts,
+        },
+        # Gateway-served — kept here so _session_credentials() can fall back
+        # to env values when the frontend doesn't supply them.
+        'portfolio': {
+            'access_token': settings.indmoney_token,
         },
         'github': {
             'personal_access_token': settings.github_token,
@@ -22,26 +39,17 @@ def _env_agent_defaults() -> dict:
             'client_id':     settings.google_client_id,
             'client_secret': settings.google_client_secret,
         },
-        'stock': {
-            'default_market': settings.stock_default_market,
+        'weather': {
+            'api_key':      settings.weather_api_key,
+            'provider':     settings.weather_provider,
+            'default_city': settings.weather_default_city,
         },
         'news': {
             'api_key': settings.news_api_key,
             'country': settings.news_default_country,
         },
-        'smarthome': {
-            'endpoint': settings.myhome_mcp_endpoint,
-            'token':    settings.myhome_mcp_token,
-        },
-        'portfolio': {
-            'endpoint':     settings.indmoney_mcp_endpoint,
-            'access_token': settings.indmoney_token,
-        },
-        'whatsapp': {
-            'phone_number_id':      settings.whatsapp_phone_number_id,
-            'access_token':         settings.whatsapp_access_token,
-            'webhook_verify_token': settings.whatsapp_webhook_verify_token,
-            'contacts':             settings.whatsapp_contacts,
+        'stock': {
+            'default_market': settings.stock_default_market,
         },
     }
 
@@ -133,11 +141,8 @@ class AgentManager:
 
     async def initialize_enabled_agents(self) -> None:
         await asyncio.gather(*(
-            agent.initialize()
-            for aid, agent in self._agents.items()
-            if aid != 'general'
+            agent.initialize() for agent in self._agents.values()
         ))
-        await self._agents['general'].initialize()
 
     async def health_snapshot(self) -> list[AgentHealth]:
         return [await agent.health() for agent in self._agents.values()]
@@ -169,15 +174,92 @@ class AgentManager:
         })
         return await agent.handle(enriched)
 
-    async def handle_as_tool(self, agent_id: str, query: str) -> str:
-        if agent_id not in self._agents:
-            return f'Unknown agent: {agent_id}'
-        response = await self.handle(agent_id, AgentRequest(text=query))
+    def _session_credentials(self) -> dict:
+        """Flat credentials dict forwarded to the gateway per tool call."""
+        ac  = self._session_agent_config
+        env = _env_agent_defaults()
+
+        def _get(section: str, key: str, fallback: str = '') -> str:
+            return (
+                ac.get(section, {}).get(key)
+                or env.get(section, {}).get(key)
+                or fallback
+            )
+
+        return {
+            # INDmoney
+            'indmoney_token':       _get('portfolio', 'access_token'),
+            # GitHub
+            'github_token':         _get('github', 'personal_access_token'),
+            # Google (Calendar + Gmail)
+            'google_access_token':  _get('google', 'access_token'),
+            # Weather
+            'weather_api_key':      _get('weather', 'api_key'),
+            'weather_provider':     _get('weather', 'provider', 'open_meteo'),
+            'weather_default_city': _get('weather', 'default_city', 'Bengaluru'),
+            # News
+            'news_api_key':         _get('news', 'api_key'),
+            'news_default_country': _get('news', 'country', 'in'),
+            # Stocks
+            'stock_default_market': _get('stock', 'default_market', 'IN'),
+            # Smart Home
+            'smarthome_endpoint':   _get('smarthome', 'endpoint'),
+            'smarthome_token':      _get('smarthome', 'token'),
+            # WhatsApp
+            'whatsapp_token':       _get('whatsapp', 'access_token'),
+            'whatsapp_phone_id':    _get('whatsapp', 'phone_number_id'),
+        }
+
+    async def handle_as_tool(self, fn_name: str, query: str) -> str:
+        if '__' in fn_name:
+            # Gateway-namespaced tool call (e.g. indmoney__query_portfolio)
+            from app.dependencies import gateway_client
+            try:
+                result = await gateway_client.call_tool(
+                    fn_name, {'query': query}, self._session_credentials()
+                )
+                if isinstance(result, str):
+                    return result
+                return json.dumps(result) if result is not None else 'No data available.'
+            except PermissionError as exc:
+                return str(exc)
+            except Exception as exc:
+                logger.warning('Gateway tool call %s failed: %s', fn_name, exc)
+                return f'Tool call failed: {str(exc)[:100]}'
+
+        # Local agent call
+        if fn_name not in self._agents:
+            return f'Unknown agent: {fn_name}'
+        response = await self.handle(fn_name, AgentRequest(text=query))
         return response.text
+
+    async def _fetch_gateway_tools(self) -> dict:
+        """Fetch tools from the gateway and convert to tool_meta format for the LLM."""
+        from app.dependencies import gateway_client
+        try:
+            raw = await gateway_client.list_tools()
+        except Exception as exc:
+            logger.debug('Gateway list_tools unavailable: %s', exc)
+            return {}
+
+        tools: dict = {}
+        for t in raw:
+            name = t.get('name', '')
+            if not name:
+                continue
+            # Extract query parameter description as query_hint
+            props     = t.get('inputSchema', {}).get('properties', {})
+            query_doc = props.get('query', {}).get('description', name)
+            tools[name] = {
+                'description': t.get('description', name),
+                'query_hint':  query_doc,
+            }
+        return tools
 
     async def orchestrate(self, user_message: str) -> tuple[str, str]:
         if self.llm_configured:
             from app.services.orchestrator import llm_orchestrator
+            gateway_tools = await self._fetch_gateway_tools()
             return await llm_orchestrator.handle(
                 user_message,
                 self._session_llm_config,
@@ -185,6 +267,7 @@ class AgentManager:
                 self._agents,
                 self.handle_as_tool,
                 assistant_name=self._session_assistant_name,
+                gateway_tools=gateway_tools if gateway_tools else None,
             )
 
         from app.services.router import _keyword_route

@@ -4,6 +4,12 @@ A desktop-first AI voice assistant with always-on wake-word detection, Alexa-sty
 
 ---
 
+## Demo
+
+[![AI Desk Companion — Demo](https://img.youtube.com/vi/VtZsCHTaAEE/maxresdefault.jpg)](https://www.youtube.com/watch?v=VtZsCHTaAEE)
+
+---
+
 ## What it does
 
 - Wakes on voice command ("Hey Robo" / "Robo, Wake-Up") or the Wake Up button, with a personalised greeting

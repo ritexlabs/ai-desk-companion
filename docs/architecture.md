@@ -33,7 +33,7 @@ Three services run locally:
 | Language | Python 3.13 |
 | Framework | FastAPI 0.115 |
 | Server | uvicorn with standard extras |
-| Config | pydantic-settings (reads `.env`) |
+| Config | pydantic-settings (reads `apps/orchestrator/.env`) |
 | HTTP client | httpx |
 
 ### MCP Gateway — `apps/mcp-gateway/`
@@ -43,6 +43,7 @@ Three services run locally:
 | Language | Python 3.13 |
 | Framework | FastAPI 0.115 |
 | Server | uvicorn with standard extras |
+| Config | pydantic-settings (reads `apps/mcp-gateway/.env`) |
 | Data | yfinance, psutil, httpx, mcp |
 
 ### Voice Providers
@@ -57,43 +58,52 @@ Three services run locally:
 ## 3. High-Level Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Browser (React + Vite :5173)                                    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  RobotAvatar · AgentBootList · SettingsPanel            │    │
-│  │  useOrchestratorRuntime · useVoiceLoop · useAgentConfig │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │ WebSocket  ws://localhost:8787/ws
-┌──────────────────────▼───────────────────────────────────────────┐
-│  Orchestrator (FastAPI :8787)                                     │
-│  • Session lifecycle — start/stop, credential plumbing           │
-│  • LLM tool-calling loop (OpenAI / Anthropic / Gemini / Ollama)  │
-│  • Local agents: SmartHome, WhatsApp, WebSearch, Calculator,     │
-│                  Memory, Briefing, GeneralAI                     │
-│  • Voice: TTS (OpenAI · ElevenLabs · Browser)                   │
-│           STT (Whisper · Browser)                                │
-└──────────────────────┬───────────────────────────────────────────┘
-                       │ HTTP  http://localhost:8788
-┌──────────────────────▼───────────────────────────────────────────┐
-│  MCP Gateway (FastAPI :8788)                                      │
-│  • Aggregates all tool-call sources                              │
-│  • Namespaces tools: weather__get_current_weather, etc.          │
-│  • Injects per-call credentials — never stores tokens            │
-│  Servers (in-process adapters):                                  │
-│  ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌───────────┐  │
-│  │ INDmoney │ │ GitHub │ │ Google │ │Weather │ │   News    │  │
-│  │indmoney__│ │github__│ │google__│ │weather_│ │  news__   │  │
-│  └──────────┘ └────────┘ └────────┘ └────────┘ └───────────┘  │
-│  ┌──────────┐ ┌────────┐                                        │
-│  │  Stocks  │ │ System │                                        │
-│  │ stocks__ │ │system__│                                        │
-│  └──────────┘ └────────┘                                        │
-└──────────────────────────────────────────────────────────────────┘
-          │                       │
-    Streamable HTTP           Direct calls
-    (remote MCP)              (yfinance / psutil / httpx)
-          │
+┌──────────────────────────────────────────────────────────────────────┐
+│  Browser (React + Vite :5173)                                        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │  RobotAvatar · AgentBootList · AgentDetailModal               │  │
+│  │  SmartHomeDashboard · PortfolioDashboard · SettingsPanel      │  │
+│  │  useOrchestratorRuntime · useVoiceLoop · useAgentConfig       │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└────────────────────────┬─────────────────────────┬───────────────────┘
+                         │ WebSocket                │ HTTP (auth-exempt)
+                         │ ws://localhost:8787/ws   │ localhost:8788
+                         │                          │ /api/portfolio/*
+                         │                          │ /auth/indmoney
+                         │                          │ /api/system/config
+┌────────────────────────▼─────────────────────────┼───────────────────┐
+│  Orchestrator (FastAPI :8787)                     │                   │
+│  • Session lifecycle — start/stop                 │                   │
+│  • LLM tool-calling loop (OpenAI / Anthropic /    │                   │
+│    Gemini / Ollama)                               │                   │
+│  • Local agents (in-process):                     │                   │
+│      WebSearch · Calculator · Memory              │                   │
+│      Briefing · GeneralAI                         │                   │
+│  • Voice: TTS (OpenAI · ElevenLabs · Browser)    │                   │
+│           STT (Whisper · Browser)                 │                   │
+└────────────────────────┬──────────────────────────┘                   │
+              HTTP Bearer │ http://localhost:8788                        │
+┌────────────────────────▼─────────────────────────────────────────────┘
+│  MCP Gateway (FastAPI :8788)                                          │
+│  • Bearer auth middleware (GATEWAY_API_TOKEN)                        │
+│  • ToolRegistry — namespaced tools, startup/shutdown lifecycle       │
+│  • MCP StreamableHTTP at /mcp (compatible with Claude Desktop etc.)  │
+│                                                                       │
+│  Tools (one file per integration, credentials from gateway .env):    │
+│  ┌─────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐        │
+│  │ weather │ │ stocks │ │  news  │ │ github │ │  google  │        │
+│  └─────────┘ └────────┘ └────────┘ └────────┘ └──────────┘        │
+│  ┌─────────┐ ┌────────┐ ┌───────────┐ ┌──────────┐                │
+│  │ system  │ │indmoney│ │ smarthome │ │ whatsapp │                │
+│  └─────────┘ └────────┘ └───────────┘ └──────────┘                │
+│                                                                       │
+│  Routers (non-tool HTTP endpoints):                                  │
+│  portfolio (OAuth PKCE) · system · tunnel (Cloudflare) · whatsapp   │
+└───────────────────────────────────────────────────────────────────────┘
+         │                  │                │
+   MCP Streamable    Direct HTTP         psutil / yfinance
+   (INDmoney)        (HA, Meta, GNews…)  (local calls)
+         │
   https://mcp.indmoney.com/mcp
 ```
 
@@ -104,14 +114,37 @@ Three services run locally:
 ```
 ai-desk-companion/
 ├── apps/
-│   ├── desktop/          React + Vite frontend
-│   ├── orchestrator/     Python FastAPI orchestrator
-│   └── mcp-gateway/      Python FastAPI MCP aggregator
-├── docs/                 Architecture, API contracts, setup guides
-├── scripts/              test.sh, gen_tests.py
-├── start.py              Cross-platform dev launcher
-├── start.sh              macOS/Linux wrapper
-└── start.bat             Windows wrapper
+│   ├── desktop/              React + Vite frontend
+│   │   └── src/
+│   │       ├── components/   UI components (RobotAvatar, AgentBootList, AgentDetailModal,
+│   │       │                 AgentBackground, SmartHomeDashboard, PortfolioDashboard,
+│   │       │                 settings/)
+│   │       ├── hooks/        React hooks (useOrchestratorRuntime, useVoiceLoop,
+│   │       │                 useAgentConfig, useAgentVoiceConfig, …)
+│   │       └── types/        Shared TypeScript types (runtime.ts)
+│   ├── orchestrator/         Python FastAPI orchestrator (port 8787)
+│   │   └── app/
+│   │       ├── agents/       Local agent implementations
+│   │       ├── api/          FastAPI routes + WebSocket (ws.py)
+│   │       ├── core/         Config (pydantic-settings, reads .env)
+│   │       ├── models/       Pydantic contracts
+│   │       └── services/     LLM, TTS, STT, boot sequence, gateway client, session
+│   └── mcp-gateway/          Python FastAPI MCP tool gateway (port 8788)
+│       └── src/
+│           ├── config/       GatewaySettings (pydantic-settings, reads .env)
+│           ├── tools/        BaseTool ABC + tool adapters (one file per integration)
+│           ├── routers/      HTTP routers for non-tool endpoints
+│           └── main.py       FastAPI app — registers tools, auth middleware, webhook routes
+├── docs/                     Full documentation
+│   ├── architecture.md       ← this file
+│   ├── mcp-gateway.md        Gateway API, BaseTool ABC, adding new tools
+│   ├── development.md        Local setup, commands, adding new agents/services
+│   ├── agents.md             Agent overview
+│   └── agents/               Per-agent docs (weather.md, github.md, …)
+├── scripts/
+│   ├── test.sh               Master test runner (backend + frontend)
+│   └── gen_tests.py          Auto-generate test stubs for new modules
+└── launch.py                 Cross-platform dev launcher (all 3 services)
 ```
 
 ### Orchestrator layout
@@ -121,50 +154,50 @@ apps/orchestrator/app/
 ├── agents/
 │   ├── base.py           AssistantAgent ABC
 │   ├── registry.py       AGENTS list (local agents only)
-│   ├── smarthome.py      Home Assistant via hass-mcp Docker
-│   ├── whatsapp.py       Meta WhatsApp Cloud API + webhook
 │   ├── websearch.py      DuckDuckGo Instant Answers
 │   ├── calculator.py     Safe AST evaluator
 │   ├── memory.py         Persistent key-value store
-│   ├── briefing.py       Parallel gateway calls → summary
+│   ├── briefing.py       Parallel gateway tool calls → spoken summary
 │   └── general_ai.py     LLM fallback
 ├── api/
-│   ├── routes/           REST endpoints (portfolio OAuth, health)
+│   ├── routes/           REST endpoints (smarthome proxy, whatsapp relay, health)
 │   └── ws.py             WebSocket handler
 ├── core/config.py        Settings (pydantic-settings)
 ├── models/contracts.py   AgentRequest / AgentResponse / AgentHealth
 └── services/
-    ├── agent_manager.py  Session state, credential plumbing, orchestrate()
+    ├── agent_manager.py  Session state, LLM config merge, local agent dispatch
     ├── orchestrator.py   LLMOrchestrator — tool-call loop
     ├── session.py        Boot sequence, phrase pools, gateway/snippet maps, AGENT_LABELS
-    ├── gateway_client.py GatewayClient — GET /tools, POST /tools/{name}
-    ├── router.py         Keyword fallback router
+    ├── gateway_client.py GatewayClient — GET /tools, POST /tools/{name} (Bearer auth)
+    ├── router.py         Keyword fallback router (no-LLM mode)
     ├── llm.py            LLM provider abstraction
-    ├── tts_helpers.py    Per-agent voice config
-    ├── hass_mcp_client.py     Home Assistant MCP client (Docker hass-mcp bridge)
-    ├── indmoney_mcp_client.py INDmoney MCP client (portfolio REST routes only)
-    ├── auth.py           Session token management
-    ├── event_bus.py      In-process event fan-out
-    ├── metrics.py        Session metrics
-    └── tunnel.py         Cloudflare tunnel helper (WhatsApp)
+    └── tts_helpers.py    Per-agent voice config
 ```
 
 ### MCP Gateway layout
 
 ```
-apps/mcp-gateway/app/
-├── main.py               FastAPI app, lifespan, /health /tools /tools/{name}
-├── config.py             GatewaySettings (port 8788, credential placeholders)
-├── aggregator.py         MCPAggregator — register, startup, shutdown, route
-└── servers/
-    ├── base.py           BaseMCPServer ABC (connect/disconnect/list_tools/call_tool)
-    ├── indmoney_mcp_adapter.py  INDmoney BaseMCPServer adapter → mcp.indmoney.com via Streamable HTTP
-    ├── github_server.py    GitHub REST API (5 tools)
-    ├── google_server.py    Google Calendar + Gmail REST APIs
-    ├── weather_server.py   Open-Meteo (free) or OpenWeatherMap/WeatherAPI
-    ├── news_server.py      GNews API
-    ├── stocks_server.py    yfinance (no key needed)
-    └── system_server.py    psutil — CPU, RAM, disk, battery, processes
+apps/mcp-gateway/src/
+├── main.py               FastAPI app — lifespan, CORS, auth middleware, routers, /tools, /mcp
+├── config/
+│   └── settings.py       GatewaySettings — all integration credentials, read from .env
+├── tools/
+│   ├── base.py           BaseTool ABC (namespace, list_tools, call_tool, startup, shutdown)
+│   ├── registry.py       ToolRegistry — register, startup, shutdown, list, route
+│   ├── weather.py        Open-Meteo / OWM / WeatherAPI
+│   ├── stocks.py         yfinance (no key needed)
+│   ├── news.py           GNews API
+│   ├── github.py         GitHub REST API
+│   ├── google.py         Google Calendar + Gmail
+│   ├── system.py         psutil (CPU, RAM, disk, battery, processes)
+│   ├── portfolio.py      INDmoney MCP via StreamableHTTP
+│   ├── smarthome.py      Home Assistant via hass-mcp Docker
+│   └── whatsapp.py       Meta WhatsApp Cloud API
+└── routers/
+    ├── portfolio.py      OAuth PKCE flow + /api/portfolio/status + /api/portfolio/data
+    ├── system.py         /api/system/config (metric toggle)
+    ├── tunnel.py         Cloudflare tunnel start/stop/status
+    └── whatsapp.py       Webhook receive + /api/whatsapp/status
 ```
 
 ---
@@ -175,20 +208,22 @@ apps/mcp-gateway/app/
 1. User speaks          → Browser STT (or OpenAI Whisper)
 2. Text sent            → WebSocket to Orchestrator
 3. Orchestrator         → GET http://localhost:8788/tools
-                          (fetches namespaced tool list from gateway)
+                          (fetches namespaced tool list; cached per-turn)
 4. LLM call             → POST {provider}/chat/completions
                           messages=[system+user], tools=[all gateway tools + local agent tools]
-5. LLM returns          → tool_call: { name: "weather__get_current_weather", arguments: { query: "..." } }
+5. LLM returns          → tool_call: { name: "weather__get_current_weather", arguments: {...} }
 6. Orchestrator         → POST http://localhost:8788/tools/weather__get_current_weather
-                          body: { arguments: {...}, credentials: { weather_api_key: "...", ... } }
-7. Gateway routes       → WeatherServer.call_tool() → Open-Meteo/OWM HTTP call
+                          headers: { Authorization: Bearer <GATEWAY_API_TOKEN> }
+                          body: { arguments: {...} }
+7. Gateway routes       → WeatherTool.call_tool() → Open-Meteo HTTP call
+                          (credentials read from GatewaySettings / .env)
 8. Result returned      → Orchestrator → LLM synthesis prompt
 9. LLM synthesises      → Plain spoken English (1–3 sentences)
 10. TTS                 → Browser or OpenAI/ElevenLabs audio → user hears response
 ```
 
-For local agent calls (smarthome, websearch, calculator, memory, briefing, general):  
-steps 6–7 are replaced by `AgentManager.handle(agent_id, request)` — no gateway hop.
+For local agent calls (websearch, calculator, memory, briefing, general):
+steps 6–7 are replaced by `agent_manager.handle(agent_id, request)` — no gateway hop, no Bearer token.
 
 ---
 
@@ -199,14 +234,16 @@ Every gateway tool is exposed with a `<namespace>__<tool>` name to prevent colli
 | Namespace | Tools |
 |---|---|
 | `weather` | `weather__get_current_weather` |
-| `news` | `news__get_news` |
 | `stocks` | `stocks__get_quote` |
+| `news` | `news__get_news` |
 | `system` | `system__get_system_info` |
 | `github` | `github__get_summary`, `github__get_pull_requests`, `github__get_notifications`, `github__get_workflow_status`, `github__get_issues` |
 | `google` | `google__get_calendar_events`, `google__get_emails` |
 | `indmoney` | `indmoney__query_portfolio` |
+| `smarthome` | `smarthome__get_states`, `smarthome__call_service` |
+| `whatsapp` | `whatsapp__send_message`, `whatsapp__get_chat` |
 
-Local agent tools keep their plain IDs: `smarthome`, `websearch`, `calculator`, `memory`, `briefing`, `general`.
+Local agent tools keep their plain IDs: `websearch`, `calculator`, `memory`, `briefing`, `general`.
 
 ---
 
@@ -223,10 +260,10 @@ start_session (WebSocket message from UI)
   │
   ├─ GET http://localhost:8788/health   ← one gateway health check
   │
-  │  ── Gateway online ────────────────────────────────────────────────
+  │  ── Gateway online ────────────────────────────────────────────────────────
   │  speak (randomised) "MCP gateway link established — tool matrix online."
   │  asyncio.gather(_fetch_boot_snippet × N agents, timeout=5 s each)
-  │    ├─ weather__get_current_weather  → "Mumbai 28°C, partly cloudy"
+  │    ├─ weather__get_current_weather  → "Bengaluru 28°C, partly cloudy"
   │    ├─ stocks__get_quote (Nifty 50)  → "Nifty ₹24,150 (+0.43%)"
   │    ├─ news__get_news                → top headline title
   │    ├─ github__get_summary           → "3 PRs awaiting review"
@@ -235,33 +272,16 @@ start_session (WebSocket message from UI)
   │    ├─ system__get_system_info       → "CPU 18% · RAM 54%"
   │    └─ indmoney__query_portfolio     → first line of portfolio summary
   │  for each gateway agent (individual speak + agent_status_changed: online):
-  │    "Weather module synchronized and online — Mumbai 28°C, partly cloudy."
-  │    "Stock Market pipeline connected — Nifty ₹24,150 (+0.43%)."
-  │    … (snippet omitted silently if fetch failed / token not configured)
+  │    "Weather module synchronised — Bengaluru 28°C, partly cloudy."
+  │    … (snippet suppressed silently if token not configured or call failed)
   │
-  │  ── Gateway offline ─────────────────────────────────────────────
+  │  ── Gateway offline ─────────────────────────────────────────────────────
   │  speak (randomised) "MCP gateway unreachable — tool network dark."
   │  for each gateway agent: emit agent_status_changed: degraded (silent)
   │
-  ├─ asyncio.gather(test_agent(smarthome), test_agent(whatsapp))
-  │    speak individual result per local agent
-  │    emit agent_status_changed: online / degraded / failed
-  │
-  ├─ emit online (websearch, calculator, memory, briefing) — silent
+  ├─ emit online (websearch, calculator, memory, briefing) — silent, always online
   └─ emit phase_changed: ready
 ```
-
-**Boot phrase pools** (all randomised each session, defined in `session.py`):
-
-| Pool | Purpose |
-|---|---|
-| `_GW_CONNECT_PHRASES` | Spoken once when gateway health check passes (8 variants) |
-| `_GW_FAIL_PHRASES` | Spoken once when gateway is unreachable (8 variants) |
-| `_GW_AGENT_ONLINE_PHRASES` | Per-agent message template; snippet appended as `— {data}.` (10 variants) |
-
-**Live snippet extraction** (`_GW_BOOT_CALLS` + `_GW_SNIP_FN`):
-
-Each gateway agent has a designated boot tool call and a snippet extractor that distils the full response into a single short phrase (≤ 70 chars). Any call that fails, times out, or returns an error string is silently suppressed — the agent still reports online, just without a snippet.
 
 ### Per-turn orchestration
 
@@ -271,29 +291,34 @@ user_message (WebSocket)
   ├─ _fetch_gateway_tools()   GET /tools  (every turn)
   ├─ llm_orchestrator.handle(message, tools=[local + gateway])
   │    LLM picks tool → call_agent(fn_name, query)
-  │    if '__' in fn_name → gateway_client.call_tool(fn_name, args, credentials)
+  │    if '__' in fn_name → gateway_client.call_tool(fn_name, args)  ← Bearer auth
   │    else               → agent_manager.handle(fn_name, request)
   └─ LLM synthesises → TTS → audio
 ```
 
 ---
 
-## 8. Credential Flow
+## 8. Credential Architecture
 
-Credentials are **never stored server-side** across sessions. Flow:
+Credentials are split across two `.env` files — one per service:
 
 ```
-UI (localStorage) ──start_session──► Orchestrator
-                                       └─ agent_manager._session_credentials()
-                                            builds flat dict: { indmoney_token, github_token,
-                                            google_access_token, weather_api_key, … }
-                                          ↓ forwarded on every POST /tools/{name}
-                                        Gateway
-                                          └─ Server.call_tool(arguments, credentials)
-                                               injects only the relevant key per server
+apps/orchestrator/.env          apps/mcp-gateway/.env
+─────────────────────           ───────────────────────
+LLM_PROVIDER / LLM_API_KEY      GATEWAY_API_TOKEN          ← shared Bearer token
+GATEWAY_URL                     GITHUB_TOKEN
+GATEWAY_API_TOKEN               WEATHER_API_KEY
+WAKE_PHRASE                     NEWS_API_KEY
+…                               GOOGLE_ACCESS_TOKEN
+                                MYHOME_MCP_TOKEN
+                                WHATSAPP_ACCESS_TOKEN
+                                INDMONEY_OAUTH_TOKEN        ← written by OAuth flow
+                                …
 ```
 
-Fallback order: session (from UI) → `.env` environment variable → empty string.
+The orchestrator holds **no** integration credentials. It sends only `GATEWAY_API_TOKEN` as a Bearer header. All integration credentials live in the gateway's own `.env` and are read at startup by `GatewaySettings`.
+
+The INDmoney `access_token` is written to `apps/mcp-gateway/.env` by the OAuth callback handler — the desktop UI never receives or stores it.
 
 ---
 
@@ -306,7 +331,7 @@ All messages follow `{ "type": "<event>", "payload": { ... } }`.
 | type | payload | description |
 |---|---|---|
 | `start_session` | `assistant_name`, `calling_name`, `registered_agents`, `llm_config`, `agent_config`, `tts`, `stt`, `agent_voices` | Begin session |
-| `stop_session` | — | End session, clear credentials |
+| `stop_session` | — | End session |
 | `voice_input` | `text` | Transcribed speech |
 | `audio_chunk` | `data` (base64) | Raw audio for Whisper STT |
 | `audio_end` | — | Signal end of audio stream |
@@ -318,7 +343,7 @@ All messages follow `{ "type": "<event>", "payload": { ... } }`.
 | `phase_changed` | `phase` | `booting` / `ready` / `listening` / `processing` / `speaking` |
 | `agent_status_changed` | `agent`, `status` | `starting` / `online` / `degraded` / `failed` |
 | `boot_status` | `text`, `agent_id?`, `agent_status?` | Spoken boot line |
-| `session_config` | `tts_provider`, `stt_provider`, `wake_word_enabled`, `wake_word_model` | Effective session config |
+| `session_config` | `tts_provider`, `stt_provider`, `wake_word_enabled` | Effective session config |
 | `response` | `text`, `agent` | Final answer + which agent/tool handled it |
 | `error` | `message` | Non-fatal error description |
 | `transcription` | `text` | STT result echo |
@@ -331,7 +356,7 @@ All messages follow `{ "type": "<event>", "payload": { ... } }`.
 
 `apps/orchestrator/app/services/orchestrator.py` — `LLMOrchestrator`
 
-Supports OpenAI, Anthropic, and Gemini. All three implement the same loop:
+Supports OpenAI, Anthropic, Gemini, and Ollama. All implement the same loop:
 
 1. Build tools list from enabled local agents + gateway tools.
 2. Send `[system, user]` + tools to the LLM.
@@ -344,58 +369,23 @@ No keyword routing happens in this path. The LLM selects the tool from descripti
 
 ---
 
-## 11. MCP Gateway Design
+## 11. Security
 
-`apps/mcp-gateway/` — independent FastAPI service on port 8788.
-
-### API
-
-| Endpoint | Description |
-|---|---|
-| `GET /health` | `{ status: "ok", servers: [...] }` — server statuses |
-| `GET /tools` | `[ { name, description, inputSchema } ]` — all namespaced tools |
-| `POST /tools/{tool_name}` | `{ arguments, credentials }` → tool result |
-
-### Server adapters
-
-All servers implement `BaseMCPServer`:
-
-```python
-class BaseMCPServer(ABC):
-    namespace: str
-    async def connect(self) -> None: ...
-    async def disconnect(self) -> None: ...
-    async def list_tools(self) -> list[dict]: ...
-    async def call_tool(self, tool_name: str, arguments: dict, credentials: dict) -> Any: ...
-```
-
-`MCPAggregator` registers servers, merges their tool lists with namespace prefixes, and routes calls.
-
-### Error codes
-
-| HTTP status | Meaning |
-|---|---|
-| 404 | Unknown tool name |
-| 401 | Missing or invalid credentials |
-| 503 | Server-side call failed (upstream error, timeout, etc.) |
-
----
-
-## 12. Security
-
-- WebSocket origin is enforced against an allowlist (`ALLOWED_ORIGINS`).
+- WebSocket origin enforced against an allowlist (`ALLOWED_ORIGINS`).
 - Per-connection rate limiting: 30 messages / 60 s sliding window.
 - Input length capped at 2000 characters per message.
-- Credentials are held in memory only for the duration of the active session.
+- Orchestrator authenticates to the gateway with a shared Bearer token (`GATEWAY_API_TOKEN`).
+- All integration credentials live in `apps/mcp-gateway/.env` — never in the orchestrator or the UI.
 - INDmoney MCP endpoint is hardcoded (`https://mcp.indmoney.com/mcp`) — no user-controlled URL parameters for MCP connections (SSRF prevention).
+- Portfolio OAuth uses PKCE + Dynamic Client Registration (RFC 7591); the access token is stored only in the gateway's `.env`.
 - No credentials are logged at any level.
-- Portfolio OAuth uses PKCE + Dynamic Client Registration (RFC 7591).
+- `.cloudflared/` (Cloudflare tunnel config containing tunnel UUIDs and hostnames) is gitignored.
 
 ---
 
-## 13. Start Order
+## 12. Start Order
 
-`start.py` manages all three services:
+`launch.py` manages all three services:
 
 ```
 1. MCP Gateway starts (port 8788) — waits until /health responds
@@ -404,6 +394,14 @@ class BaseMCPServer(ABC):
 ```
 
 Each service runs in its own virtualenv:
-- `apps/orchestrator/.venv`
 - `apps/mcp-gateway/.venv`
+- `apps/orchestrator/.venv`
 - `apps/desktop/node_modules`
+
+```bash
+python3 launch.py setup    # first-time: create venvs, install deps
+python3 launch.py          # start all services (default)
+python3 launch.py stop     # stop all services
+python3 launch.py status   # check service status
+python3 launch.py restart  # stop then start
+```

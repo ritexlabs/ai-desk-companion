@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from app.agents.base import AssistantAgent
-from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, AgentStatus
+from app.models.contracts import AgentHealth, AgentResponse, AgentStatus
 
 
 class BriefingAgent(AssistantAgent):
@@ -30,20 +30,19 @@ class BriefingAgent(AssistantAgent):
         return None
 
     async def handle(self, request: AgentRequest) -> AgentResponse:
-        from app.dependencies import agent_manager, gateway_client
+        from app.dependencies import agent_manager
 
-        creds   = agent_manager._session_credentials()
         enabled = set(agent_manager._session_enabled_agents)
 
         tasks = [
-            ('Weather',  self._gw('weather__get_current_weather',   {'query': 'current weather'}, creds)),
-            ('Calendar', self._gw('google__get_calendar_events',     {'query': 'events today'},    creds)),
-            ('News',     self._gw('news__get_news',                  {'query': 'top 3 headlines'}, creds)),
+            ('Weather',  self._gw('weather__get_current_weather',   {'query': 'current weather'})),
+            ('Calendar', self._gw('google__get_calendar_events',     {'query': 'events today'})),
+            ('News',     self._gw('news__get_news',                  {'query': 'top 3 headlines'})),
         ]
 
         if 'smarthome' in enabled:
             tasks.append(
-                ('Home', self._local('smarthome', 'Give me a brief status of my home devices.', request.context))
+                ('Home', self._gw('smarthome__system_overview', {}))
             )
 
         labels, coros = zip(*tasks)
@@ -65,18 +64,10 @@ class BriefingAgent(AssistantAgent):
             )
         return AgentResponse(agent=self.id, text=' | '.join(parts))
 
-    async def _gw(self, tool_name: str, arguments: dict, credentials: dict) -> str:
+    async def _gw(self, tool_name: str, arguments: dict) -> str:
         from app.dependencies import gateway_client
         try:
-            result = await gateway_client.call_tool(tool_name, arguments, credentials)
+            result = await gateway_client.call_tool(tool_name, arguments)
             return str(result).strip() if result else ''
-        except Exception:
-            return ''
-
-    async def _local(self, agent_id: str, query: str, context: dict) -> str:
-        from app.dependencies import agent_manager
-        try:
-            resp = await agent_manager.handle(agent_id, AgentRequest(text=query, context=context))
-            return resp.text.strip()[:300]
         except Exception:
             return ''

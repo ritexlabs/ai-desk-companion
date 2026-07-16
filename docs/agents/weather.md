@@ -100,7 +100,7 @@ You say: "What is the weather in Bengaluru?"
 
 | Requirement | Notes |
 |-------------|-------|
-| App running (`python3 start.py`) | Orchestrator must be up |
+| App running (`python3 launch.py`) | Orchestrator must be up |
 | Internet connection | Required to fetch weather data |
 | API key | **Optional** — Open-Meteo works without any key |
 
@@ -182,7 +182,7 @@ You can configure the Weather agent via the Settings UI or by editing `.env` dir
 
 ### C1. Configure via Settings UI (recommended)
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **Weather**
 4. Fill in:
@@ -208,7 +208,7 @@ WEATHER_DEFAULT_CITY=Bengaluru         # used when no city is mentioned in the v
 Restart the app after editing `.env`:
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 ---

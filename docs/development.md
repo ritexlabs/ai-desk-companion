@@ -17,12 +17,13 @@
 git clone https://github.com/ritexlabs/ai-desk-companion.git
 cd ai-desk-companion
 
-# One-command setup and launch (installs deps on first run)
-python3 start.py          # macOS / Linux
-python start.py           # Windows
+python3 launch.py setup   # first-time install (creates venvs, installs all deps)
+python3 launch.py start   # start all services and open the browser
+
+# Windows: use  python launch.py  instead of  python3 launch.py
 ```
 
-The launcher:
+`launch.py setup`:
 1. Creates a Python virtual environment in `apps/mcp-gateway/.venv`
 2. Installs MCP Gateway Python dependencies from `apps/mcp-gateway/requirements.txt`
 3. Creates a Python virtual environment in `apps/orchestrator/.venv`
@@ -38,7 +39,7 @@ cd apps/mcp-gateway
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8788
+uvicorn src.main:app --reload --port 8788
 ```
 
 **Terminal 2 — Orchestrator**
@@ -161,16 +162,16 @@ See the full guide: [docs/mcp-gateway.md](mcp-gateway.md)
 
 **Short version — 4 steps:**
 
-1. Create `apps/mcp-gateway/app/servers/myservice_server.py` implementing `BaseMCPServer` (see any existing server as a template).
-2. Register it in `apps/mcp-gateway/app/main.py` → `_register_servers()`.
-3. Add its credential key to `apps/orchestrator/app/services/agent_manager.py` → `_session_credentials()`.
-4. Add the frontend credential field in `apps/desktop/src/hooks/useAgentConfig.ts` and a settings panel.
+1. Create `apps/mcp-gateway/src/tools/myservice.py` implementing `BaseTool` (see any existing tool as a template). Credentials are read from `settings` — no forwarding needed.
+2. Register it in `apps/mcp-gateway/src/main.py` → `_register_tools()`.
+3. Add credential keys to `apps/mcp-gateway/.env` (and document them in `.env.sample`).
+4. The orchestrator and frontend need no changes — the gateway discovers the tool automatically.
 
 The LLM discovers the tool automatically from its description. No keyword rules, no boot query, no agent class.
 
-### Case B — New local agent (for agents that need persistent connections or side-channel webhooks)
+### Case B — New local agent (for agents that run entirely in-process)
 
-Use this for agents like Smart Home (Docker subprocess) or WhatsApp (webhook receiver). Follow these steps in order — skipping any makes the agent invisible in the roster or silently ignored by the router.
+Use this for pure in-process logic — calculators, memory stores, keyword tools. Services that call external APIs or receive webhooks should be gateway tools (Case A). Follow these steps in order — skipping any makes the agent invisible in the roster or silently ignored by the router.
 
 #### Step 1 — Backend Python class
 
@@ -314,7 +315,7 @@ ai-desk-companion/
 │   │   └── package.json
 │   ├── orchestrator/
 │   │   ├── app/
-│   │   │   ├── agents/           Local agent implementations (smarthome, whatsapp, built-in skills)
+│   │   │   ├── agents/           Local agent implementations (websearch, calculator, memory, briefing, general_ai)
 │   │   │   ├── api/              FastAPI routes and WebSocket endpoint (ws.py)
 │   │   │   ├── core/             Config and settings (reads .env)
 │   │   │   ├── models/           Pydantic contracts
@@ -328,26 +329,28 @@ ai-desk-companion/
 │   │   ├── requirements.txt      Runtime dependencies
 │   │   └── requirements-dev.txt  Test-only dependencies
 │   └── mcp-gateway/
-│       ├── app/
-│       │   ├── main.py           FastAPI app (/health /tools /tools/{name})
-│       │   ├── aggregator.py     MCPAggregator — register, merge, route
-│       │   ├── config.py         GatewaySettings
-│       │   └── servers/          BaseMCPServer + 7 server adapters
+│       ├── src/
+│       │   ├── main.py           FastAPI app (Bearer auth, /health, /tools, /mcp)
+│       │   ├── config/settings.py  GatewaySettings — all credentials from .env
+│       │   ├── tools/            BaseTool ABC + 9 tool implementations
+│       │   ├── routers/          portfolio (OAuth), system, tunnel, whatsapp
+│       │   └── utils/            errors.py, logger.py
+│       ├── .env.sample           Template — copy to .env and fill in keys
 │       └── requirements.txt
 ├── docs/                         All documentation
 ├── scripts/
 │   ├── test.sh                   Master test runner (backend + frontend + report)
 │   └── gen_tests.py              Auto-generate test stubs for new modules
-├── start.py                      Cross-platform dev launcher (3 services)
-├── start.sh                      macOS/Linux shell wrapper
-└── start.bat                     Windows wrapper
+└── launch.py                     Cross-platform launcher (setup/start/stop/status/restart/clean)
 ```
 
 ---
 
 ## Environment Variables
 
-Copy `apps/orchestrator/.env.sample` to `apps/orchestrator/.env` and fill in any keys you need.
+Credentials are split across two `.env` files — one per service. Copy the matching `.env.sample` and fill in only the keys you need.
+
+### `apps/orchestrator/.env`
 
 | Variable | Description | Required |
 |----------|-------------|----------|
@@ -361,19 +364,32 @@ Copy `apps/orchestrator/.env.sample` to `apps/orchestrator/.env` and fill in any
 | `OPENAI_TTS_MODEL` | `tts-1` or `tts-1-hd` | No (defaults to tts-1) |
 | `ELEVENLABS_API_KEY` | ElevenLabs API key | For ElevenLabs TTS |
 | `ELEVENLABS_VOICE_ID` | ElevenLabs voice ID | For ElevenLabs TTS |
-| `WEATHER_API_KEY` | OpenWeatherMap or WeatherAPI key | For Weather agent |
-| `WEATHER_PROVIDER` | `openweathermap` or `weatherapi` | No (defaults to openweathermap) |
-| `WEATHER_DEFAULT_CITY` | Default city for weather queries | No |
+| `GATEWAY_URL` | MCP Gateway base URL | No (defaults to http://localhost:8788) |
+| `GATEWAY_API_TOKEN` | Shared Bearer token to authenticate with the gateway | No (leave blank for local dev) |
+| `WAKE_PHRASE` | Wake word / phrase the assistant listens for | No (defaults to Robo) |
+
+### `apps/mcp-gateway/.env`
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `GATEWAY_API_TOKEN` | Must match the orchestrator's `GATEWAY_API_TOKEN` | No (leave blank for local dev) |
 | `GITHUB_TOKEN` | GitHub Personal Access Token | For GitHub agent |
 | `GOOGLE_ACCESS_TOKEN` | Google OAuth2 access token | For Calendar/Gmail agents |
 | `GOOGLE_REFRESH_TOKEN` | Google OAuth2 refresh token | For token refresh |
 | `GOOGLE_CLIENT_ID` | Google OAuth2 client ID | For token refresh |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth2 client secret | For token refresh |
+| `WEATHER_API_KEY` | OpenWeatherMap or WeatherAPI key | No (Open-Meteo free fallback) |
+| `WEATHER_PROVIDER` | `open_meteo` / `openweathermap` / `weatherapi` | No (defaults to open_meteo) |
+| `WEATHER_DEFAULT_CITY` | Default city for weather queries | No |
 | `STOCK_DEFAULT_MARKET` | `IN` (NSE) or `US` (NYSE/NASDAQ) | No (defaults to IN) |
-| `NEWS_API_KEY` | NewsAPI.org API key | For News agent |
+| `NEWS_API_KEY` | GNews API key | For News agent |
 | `NEWS_DEFAULT_COUNTRY` | ISO 3166-1 alpha-2 code (`in`, `us`, …) | No |
-| `WAKE_WORD_ENABLED` | `true` / `false` | No (defaults to false) |
-| `WAKE_WORD_MODEL` | openWakeWord model name | No |
+| `MYHOME_MCP_ENDPOINT` | Home Assistant URL | For Smart Home agent |
+| `MYHOME_MCP_TOKEN` | Home Assistant long-lived access token | For Smart Home agent |
+| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp phone number ID | For WhatsApp agent |
+| `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp system user token | For WhatsApp agent |
+| `WHATSAPP_APP_SECRET` | Meta app secret (webhook signature validation) | For WhatsApp webhooks |
+| `INDMONEY_OAUTH_TOKEN` | Written automatically by the OAuth flow | — (do not set manually) |
 
 ---
 

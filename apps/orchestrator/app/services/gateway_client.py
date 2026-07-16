@@ -10,43 +10,48 @@ logger = logging.getLogger(__name__)
 
 class GatewayClient:
     """
-    HTTP client for the MCP Gateway at apps/mcp-gateway (port 8788).
+    HTTP client for the MCP Gateway (default: apps/mcp-gateway, port 8788).
 
-    Orchestrator calls this to list available tools and invoke them.
-    credentials is a flat dict of all session tokens forwarded per-call
-    so the gateway can inject only what each server needs.
+    The gateway owns all tool credentials in its own .env — this client
+    does NOT forward credentials per-call.  It authenticates with a single
+    Bearer token (GATEWAY_API_TOKEN) that matches the gateway's configuration.
+
+    To point at an external gateway, change GATEWAY_URL and GATEWAY_API_TOKEN
+    in the orchestrator .env — no other code changes needed.
     """
 
-    def __init__(self, base_url: str, timeout: float = 30.0) -> None:
-        self._base = base_url.rstrip('/')
+    def __init__(self, base_url: str, api_token: str = '', timeout: float = 30.0) -> None:
+        self._base    = base_url.rstrip('/')
+        self._token   = api_token
         self._timeout = timeout
+
+    def _headers(self) -> dict:
+        if self._token:
+            return {'Authorization': f'Bearer {self._token}'}
+        return {}
 
     async def health(self) -> dict:
         async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f'{self._base}/health')
+            r = await client.get(f'{self._base}/health', headers=self._headers())
             r.raise_for_status()
             return r.json()
 
     async def list_tools(self) -> list[dict]:
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                r = await client.get(f'{self._base}/tools')
+                r = await client.get(f'{self._base}/tools', headers=self._headers())
                 r.raise_for_status()
                 return r.json()
         except Exception as exc:
             logger.warning('Gateway list_tools failed: %s', exc)
             return []
 
-    async def call_tool(
-        self,
-        tool_name: str,
-        arguments: dict,
-        credentials: dict,
-    ) -> Any:
+    async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.post(
                 f'{self._base}/tools/{tool_name}',
-                json={'arguments': arguments, 'credentials': credentials},
+                json={'arguments': arguments},
+                headers=self._headers(),
             )
             if r.status_code == 401:
                 raise PermissionError(r.json().get('detail', 'Unauthorized'))

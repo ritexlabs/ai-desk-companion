@@ -1,139 +1,178 @@
-import { useState } from 'react';
-import { ChevronDown, ChevronUp, LogIn, LogOut, RefreshCw } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { LogIn, LogOut, RefreshCw } from 'lucide-react';
 import type { PortfolioCreds } from '../../hooks/useAgentConfig';
-import { SectionLabel, StatusBadge } from './shared';
+
+const GATEWAY = (import.meta.env.VITE_GATEWAY_URL as string | undefined) ?? 'http://localhost:8788';
 
 interface Props {
-  config:      PortfolioCreds;
-  onPatch:     (p: Partial<PortfolioCreds>) => void;
-  onConnect:   () => void;
+  config:       PortfolioCreds;
+  onPatch:      (p: Partial<PortfolioCreds>) => void;
+  onConnect:    () => void;
   onDisconnect: () => void;
-  onRefresh:   () => void;
+  onRefresh:    () => void;
 }
 
-export function PortfolioSettings({ config, onPatch, onConnect, onDisconnect, onRefresh }: Props) {
-  const connected     = config.status === 'connected' && !!config.connectedAccount;
-  const discoveryFail = config.status === 'error';
-  const hasManual     = !!(config.authEndpoint || config.tokenEndpoint);
+export function PortfolioSettings({ config, onPatch, onDisconnect }: Props) {
+  const [checking, setChecking] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // advancedOpen tracks user intent; the section also force-opens on error or when fields are set
-  const [advancedOpen, setAdvancedOpen] = useState(hasManual);
-  const showAdvanced = advancedOpen || discoveryFail || hasManual;
+  const connected = config.status === 'connected';
+
+  // Poll gateway status after launching the auth tab
+  function startPolling() {
+    if (pollRef.current) return;
+    pollRef.current = setInterval(async () => {
+      try {
+        const res  = await fetch(`${GATEWAY}/api/portfolio/status`);
+        const data = await res.json() as { connected: boolean; info?: string; expires_at?: number };
+        if (data.connected) {
+          stopPolling();
+          onPatch({
+            status:           'connected',
+            connectedAccount: 'INDmoney',
+            info:             'Portfolio connected',
+            enabled:          true,
+          });
+        }
+      } catch {
+        // gateway not reachable yet — keep polling
+      }
+    }, 1500);
+  }
+
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setChecking(false);
+  }
+
+  useEffect(() => () => stopPolling(), []);
+
+  async function handleConnect() {
+    setChecking(true);
+    onPatch({ status: 'verifying', info: '' });
+    // Open gateway auth flow in a new tab — INDmoney shows mobile/OTP login
+    window.open(`${GATEWAY}/auth/indmoney`, '_blank', 'width=520,height=680,left=200,top=80');
+    startPolling();
+    // Stop polling after 5 minutes regardless
+    setTimeout(() => {
+      if (pollRef.current) {
+        stopPolling();
+        onPatch({ status: 'idle' });
+      }
+    }, 5 * 60 * 1000);
+  }
+
+  async function handleDisconnect() {
+    try {
+      await fetch(`${GATEWAY}/auth/indmoney/token`, { method: 'DELETE' });
+    } catch { /* ignore if gateway unreachable */ }
+    onDisconnect();
+  }
+
+  async function handleCheckStatus() {
+    setChecking(true);
+    try {
+      const res  = await fetch(`${GATEWAY}/api/portfolio/status`);
+      const data = await res.json() as { connected: boolean; info?: string };
+      if (data.connected) {
+        onPatch({ status: 'connected', connectedAccount: 'INDmoney', info: 'Portfolio connected', enabled: true });
+      } else {
+        onPatch({ status: 'idle', info: data.info ?? '' });
+      }
+    } catch {
+      onPatch({ status: 'error', info: 'Gateway unreachable' });
+    } finally {
+      setChecking(false);
+    }
+  }
 
   return (
-    <div className="space-y-5">
-      {/* MCP endpoint + Client ID */}
-      <section className="space-y-3">
-        <SectionLabel>INDmoney MCP Server</SectionLabel>
+    <div className="space-y-4 pt-1">
+      <div className="rounded-xl border border-rose-400/25 bg-rose-400/6 px-4 py-3 text-sm text-rose-300">
+        Connects to your <span className="font-semibold">INDmoney</span> portfolio via OAuth 2.0.
+        Clicking <em>Connect</em> opens INDmoney's login page — enter your mobile number and OTP there.
+      </div>
 
-        <div className="space-y-2">
-          <label className="text-[10px] text-slate-500 uppercase tracking-wide">MCP Endpoint</label>
-          <input
-            type="text"
-            value={config.endpoint}
-            onChange={(e) => onPatch({ endpoint: e.target.value })}
-            placeholder="https://mcp.indmoney.com/mcp"
-            className="w-full h-9 rounded-xl border border-white/10 bg-black/35 px-3 text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-400/35 transition"
-          />
-          <p className="text-[10px] text-slate-600">Leave as default unless INDmoney provides a different URL.</p>
-        </div>
-      </section>
-
-      {/* OAuth connect / status */}
-      <section className="space-y-3">
-        <SectionLabel>INDmoney Account</SectionLabel>
-
-        {connected ? (
-          <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/6 p-3 space-y-2.5">
-            <div className="flex items-center gap-2">
-              <StatusBadge status="connected" info={config.connectedAccount} />
-              {config.tokenExpiresAt > 0 && config.tokenExpiresAt < Date.now() + 5 * 60 * 1000 && (
-                <span className="text-[10px] text-amber-400">Token expiring soon</span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={onRefresh}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-cyan-500/15 border border-cyan-400/25 text-cyan-300 text-xs font-medium hover:bg-cyan-500/25 transition"
-              >
-                <RefreshCw className="h-3 w-3" /> Refresh token
-              </button>
-              <button
-                onClick={onDisconnect}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-red-500/12 border border-red-400/25 text-red-400 text-xs font-medium hover:bg-red-500/20 transition"
-              >
-                <LogOut className="h-3 w-3" /> Disconnect
-              </button>
-            </div>
+      {connected ? (
+        <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/6 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
+            <span className="text-sm text-emerald-300 font-medium">
+              {config.connectedAccount ?? 'INDmoney'} connected
+            </span>
           </div>
-        ) : (
-          <div className="space-y-2.5">
+          <div className="flex gap-2">
             <button
-              onClick={onConnect}
-              disabled={config.status === 'verifying'}
-              className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-rose-500/15 border border-rose-400/25 text-rose-300 text-sm font-medium hover:bg-rose-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={handleCheckStatus}
+              disabled={checking}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-cyan-500/15 border border-cyan-400/25 text-cyan-300 text-xs font-medium hover:bg-cyan-500/25 disabled:opacity-40 transition"
             >
-              <LogIn className="h-4 w-4" />
-              {config.status === 'verifying' ? 'Connecting…' : 'Connect with INDmoney'}
+              <RefreshCw className={`h-3 w-3 ${checking ? 'animate-spin' : ''}`} />
+              Verify
             </button>
-            {config.status === 'error' && (
-              <p className="text-[11px] text-amber-400 text-center leading-relaxed">
-                Could not connect automatically — enter the OAuth endpoints below.
-              </p>
-            )}
-            <p className="text-[10px] text-slate-600 text-center leading-relaxed">
-              Opens a sign-in popup. INDmoney uses OAuth 2.0 — no password is stored here.
-            </p>
+            <button
+              onClick={handleDisconnect}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-red-500/12 border border-red-400/25 text-red-400 text-xs font-medium hover:bg-red-500/20 transition"
+            >
+              <LogOut className="h-3 w-3" /> Disconnect
+            </button>
           </div>
-        )}
-      </section>
-
-      {/* Advanced: manual OAuth endpoints */}
-      {!connected && (
-        <section className="space-y-3">
+        </div>
+      ) : (
+        <div className="space-y-3">
           <button
-            onClick={() => setAdvancedOpen((v) => !v)}
-            className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 uppercase tracking-wide transition"
+            onClick={handleConnect}
+            disabled={config.status === 'verifying' || checking}
+            className="w-full flex items-center justify-center gap-2 h-10 rounded-xl bg-rose-500/15 border border-rose-400/25 text-rose-300 text-sm font-medium hover:bg-rose-500/25 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {showAdvanced ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            Advanced — Manual OAuth endpoints
+            <LogIn className="h-4 w-4" />
+            {config.status === 'verifying' ? 'Waiting for login…' : 'Connect with INDmoney'}
           </button>
 
-          {showAdvanced && (
-            <div className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-3">
-              <p className="text-[10px] text-slate-500 leading-relaxed">
-                If auto-discovery fails, enter the OAuth endpoints from{' '}
-                <span className="text-slate-400">INDmoney Developer Portal</span>.
-                Leave blank to use auto-discovery.
+          {config.status === 'verifying' && (
+            <div className="rounded-xl border border-rose-400/15 bg-rose-400/5 px-4 py-3 space-y-2">
+              <p className="text-[11px] text-rose-300/80 leading-relaxed text-center">
+                INDmoney login page opened. Enter your mobile number and OTP there.
               </p>
-              <div className="space-y-2">
-                <label className="text-[10px] text-slate-500 uppercase tracking-wide">Authorization Endpoint</label>
-                <input
-                  type="url"
-                  value={config.authEndpoint}
-                  onChange={(e) => onPatch({ authEndpoint: e.target.value })}
-                  placeholder="https://www.indmoney.com/oauth/authorize"
-                  className="w-full h-9 rounded-xl border border-white/10 bg-black/35 px-3 text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-400/35 transition"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] text-slate-500 uppercase tracking-wide">Token Endpoint</label>
-                <input
-                  type="url"
-                  value={config.tokenEndpoint}
-                  onChange={(e) => onPatch({ tokenEndpoint: e.target.value })}
-                  placeholder="https://www.indmoney.com/oauth/token"
-                  className="w-full h-9 rounded-xl border border-white/10 bg-black/35 px-3 text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-400/35 transition"
-                />
-              </div>
+              <button
+                onClick={handleCheckStatus}
+                className="w-full h-8 rounded-lg bg-white/5 border border-white/10 text-slate-400 text-xs hover:bg-white/8 transition"
+              >
+                Already logged in? Check status
+              </button>
+              <button
+                onClick={() => { stopPolling(); onPatch({ status: 'idle' }); }}
+                className="w-full h-8 rounded-lg text-slate-600 text-xs hover:text-slate-400 transition"
+              >
+                Cancel
+              </button>
             </div>
           )}
-        </section>
+
+          {config.status === 'error' && config.info && (
+            <p className="text-[11px] text-red-400 text-center">{config.info}</p>
+          )}
+        </div>
       )}
 
-      {/* Capability summary */}
-      <section className="rounded-xl border border-white/8 bg-white/3 p-3 space-y-1.5">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">What this agent can do</div>
+      {/* How it works */}
+      <div className="rounded-xl border border-white/6 bg-white/3 px-3 py-2.5 space-y-1.5 text-[11px] text-slate-500 leading-relaxed">
+        <p className="font-medium text-slate-400">How it works:</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>Click <em>Connect with INDmoney</em> — a login page opens</li>
+          <li>Enter your registered mobile number</li>
+          <li>Verify the OTP sent to your phone</li>
+          <li>Tab closes automatically — portfolio is linked</li>
+        </ol>
+        <p className="mt-2 text-slate-600">
+          Tokens are stored in the gateway's <code className="text-slate-500">.env</code> file and
+          are auto-refreshed before expiry. No credentials are stored in the browser.
+        </p>
+      </div>
+
+      {/* What it can do */}
+      <div className="rounded-xl border border-white/6 bg-white/3 px-3 py-2.5 space-y-1.5">
+        <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">What this agent can do</p>
         <ul className="text-[11px] text-slate-500 space-y-1">
           <li>• View equity holdings and current values</li>
           <li>• Check portfolio P&amp;L and returns</li>
@@ -141,7 +180,7 @@ export function PortfolioSettings({ config, onPatch, onConnect, onDisconnect, on
           <li>• See watchlist and tracked instruments</li>
           <li>• Review recent buy/sell transactions</li>
         </ul>
-      </section>
+      </div>
     </div>
   );
 }

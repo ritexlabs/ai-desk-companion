@@ -201,7 +201,7 @@ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI4Y...
 
 ### C1. Configure via Settings UI (recommended)
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **Smart Home**
 4. Fill in:
@@ -223,7 +223,7 @@ MYHOME_MCP_TOKEN=eyJhbGci...your-long-token...
 Restart the app after editing `.env`:
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 ---

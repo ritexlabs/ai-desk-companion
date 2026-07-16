@@ -19,6 +19,7 @@ import { NewsSettings }      from './NewsSettings';
 import { SmartHomeSettings } from './SmartHomeSettings';
 import { PortfolioSettings } from './PortfolioSettings';
 import { WhatsappSettings }  from './WhatsappSettings';
+import { SystemSettings }    from './SystemSettings';
 
 // ── Agent metadata ────────────────────────────────────────────────────────────
 
@@ -348,6 +349,8 @@ function DetailView({
 
   function renderForm() {
     switch (agentId) {
+      case 'system':
+        return <SystemSettings />;
       case 'weather':
         return <WeatherSettings config={config.weather} onPatch={(p) => onPatch('weather', p)} onVerify={onVerifyWeather} />;
       case 'google':

@@ -197,7 +197,7 @@ The default Ollama base URL is `http://localhost:11434`. If you run Ollama on a 
 
 ## 8. Configure in the app
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click **⚙ → AI**
 3. Select your **Provider** (Anthropic / OpenAI / Gemini / Ollama)
 4. Choose a **Model** from the dropdown

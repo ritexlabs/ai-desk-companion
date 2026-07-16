@@ -16,7 +16,7 @@ Python FastAPI backend for AI Desk Companion — port 8787.
 The repo-root launcher starts all three services in order (gateway first, then orchestrator, then desktop):
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 To start the orchestrator independently (gateway must already be running on port 8788):

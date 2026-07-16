@@ -94,7 +94,7 @@ Everything stays on your machine. No data is sent to any external service.
 
 | Requirement | Notes |
 |-------------|-------|
-| App running (`python3 start.py`) | That is all — no other setup needed |
+| App running (`python3 launch.py`) | That is all — no other setup needed |
 | `psutil` Python package | Installed automatically by `pip install -r requirements.txt` |
 
 No credentials, no account, no API key.
@@ -107,7 +107,7 @@ The System agent is **enabled by default**. You do not need to configure anythin
 
 ### A1. Confirm it is running
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. The agent roster in the sidebar should show **System** with a green dot
 3. Say *"Hey Robo, what is my CPU usage?"* — Robo reads your current CPU load
 
@@ -175,7 +175,7 @@ The agent takes a 200 ms CPU sample (`interval=0.2`). If you are calling it in r
 ### "System agent is offline" in roster
 
 1. Check the orchestrator is running: open `http://localhost:8787` in a browser — you should see JSON
-2. Restart the app: `python3 start.py`
+2. Restart the app: `python3 launch.py`
 3. Check for Python errors in the terminal output
 
 ---

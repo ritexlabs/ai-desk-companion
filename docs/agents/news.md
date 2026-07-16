@@ -105,7 +105,7 @@ You say: "Any news about artificial intelligence?"
 |-------------|-------|
 | A GNews account | Free at [gnews.io](https://gnews.io) — takes 1 minute |
 | A GNews API key | Provided immediately on signup |
-| App running (`python3 start.py`) | Orchestrator must be up |
+| App running (`python3 launch.py`) | Orchestrator must be up |
 | Internet connection | Required to reach the GNews API |
 
 ---
@@ -149,7 +149,7 @@ You say: "Any news about artificial intelligence?"
 
 ### B1. Configure via Settings UI (recommended)
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **News**
 4. Fill in:
@@ -175,7 +175,7 @@ NEWS_DEFAULT_CITY=               # optional: city name
 Restart the app after editing `.env`:
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 ---

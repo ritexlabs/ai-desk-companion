@@ -97,7 +97,7 @@ You say: "Do I have any unread emails?"
 | Requirement | Notes |
 |-------------|-------|
 | A Google account | The one your Gmail inbox lives on |
-| App running (`python3 start.py`) | Orchestrator must be up |
+| App running (`python3 launch.py`) | Orchestrator must be up |
 | Internet connection | Required to reach the Gmail API |
 
 ---
@@ -176,7 +176,7 @@ You will use the [Google OAuth Playground](https://developers.google.com/oauthpl
 
 ### C1. Configure via Settings UI (recommended)
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **Gmail**
 4. Paste your **Access token** into the token field
@@ -197,7 +197,7 @@ GOOGLE_ACCESS_TOKEN=ya29.your-token-here
 Restart the app after editing `.env`:
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 ---

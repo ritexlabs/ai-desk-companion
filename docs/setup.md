@@ -23,27 +23,34 @@ npm --version
 
 ## Option A — Single-command launcher (recommended)
 
-The `start.py` launcher does everything on first run: creates the Python virtualenv, installs all Python and Node dependencies, starts both services in parallel, and opens the browser.
+`launch.py` is the cross-platform launcher — works identically on macOS, Linux, and Windows.
 
-**macOS / Linux**
 ```bash
-python3 start.py
+# First-time setup after cloning (creates venvs, installs all deps, prepares .env files)
+python3 launch.py setup
+
+# Start all three services (gateway → orchestrator → desktop) and open the browser
+python3 launch.py start
+
+# Windows: use  python launch.py  instead of  python3 launch.py
 ```
 
-**Windows**
-```cmd
-python start.py
-```
-
-**Launcher flags**
+**All commands**
 ```bash
-python3 start.py --no-browser   # skip auto-opening the browser
-python3 start.py --no-color     # plain terminal output (CI-friendly)
-python3 start.py --clean        # wipe venv / node_modules / build artifacts, then exit
+python3 launch.py setup            # first-time install (run once after cloning)
+python3 launch.py start            # start all services (default when no command given)
+python3 launch.py stop             # stop all running services
+python3 launch.py status           # show live status of each service
+python3 launch.py restart          # stop then start
+python3 launch.py clean            # remove venv / node_modules / build artefacts
+
+python3 launch.py start --no-browser        # skip auto-opening the browser
+python3 launch.py start --browser safari    # open in Safari instead of Chrome
+python3 launch.py start --no-color          # plain terminal output (CI-friendly)
 ```
 
-The launcher prefixes each output line with `[ORCH]` (orchestrator) or `[ UI ]` (desktop).  
-Press **Ctrl+C** to stop both services cleanly.
+The launcher prefixes each output line with `[GW  ]` (gateway), `[ORCH]` (orchestrator), or `[ UI ]` (desktop).  
+Press **Ctrl+C** or run `python3 launch.py stop` to stop all services cleanly.
 
 ---
 
@@ -63,7 +70,7 @@ pip install -r requirements.txt
 
 # Every time
 source .venv/bin/activate
-uvicorn app.main:app --reload --port 8788
+uvicorn src.main:app --reload --port 8788
 ```
 
 **Terminal 2 — Orchestrator (Python FastAPI, port 8787)**
@@ -181,7 +188,7 @@ cp apps/orchestrator/.env.example apps/orchestrator/.env
 ### Phase 2 — Real local orchestrator
 - Python FastAPI WebSocket orchestrator at `:8787`
 - Boot sequence via WS events, auto-reconnect, WS badge in header
-- `start.py` cross-platform launcher
+- `launch.py` cross-platform launcher
 
 ### Phase 3 — Real voice stack
 - OpenAI TTS and Whisper STT integration

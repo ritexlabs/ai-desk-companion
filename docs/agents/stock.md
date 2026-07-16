@@ -112,7 +112,7 @@ You say: "What is the Reliance stock price?"
 | Requirement | Notes |
 |-------------|-------|
 | Python packages | `yfinance`, `pandas`, `numpy` — install steps below |
-| App running (`python3 start.py`) | Orchestrator must be up |
+| App running (`python3 launch.py`) | Orchestrator must be up |
 | Internet connection | Required to download price data from Yahoo Finance |
 
 No API key, no account, no registration.
@@ -151,7 +151,7 @@ If this prints a number, you are ready. If it errors, see [Troubleshooting](#10-
 
 ### B1. Configure via Settings UI
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **Stock Market**
 4. Set **Default Market**:

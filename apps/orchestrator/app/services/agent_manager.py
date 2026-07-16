@@ -12,46 +12,9 @@ logger = logging.getLogger(__name__)
 
 
 def _env_agent_defaults() -> dict:
-    """Env-level defaults for remaining local agents and credential sources."""
-    return {
-        # Still local
-        'smarthome': {
-            'endpoint': settings.myhome_mcp_endpoint,
-            'token':    settings.myhome_mcp_token,
-        },
-        'whatsapp': {
-            'phone_number_id':      settings.whatsapp_phone_number_id,
-            'access_token':         settings.whatsapp_access_token,
-            'webhook_verify_token': settings.whatsapp_webhook_verify_token,
-            'contacts':             settings.whatsapp_contacts,
-        },
-        # Gateway-served — kept here so _session_credentials() can fall back
-        # to env values when the frontend doesn't supply them.
-        'portfolio': {
-            'access_token': settings.indmoney_token,
-        },
-        'github': {
-            'personal_access_token': settings.github_token,
-        },
-        'google': {
-            'access_token':  settings.google_access_token,
-            'refresh_token': settings.google_refresh_token,
-            'client_id':     settings.google_client_id,
-            'client_secret': settings.google_client_secret,
-        },
-        'weather': {
-            'api_key':      settings.weather_api_key,
-            'provider':     settings.weather_provider,
-            'default_city': settings.weather_default_city,
-        },
-        'news': {
-            'api_key': settings.news_api_key,
-            'country': settings.news_default_country,
-        },
-        'stock': {
-            'default_market': settings.stock_default_market,
-        },
-    }
+    """Env-level defaults for local built-in agents.
+    All integrations (smarthome, whatsapp, etc.) are now served by the MCP Gateway."""
+    return {}
 
 
 def _env_llm_defaults() -> dict:
@@ -174,50 +137,13 @@ class AgentManager:
         })
         return await agent.handle(enriched)
 
-    def _session_credentials(self) -> dict:
-        """Flat credentials dict forwarded to the gateway per tool call."""
-        ac  = self._session_agent_config
-        env = _env_agent_defaults()
-
-        def _get(section: str, key: str, fallback: str = '') -> str:
-            return (
-                ac.get(section, {}).get(key)
-                or env.get(section, {}).get(key)
-                or fallback
-            )
-
-        return {
-            # INDmoney
-            'indmoney_token':       _get('portfolio', 'access_token'),
-            # GitHub
-            'github_token':         _get('github', 'personal_access_token'),
-            # Google (Calendar + Gmail)
-            'google_access_token':  _get('google', 'access_token'),
-            # Weather
-            'weather_api_key':      _get('weather', 'api_key'),
-            'weather_provider':     _get('weather', 'provider', 'open_meteo'),
-            'weather_default_city': _get('weather', 'default_city', 'Bengaluru'),
-            # News
-            'news_api_key':         _get('news', 'api_key'),
-            'news_default_country': _get('news', 'country', 'in'),
-            # Stocks
-            'stock_default_market': _get('stock', 'default_market', 'IN'),
-            # Smart Home
-            'smarthome_endpoint':   _get('smarthome', 'endpoint'),
-            'smarthome_token':      _get('smarthome', 'token'),
-            # WhatsApp
-            'whatsapp_token':       _get('whatsapp', 'access_token'),
-            'whatsapp_phone_id':    _get('whatsapp', 'phone_number_id'),
-        }
-
     async def handle_as_tool(self, fn_name: str, query: str) -> str:
         if '__' in fn_name:
-            # Gateway-namespaced tool call (e.g. indmoney__query_portfolio)
+            # Gateway-namespaced tool call (e.g. indmoney__query_portfolio).
+            # No credentials forwarded — gateway reads them from its own .env.
             from app.dependencies import gateway_client
             try:
-                result = await gateway_client.call_tool(
-                    fn_name, {'query': query}, self._session_credentials()
-                )
+                result = await gateway_client.call_tool(fn_name, {'query': query})
                 if isinstance(result, str):
                     return result
                 return json.dumps(result) if result is not None else 'No data available.'

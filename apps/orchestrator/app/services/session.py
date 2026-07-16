@@ -17,8 +17,6 @@ from app.services.tts_helpers import settings_label, agent_tts
 # ── Agent protocol constants ──────────────────────────────────────────────────
 
 AGENT_LABELS: dict[str, str] = {
-    'smarthome':  'Smart Home',
-    'whatsapp':   'WhatsApp',
     'websearch':  'Web Search',
     'calculator': 'Calculator',
     'memory':     'Memory',
@@ -27,11 +25,8 @@ AGENT_LABELS: dict[str, str] = {
 }
 
 # '__boot__' triggers the agent's built-in boot summary; '' skips the test call.
-# Only local agents that still run in the orchestrator are listed here.
+# Only built-in skills that run locally in the orchestrator are listed here.
 AGENT_BOOT_QUERY: dict[str, str] = {
-    'smarthome':  '__boot__',
-    'whatsapp':   '__boot__',
-    # Built-in skills — always online, no boot health-check needed
     'websearch':  '',
     'calculator': '',
     'memory':     '',
@@ -39,7 +34,7 @@ AGENT_BOOT_QUERY: dict[str, str] = {
     'general':    '',
 }
 
-# Old agent IDs that are now served by the MCP Gateway.
+# All external integrations are served by the MCP Gateway.
 # Key: frontend agent ID  →  Value: gateway server namespace
 _GATEWAY_AGENT_MAP: dict[str, str] = {
     'weather':   'weather',
@@ -50,6 +45,8 @@ _GATEWAY_AGENT_MAP: dict[str, str] = {
     'stock':     'stocks',
     'news':      'news',
     'portfolio': 'indmoney',
+    'smarthome': 'smarthome',
+    'whatsapp':  'whatsapp',
 }
 
 # Human-readable labels for gateway-served agents (used in boot messages)
@@ -62,6 +59,8 @@ _GATEWAY_LABELS: dict[str, str] = {
     'stock':     'Stock Market',
     'news':      'News',
     'portfolio': 'Portfolio',
+    'smarthome': 'Smart Home',
+    'whatsapp':  'WhatsApp',
 }
 
 # Randomised phrases for gateway-level events
@@ -104,14 +103,16 @@ _GW_AGENT_ONLINE_PHRASES = [
 
 # Per-agent boot call: (gateway tool name, arguments)
 _GW_BOOT_CALLS: dict[str, tuple[str, dict]] = {
-    'weather':   ('weather__get_current_weather', {'query': 'current weather'}),
-    'stock':     ('stocks__get_quote',            {'query': 'Nifty 50'}),
-    'news':      ('news__get_news',               {'query': 'top news today'}),
-    'github':    ('github__get_summary',          {}),
-    'calendar':  ('google__get_calendar_events',  {'query': 'next event'}),
-    'email':     ('google__get_emails',           {'query': 'unread emails'}),
-    'system':    ('system__get_system_info',      {'query': 'system status'}),
-    'portfolio': ('indmoney__query_portfolio',    {'query': 'portfolio overview'}),
+    'weather':   ('weather__get_current_weather',    {'query': 'current weather'}),
+    'stock':     ('stocks__get_quote',               {'query': 'Nifty 50'}),
+    'news':      ('news__get_news',                  {'query': 'top news today'}),
+    'github':    ('github__get_summary',             {}),
+    'calendar':  ('google__get_calendar_events',     {'query': 'next event'}),
+    'email':     ('google__get_emails',              {'query': 'unread emails'}),
+    'system':    ('system__get_system_info',         {'query': 'system status'}),
+    'portfolio': ('indmoney__query_portfolio',       {'query': 'portfolio overview'}),
+    'smarthome': ('smarthome__system_overview',      {}),
+    'whatsapp':  ('whatsapp__get_status',            {}),
 }
 
 GREETING_SUFFIXES = [
@@ -229,6 +230,28 @@ def _snip_portfolio(raw: str) -> str:
             return line[:70]
     return ''
 
+def _snip_smarthome(raw: str) -> str:
+    # Gateway returns a dict — may arrive as dict, JSON string, or Python repr string
+    import json as _json, ast as _ast
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            data = _json.loads(raw)
+        except Exception:
+            try:
+                data = _ast.literal_eval(raw)
+            except Exception:
+                return str(raw).split('.')[0][:55]
+    location = data.get('location_name', 'Home')
+    total    = data.get('total_entities', '?')
+    domains  = data.get('domain_count', '?')
+    return f'{location} — {total} entities, {domains} domains'
+
+def _snip_whatsapp(raw: str) -> str:
+    # "Connected — +91... (Name). N messages received this session."
+    return str(raw).split('.')[0][:65]
+
 _GW_SNIP_FN: dict[str, Callable[[str], str]] = {
     'weather':   _snip_weather,
     'stock':     _snip_stock,
@@ -238,10 +261,12 @@ _GW_SNIP_FN: dict[str, Callable[[str], str]] = {
     'email':     _snip_email,
     'system':    _snip_system,
     'portfolio': _snip_portfolio,
+    'smarthome': _snip_smarthome,
+    'whatsapp':  _snip_whatsapp,
 }
 
 
-async def _fetch_boot_snippet(agent_id: str, creds: dict) -> str:
+async def _fetch_boot_snippet(agent_id: str) -> str:
     """Call the agent's boot tool and return a short live-data snippet, or '' on any failure."""
     call = _GW_BOOT_CALLS.get(agent_id)
     if not call:
@@ -249,12 +274,14 @@ async def _fetch_boot_snippet(agent_id: str, creds: dict) -> str:
     tool_name, args = call
     try:
         raw = await asyncio.wait_for(
-            gateway_client.call_tool(tool_name, args, creds),
+            gateway_client.call_tool(tool_name, args),
             timeout=5.0,
         )
         if not raw:
             return ''
-        text = str(raw)
+        # Serialize dicts/lists as JSON so snippet fns get valid JSON strings
+        import json as _json
+        text = _json.dumps(raw) if isinstance(raw, (dict, list)) else str(raw)
         if is_agent_error(text):
             return ''
         fn = _GW_SNIP_FN.get(agent_id)
@@ -400,8 +427,7 @@ async def boot_sequence(
 
     # Fetch live snippets for all online gateway agents in parallel
     if gw_ok and gateway_ids:
-        creds = agent_manager._session_credentials()
-        snippets = await asyncio.gather(*[_fetch_boot_snippet(a, creds) for a in gateway_ids])
+        snippets = await asyncio.gather(*[_fetch_boot_snippet(a) for a in gateway_ids])
         snippet_map = dict(zip(gateway_ids, snippets))
     else:
         snippet_map = {}
@@ -421,7 +447,7 @@ async def boot_sequence(
             )
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
 
-    # ── Local agents (smarthome, whatsapp) ────────────────────────────────────
+    # ── Local built-in agents (websearch, calculator, memory, briefing, general) ─
     results: list[tuple[str, str, str]] = await asyncio.gather(
         *[test_agent(agent_id) for agent_id in local_ids]
     )

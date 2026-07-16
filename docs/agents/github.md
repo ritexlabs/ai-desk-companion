@@ -98,7 +98,7 @@ You say: "Do I have any pull requests to review?"
 |-------------|-------|
 | A GitHub account | Free at [github.com](https://github.com) |
 | A Personal Access Token | Created in GitHub settings — steps below |
-| App running (`python3 start.py`) | Orchestrator must be up |
+| App running (`python3 launch.py`) | Orchestrator must be up |
 | Internet connection | Required to reach the GitHub API |
 
 ---
@@ -162,7 +162,7 @@ Fine-grained tokens let you limit access to specific repositories. Use this if y
 
 ### B1. Configure via Settings UI (recommended)
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **GitHub**
 4. Paste your token into the **Personal Access Token** field
@@ -183,7 +183,7 @@ GITHUB_TOKEN=ghp_your-token-here
 Restart the app after editing `.env`:
 
 ```bash
-python3 start.py
+python3 launch.py
 ```
 
 ---

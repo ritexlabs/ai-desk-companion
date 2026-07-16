@@ -80,8 +80,11 @@ class TestMergeLlm:
 
 class TestAgentManager:
     def test_all_core_agents_registered(self):
+        # Only built-in local agents live in the registry.
+        # Gateway tools (weather, system, github, news, smarthome, whatsapp, etc.)
+        # are served by the MCP Gateway and do not appear here.
         mgr = AgentManager()
-        for agent_id in ('weather', 'system', 'github', 'news', 'general'):
+        for agent_id in ('websearch', 'calculator', 'memory', 'briefing', 'general'):
             assert agent_id in mgr.agents, f"'{agent_id}' missing from registry"
 
     def test_configure_session_always_adds_general(self):
@@ -116,7 +119,7 @@ class TestAgentManager:
         assert mgr._session_llm_config     == {}
         assert mgr._session_agent_config   == {}
         assert mgr._session_enabled_agents == []
-        assert mgr._session_calling_name   == 'Robo'
+        assert mgr._session_calling_name   == 'Master'
 
     def test_calling_name_stored(self):
         mgr = AgentManager()
@@ -125,22 +128,12 @@ class TestAgentManager:
 
     @pytest.mark.asyncio
     async def test_handle_known_agent_returns_response(self):
-        from unittest.mock import patch
         mgr = AgentManager()
-        mgr.configure_session({}, {}, ['system'])
-        with patch('app.agents.system._collect_metrics', return_value={
-            'now': __import__('datetime').datetime(2025, 6, 26, 10, 0),
-            'tz_name': 'UTC', 'os_name': 'Linux', 'machine': 'x86_64',
-            'cores': 4, 'py_ver': '3.12', 'cpu_pct': 10.0, 'per_core': [],
-            'mem_total': 8*(1024**3), 'mem_used': 4*(1024**3), 'mem_avail': 4*(1024**3),
-            'mem_pct': 50.0, 'swap_used': 0, 'swap_total': 0,
-            'disk_total': 100*(1024**3), 'disk_used': 50*(1024**3), 'disk_pct': 50.0,
-            'bat_info': None, 'top_procs': [],
-        }):
-            req  = AgentRequest(text='__boot__', context={})
-            resp = await mgr.handle('system', req)
-        assert resp.agent == 'system'
-        assert 'healthy' in resp.text
+        mgr.configure_session({}, {}, ['calculator'])
+        req  = AgentRequest(text='2 + 2', context={})
+        resp = await mgr.handle('calculator', req)
+        assert resp.agent == 'calculator'
+        assert '4' in resp.text
 
     @pytest.mark.asyncio
     async def test_handle_unknown_agent_falls_back_to_general(self):

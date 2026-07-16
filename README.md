@@ -45,23 +45,28 @@ No API keys are required to run the app in browser-TTS / browser-STT mode.
 git clone https://github.com/ritexlabs/ai-desk-companion.git
 cd ai-desk-companion
 
-# macOS / Linux
-python3 start.py
-
-# Windows
-python start.py
+python3 launch.py setup    # first-time install: creates venvs, installs all deps, prepares .env
+python3 launch.py start    # start all three services and open the browser
 ```
 
-Then open **http://localhost:5173** in your browser (the launcher opens it automatically).
+Then open **http://localhost:5173** (the launcher opens it automatically).
 
-Press **Ctrl+C** to stop both services.
+### All launcher commands
 
-> **Flags:**
-> ```bash
-> python3 start.py --no-browser   # skip auto-opening the browser
-> python3 start.py --no-color     # plain output (useful for CI / logs)
-> python3 start.py --clean        # remove venv / node_modules / build artifacts
-> ```
+```bash
+python3 launch.py setup            # install everything (run once after cloning)
+python3 launch.py start            # start all services  (default when no command given)
+python3 launch.py stop             # stop all running services
+python3 launch.py status           # show live status of each service
+python3 launch.py restart          # stop then start
+python3 launch.py clean            # remove venv / node_modules / build artefacts
+
+python3 launch.py start --no-browser        # skip auto-opening the browser
+python3 launch.py start --browser safari    # open in Safari instead of Chrome
+python3 launch.py start --no-color          # plain output (CI / logs)
+```
+
+> **Windows:** use `python launch.py` instead of `python3 launch.py`.
 
 ---
 
@@ -102,9 +107,7 @@ ai-desk-companion/
 │   └── mcp-gateway/      Python FastAPI MCP tool aggregator (port 8788)
 ├── docs/                 Architecture, API contracts, setup guides
 ├── scripts/              test.sh, gen_tests.py
-├── start.py              Cross-platform dev launcher
-├── start.sh              macOS/Linux wrapper
-└── start.bat             Windows wrapper
+└── launch.py             Cross-platform launcher (start / stop / status / restart / clean)
 ```
 
 ---
@@ -129,13 +132,13 @@ The app works out of the box with no configuration. Add API keys to unlock real 
 
 If you prefer to run services independently:
 
-**Terminal 1 — MCP Gateway**
+**Terminal 1 — MCP Gateway (start first)**
 ```bash
 cd apps/mcp-gateway
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8788
+uvicorn src.main:app --reload --port 8788
 ```
 
 **Terminal 2 — Orchestrator**

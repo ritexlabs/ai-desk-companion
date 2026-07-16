@@ -292,6 +292,8 @@ export default function App() {
   const handleAgentClick = (agentId: string) => {
     if (agentId === 'portfolio') {
       setPortfolioDashboardOpen(true);
+    } else if (agentId === 'smarthome') {
+      setSmartHomeDashboardOpen(true);
     } else {
       setSelectedAgentId(agentId);
     }

@@ -207,7 +207,7 @@ ElevenLabs voices are identified by a Voice ID string (not a name).
 
 Full walkthrough for setting up OpenAI (recommended starting point):
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click **⚙ → Providers**
 3. Select **OpenAI Whisper** under Speech to Text
 4. Select **OpenAI TTS** under Text to Speech
@@ -242,7 +242,7 @@ Browser click "Test TTS Provider"
 
 If you hear nothing:
 - Check your system volume and browser audio permissions
-- Confirm the orchestrator (`python3 start.py`) is running
+- Confirm the orchestrator (`python3 launch.py`) is running
 - Check the browser console for errors
 
 ---
@@ -266,7 +266,7 @@ This means you can configure **Provider = OpenAI** in the AI tab, set your key o
 ### No audio plays after clicking "Test TTS Provider"
 
 - Browser may be blocking audio autoplay — click anywhere on the page first, then retry
-- Confirm the orchestrator is running (`python3 start.py`)
+- Confirm the orchestrator is running (`python3 launch.py`)
 - Check the browser console for errors (F12 → Console)
 
 ### OpenAI TTS returns "401 Unauthorized"

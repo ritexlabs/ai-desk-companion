@@ -123,7 +123,7 @@ You say: "Any WhatsApp messages?"
 | A Meta (Facebook) account | Free, personal account works |
 | A phone number for test messages | Any number — Meta provides a free test number |
 | `cloudflared` installed | Free, open source — install steps below |
-| App running (`python3 start.py`) | Orchestrator must be up before registering the webhook |
+| App running (`python3 launch.py`) | Orchestrator must be up before registering the webhook |
 
 > **No WhatsApp Business account or physical device is required.** Meta provides a free cloud-hosted test number.
 
@@ -348,7 +348,7 @@ CLOUDFLARE_DOMAIN=yourdomain.com
 
 You can also enter credentials directly in the app (they are stored in browser localStorage — never sent to any server except through the orchestrator):
 
-1. Start the app: `python3 start.py`
+1. Start the app: `python3 launch.py`
 2. Click the **⚙ gear icon** → **Agents** tab
 3. Expand **WhatsApp**
 4. Fill in:

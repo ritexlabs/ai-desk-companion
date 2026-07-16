@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -22,9 +22,10 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { RobotAvatar } from './components/RobotAvatar';
+import { AICore } from './components/AICore';
 import { WaveVisualizer } from './components/WaveVisualizer';
 import { AgentBootList } from './components/AgentBootList';
+import { HoloChat } from './components/HoloChat';
 import { AgentDetailModal } from './components/AgentDetailModal';
 import { SmartHomeDashboard } from './components/SmartHomeDashboard';
 import { PortfolioDashboard } from './components/PortfolioDashboard';
@@ -97,55 +98,7 @@ function useClock() {
   return t;
 }
 
-/* ─── mission-control log row ───────────────────────────────── */
-
-const AGENT_SHORT: Record<string, string> = {
-  system: 'Sys', weather: 'Wthr', calendar: 'Cal', email: 'Mail',
-  github: 'GitHub', stock: 'Stock', news: 'News', smarthome: 'Home', general: '',
-};
-
-function LogRow({ turn, aiName }: { turn: { speaker: 'user' | 'assistant' | 'system'; text: string; timestamp: string; agentId?: string }; aiName: string }) {
-  const time = (() => {
-    try {
-      return new Date(turn.timestamp).toLocaleTimeString('en-US', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-      });
-    } catch { return '--:--:--'; }
-  })();
-
-  const isUser = turn.speaker === 'user';
-  const isSys  = turn.speaker === 'system';
-
-  const label = (() => {
-    if (isUser) return 'You';
-    if (isSys)  return 'Sys';
-    const short = turn.agentId ? AGENT_SHORT[turn.agentId] : '';
-    return short || aiName.charAt(0).toUpperCase() + aiName.slice(1).toLowerCase();
-  })();
-
-  return (
-    <div className={`flex items-start gap-0 py-[3px] px-2 rounded hover:bg-white/[0.03] transition-colors ${isSys ? 'opacity-55' : ''}`}>
-      {/* Label badge */}
-      <span className={`flex-shrink-0 w-12 text-right text-[9px] font-bold tracking-[0.08em] mr-2 mt-[2px] ${
-        isUser ? 'text-violet-400' : isSys ? 'text-slate-500' : 'text-cyan-400'
-      }`}>
-        {label}
-      </span>
-      {/* Pipe separator */}
-      <span className="flex-shrink-0 text-[10px] text-slate-700 mr-2 mt-[1px]">│</span>
-      {/* Timestamp */}
-      <span className="flex-shrink-0 text-[9px] font-mono text-slate-600 tabular-nums mr-3 mt-[2px]">{time}</span>
-      {/* Message text */}
-      <span className={`flex-1 min-w-0 text-[11px] leading-[1.5] whitespace-pre-wrap break-words ${
-        isUser  ? 'text-amber-200'
-        : isSys ? 'text-slate-500 italic'
-        :         'text-emerald-300'
-      }`}>
-        {turn.text}
-      </span>
-    </div>
-  );
-}
+/* LogRow replaced by HoloChat component */
 
 /* ─── Quick Stats helpers ───────────────────────────────────── */
 
@@ -233,7 +186,6 @@ export default function App() {
   const rt = useOrchestratorRuntime(voiceConfig, appConfig, registeredAgentIds, llmConfig, voiceProviderConfig, agentConfig, refreshGoogleToken, agentVoices, refreshPortfolioToken);
   const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
-  const transcriptRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useProactiveNotifications(agentConfig, ({ text, agentId }) => rt.pushNotification(text, agentId));
@@ -269,10 +221,7 @@ export default function App() {
     setAudioUnlocked(true);
   };
 
-  useEffect(() => {
-    if (transcriptRef.current)
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-  }, [rt.transcript]);
+  /* HoloChat handles its own scroll-to-bottom */
 
   const isActive = rt.phase !== 'standby' && rt.phase !== 'sleep';
   const isSpeaking = rt.speechState === 'speaking' || rt.isPlayingServerAudio;
@@ -405,8 +354,8 @@ export default function App() {
               <Zap className="h-4 w-4 text-cyan-400" />
             </motion.div>
             <div>
-              <div className="text-[10px] uppercase tracking-[0.35em] text-cyan-400/70">Personal AI Agent</div>
-              <div className="text-sm font-semibold text-white/90 leading-none mt-0.5">AI Desk Companion</div>
+              <div className="text-[8px] uppercase tracking-[0.4em] text-cyan-400/60 font-mono">Personal AI Agent</div>
+              <div className="text-sm font-bold text-white/90 leading-none mt-0.5 font-orbitron">AI Desk Companion</div>
             </div>
           </div>
 
@@ -540,8 +489,8 @@ export default function App() {
             {/* Top: orb + controls (fixed height) */}
             <div className="flex flex-col items-center justify-center gap-4 px-8 py-4 flex-shrink-0">
 
-              {/* Animated orb */}
-              <RobotAvatar phase={displayPhase} />
+              {/* Neural plasma orb */}
+              <AICore phase={displayPhase} />
 
               {/* Assistant speech bubble with typing animation */}
               <AnimatePresence mode="wait">
@@ -570,6 +519,41 @@ export default function App() {
               {/* Wave visualizer */}
               <div className="w-full max-w-sm">
                 <WaveVisualizer active={waveActive} color={waveColor(displayPhase)} intensity={waveIntensity} />
+              </div>
+
+              {/* Routing indicator — shows which agent is processing */}
+              <div className="h-5 flex items-center justify-center">
+                <AnimatePresence>
+                  {rt.activeAgentId && (rt.phase === 'thinking' || rt.phase === 'responding') && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex items-center gap-1.5"
+                    >
+                      {[0, 1, 2, 3].map(j => (
+                        <motion.div
+                          key={j}
+                          className="h-1 w-1 rounded-full bg-cyan-400"
+                          animate={{ opacity: [0, 1, 0] }}
+                          transition={{ duration: 0.65, repeat: Infinity, delay: j * 0.14, ease: 'linear' }}
+                        />
+                      ))}
+                      <span className="text-[8.5px] font-mono uppercase tracking-[0.28em] text-cyan-400/60 px-1.5">
+                        {rt.agents.find(a => a.id === rt.activeAgentId)?.label ?? rt.activeAgentId}
+                      </span>
+                      {[0, 1, 2, 3].map(j => (
+                        <motion.div
+                          key={j}
+                          className="h-1 w-1 rounded-full bg-cyan-400"
+                          animate={{ opacity: [0, 1, 0] }}
+                          transition={{ duration: 0.65, repeat: Infinity, delay: j * 0.14, ease: 'linear' }}
+                        />
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Action buttons */}
@@ -636,71 +620,53 @@ export default function App() {
               </div>
             </div>
 
-            {/* Transcript — mission-control log style */}
-            <div
-              ref={transcriptRef}
-              className="flex-1 min-h-0 overflow-y-auto border-t border-white/8 bg-black/15 backdrop-blur-sm px-3 py-2 scrollbar-thin"
-            >
-              {/* Column header */}
-              <div className="flex items-center gap-0 px-2 pb-1.5 mb-1 border-b border-white/5">
-                <span className="w-8 mr-2 text-right text-[8px] uppercase tracking-[0.15em] text-slate-700">src</span>
-                <span className="text-[8px] text-slate-700 mr-2">│</span>
-                <span className="text-[8px] uppercase tracking-[0.15em] text-slate-700 mr-3 w-[52px]">time</span>
-                <span className="text-[8px] uppercase tracking-[0.15em] text-slate-700">message</span>
-              </div>
-              <AnimatePresence initial={false}>
-                {rt.transcript.map((turn, i) => (
-                  <motion.div
-                    key={`${turn.timestamp}-${i}`}
-                    initial={{ opacity: 0, x: -4 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <LogRow turn={turn} aiName={appConfig.wakeWord} />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+            {/* Holographic chat transcript */}
+            <HoloChat transcript={rt.transcript} aiName={appConfig.wakeWord} />
 
-            {/* Input bar — pinned to center-column bottom */}
-            <div className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 border-t border-white/6 bg-black/15 backdrop-blur-sm">
-              <input
-                value={rt.command}
-                onChange={(e) => rt.setCommand(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && rt.command.trim()) {
+            {/* Input bar — sci-fi terminal */}
+            <div className="flex-shrink-0 border-t border-cyan-400/8 bg-black/20 backdrop-blur-sm px-4 py-3">
+              <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 focus-within:border-cyan-400/22 transition-colors">
+                {/* Blinking terminal cursor prefix */}
+                <motion.span
+                  animate={{ opacity: [1, 0.2, 1] }}
+                  transition={{ duration: 1.1, repeat: Infinity }}
+                  className="text-cyan-400 font-mono text-sm flex-shrink-0 select-none"
+                >
+                  ❯
+                </motion.span>
+                <input
+                  value={rt.command}
+                  onChange={(e) => rt.setCommand(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && rt.command.trim()) {
+                      if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
+                      else rt.ask();
+                    }
+                  }}
+                  placeholder={
+                    isActive && rt.phase !== 'booting'
+                      ? 'Ask about weather, calendar, email, stocks, or anything…'
+                      : 'Type a message — system wakes automatically…'
+                  }
+                  className="flex-1 bg-transparent text-[13px] text-white/90 outline-none placeholder:text-slate-700 font-mono"
+                />
+                <motion.button
+                  onClick={() => {
+                    if (!rt.command.trim()) return;
                     if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
                     else rt.ask();
-                  }
-                }}
-                placeholder={
-                  isActive && rt.phase !== 'booting'
-                    ? 'Ask about weather, calendar, email, GitHub, stocks, or anything…'
-                    : 'Type your message — system will wake automatically…'
-                }
-                className="flex-1 h-9 rounded-xl border border-white/10 bg-black/25 px-4 text-sm text-white outline-none placeholder:text-slate-600 focus:border-cyan-400/35 transition-colors"
-              />
-              <motion.button
-                onClick={() => {
-                  if (!rt.command.trim()) return;
-                  if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
-                  else rt.ask();
-                }}
-                disabled={!rt.command.trim()}
-                whileHover={{ scale: 1.06 }}
-                whileTap={{ scale: 0.94 }}
-                animate={rt.command.trim() ? { boxShadow: ['0 0 0px rgba(139,92,246,0)', '0 0 10px rgba(139,92,246,0.45)', '0 0 0px rgba(139,92,246,0)'] } : {}}
-                transition={{ duration: 1.8, repeat: Infinity }}
-                className="flex items-center gap-1.5 h-9 px-4 rounded-xl bg-violet-500 text-sm font-medium hover:bg-violet-400 disabled:opacity-35 transition-colors"
-              >
-                <motion.div
-                  animate={rt.command.trim() ? { x: [0, 2, 0] } : {}}
-                  transition={{ duration: 0.8, repeat: Infinity, repeatDelay: 1 }}
+                  }}
+                  disabled={!rt.command.trim()}
+                  whileHover={{ scale: 1.06 }}
+                  whileTap={{ scale: 0.94 }}
+                  animate={rt.command.trim() ? { boxShadow: ['0 0 0px rgba(139,92,246,0)', '0 0 8px rgba(139,92,246,0.4)', '0 0 0px rgba(139,92,246,0)'] } : {}}
+                  transition={{ duration: 1.8, repeat: Infinity }}
+                  className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-violet-500/20 border border-violet-400/30 text-violet-300 text-xs font-medium hover:bg-violet-500/30 disabled:opacity-30 transition-colors"
                 >
-                  <Send className="h-3.5 w-3.5" />
-                </motion.div>
-                Send
-              </motion.button>
+                  <Send className="h-3 w-3" />
+                  Send
+                </motion.button>
+              </div>
             </div>
           </main>
 

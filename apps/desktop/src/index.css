@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -20,6 +22,51 @@ body,
 body {
   color: white;
   overflow: hidden;
+}
+
+/* ─── Custom font utilities ────────────────────────────── */
+.font-orbitron {
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.font-jetbrains {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ─── Holographic terminal overlay ─────────────────────── */
+.holo-terminal {
+  position: relative;
+}
+.holo-terminal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.04) 3px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+.holo-terminal > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Neural pulse ring ─────────────────────────────────── */
+@keyframes neural-ring {
+  0%   { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(3.8); opacity: 0; }
+}
+
+/* ─── Data packet flow ──────────────────────────────────── */
+@keyframes data-flow {
+  0%   { opacity: 0; transform: translateX(-8px); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(8px); }
 }
 
 /* ─── Thin scrollbar ───────────────────────────────────── */

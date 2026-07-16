@@ -45,7 +45,14 @@
       "Bash(git check-ignore *)",
       "Bash(grep '\\\\.env$')",
       "Bash(xargs grep -lE '\\(ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,}|GOCSPX-[A-Za-z0-9]\\)')",
-      "Bash(xargs grep -lE '\\(ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,}|EAA[A-Za-z0-9]{40,}|AIza[A-Za-z0-9]{35,}|GOCSPX-[A-Za-z0-9]{24,}\\)')"
+      "Bash(xargs grep -lE '\\(ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9]{20,}|EAA[A-Za-z0-9]{40,}|AIza[A-Za-z0-9]{35,}|GOCSPX-[A-Za-z0-9]{24,}\\)')",
+      "Bash(curl -s http://localhost:8787/api/smarthome/states)",
+      "Bash(python3 -c \"from pathlib import Path; f='/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/mcp-gateway/src/tools/portfolio.py'; print\\(Path\\(f\\).parents[2]\\)\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('total:', d.get\\('total'\\), 'domains:', list\\(d.get\\('domains',{}\\).keys\\(\\)\\)[:5]\\)\")",
+      "Bash(python3 -c \"from pathlib import Path; f='src/routers/portfolio.py'; print\\(Path\\(f\\).resolve\\(\\).parents[2]\\)\")",
+      "Bash(python3 -m py_compile apps/mcp-gateway/src/tools/hass_mcp.py)",
+      "Bash(python3 -m py_compile apps/mcp-gateway/src/tools/portfolio.py)",
+      "Bash(python3 -m py_compile apps/mcp-gateway/src/routers/portfolio.py)"
     ]
   }
 }

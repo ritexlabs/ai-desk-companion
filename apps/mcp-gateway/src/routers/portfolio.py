@@ -38,7 +38,7 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 def _env_path() -> Path:
-    return Path(__file__).parents[3] / '.env'
+    return Path(__file__).parents[2] / '.env'
 
 
 def _update_env(key: str, value: str) -> None:

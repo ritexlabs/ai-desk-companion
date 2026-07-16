@@ -45,7 +45,7 @@ def _save_token(token_data: dict) -> None:
     try:
         import re as _re
         from pathlib import Path
-        env_file = Path(__file__).parents[3] / '.env'
+        env_file = Path(__file__).parents[2] / '.env'
         if not env_file.exists():
             return
         content = env_file.read_text()

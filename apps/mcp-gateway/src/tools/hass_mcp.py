@@ -10,11 +10,37 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
 _MCP_VERSION = '2024-11-05'
+
+
+def _resolve_for_docker(url: str) -> str:
+    """
+    Replace mDNS / .local hostnames with their resolved IPv4 address.
+    Docker Desktop on macOS/Windows runs in a VM whose DNS resolver does not
+    participate in mDNS, so homeassistant.local cannot be looked up inside a
+    container.  We resolve on the host first and hand the IP to Docker instead.
+    """
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ''
+        if host.endswith('.local') or not host:
+            results = socket.getaddrinfo(host, None, socket.AF_INET)
+            if results:
+                ip = results[0][4][0]
+                port = parsed.port
+                netloc = f'{ip}:{port}' if port else ip
+                resolved = urlunparse(parsed._replace(netloc=netloc))
+                logger.info('hass-mcp: resolved %s → %s for Docker', url, resolved)
+                return resolved
+    except OSError as exc:
+        logger.warning('hass-mcp: could not resolve %s — %s', url, exc)
+    return url
 
 
 class HassMCPClient:
@@ -32,15 +58,19 @@ class HassMCPClient:
         self._write_lock = asyncio.Lock()
 
     async def _start(self) -> None:
-        logger.info('hass-mcp: starting Docker container')
+        # Resolve mDNS / .local hostnames to IPs before handing to Docker —
+        # Docker Desktop's VM DNS does not forward mDNS, so .local names fail.
+        resolved_url = _resolve_for_docker(self._ha_url)
+        logger.info('hass-mcp: starting Docker container (HA_URL=%s)', resolved_url)
         self._proc = await asyncio.create_subprocess_exec(
             'docker', 'run', '-i', '--rm',
-            '-e', f'HA_URL={self._ha_url}',
+            '-e', f'HA_URL={resolved_url}',
             '-e', f'HA_TOKEN={self._ha_token}',
             'voska/hass-mcp:latest',
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=16 * 1024 * 1024,  # 16 MB — HA entity dumps with 500 entities can exceed 64 KB default
         )
         self._reader_task = asyncio.create_task(self._read_loop())
 
@@ -113,6 +143,13 @@ class HassMCPClient:
         async with self._lock:
             alive = self._proc is not None and self._proc.returncode is None
             if not alive or not self._ready:
+                # Terminate the old container before spawning a new one to prevent leaks
+                if self._proc and self._proc.returncode is None:
+                    try:
+                        self._proc.terminate()
+                        await asyncio.wait_for(self._proc.wait(), timeout=5.0)
+                    except Exception:
+                        pass
                 if self._reader_task and not self._reader_task.done():
                     self._reader_task.cancel()
                 await self._start()

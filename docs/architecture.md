@@ -61,8 +61,9 @@ Three services run locally:
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Browser (React + Vite :5173)                                        │
 │  ┌───────────────────────────────────────────────────────────────┐  │
-│  │  RobotAvatar · AgentBootList · AgentDetailModal               │  │
-│  │  SmartHomeDashboard · PortfolioDashboard · SettingsPanel      │  │
+│  │  AgentOrbit3D · WeatherWidget · HoloChat                      │  │
+│  │  AgentBootList · AgentDetailModal · SettingsPanel             │  │
+│  │  SmartHomeDashboard · PortfolioDashboard                      │  │
 │  │  useOrchestratorRuntime · useVoiceLoop · useAgentConfig       │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 └────────────────────────┬─────────────────────────┬───────────────────┘
@@ -116,9 +117,13 @@ ai-desk-companion/
 ├── apps/
 │   ├── desktop/              React + Vite frontend
 │   │   └── src/
-│   │       ├── components/   UI components (RobotAvatar, AgentBootList, AgentDetailModal,
-│   │       │                 AgentBackground, SmartHomeDashboard, PortfolioDashboard,
-│   │       │                 settings/)
+│   │       ├── components/   UI components:
+│   │       │                 AgentOrbit3D   — 3D orbital canvas + AI Core + agent nodes
+│   │       │                 WeatherWidget  — current conditions + ForecastStrip
+│   │       │                 HoloChat       — conversation message history
+│   │       │                 AgentBootList · AgentDetailModal
+│   │       │                 SmartHomeDashboard · PortfolioDashboard
+│   │       │                 settings/      Per-agent settings accordions
 │   │       ├── hooks/        React hooks (useOrchestratorRuntime, useVoiceLoop,
 │   │       │                 useAgentConfig, useAgentVoiceConfig, …)
 │   │       └── types/        Shared TypeScript types (runtime.ts)
@@ -405,3 +410,86 @@ python3 launch.py stop     # stop all services
 python3 launch.py status   # check service status
 python3 launch.py restart  # stop then start
 ```
+
+---
+
+## 13. Dashboard UI Layout
+
+The desktop UI (`apps/desktop/src/App.tsx`) is a full-viewport 3-column layout rendered at `http://localhost:5173`.
+
+### Header bar
+
+Spans all three columns. Left to right:
+
+- Title + subtitle ("AI Desk Companion")
+- Spacer
+- Voice on/off toggle
+- **Restart** button (icon + label) — triggers a new wake-word cycle
+- **Sleep / Wake Up / Booting** button — animated state machine:
+  - `booting` / `wake_detected` → spinner + "Booting…" / "Activating…" (disabled)
+  - `standby` / `sleep` → cyan "Wake Up" button
+  - any active phase → "Sleep" button
+- Settings gear
+
+### Left panel
+
+- `AgentBootList` — scrollable list of all registered agents with live status dots and boot-sequence log lines
+
+### Center panel
+
+Primary interaction area, laid out top to bottom:
+
+1. **Orbit canvas** — `AgentOrbit3D` (fixed 420 px height, `position: relative`)
+
+   | Canvas layer | Description |
+   |---|---|
+   | Orbit guide rings | Two dashed ellipses defining the 3D orbit path |
+   | Communication link | Dotted animated line + sliding pulse dot between AI Core and active agent |
+   | Active-agent radiation | Ambient glow + 4 expanding rings centered on the responding agent |
+   | AI Core | Gyroscope rings (2 tilted), octahedron wireframe, voice-reactive glow + 5 expanding rings |
+   | Agent nodes | DOM elements positioned by RAF physics — float on fibonacci ellipsoid |
+
+   **Canvas overlays (absolute-positioned DOM):**
+
+   | Position | Component | Content |
+   |---|---|---|
+   | Top-left | `ForecastStrip` | Vertical 5-day forecast (Today / Sat / Sun / Mon / Tue) |
+   | Top-right | Performance HUD | Latency, active agent, CPU %, RAM % |
+
+2. **Conversation header** — current phase label + active agent name
+
+3. **HoloChat** — scrollable conversation history (user + assistant turns)
+
+4. **Input bar** — text field + send button
+
+### Right panel
+
+Three cards stacked vertically:
+
+| Card | Content |
+|---|---|
+| System Status (teal) | CPU %, RAM %, disk %, uptime — spread label/value layout |
+| App Status (violet) | Orchestrator, MCP Gateway, Desktop — live health dots |
+| Config | LLM provider, TTS/STT mode, wake-word status |
+
+### AI Core — voice reactivity
+
+`AgentOrbit3D` receives `voiceActive: boolean` and `voiceIntensity: number` (0–1) from `App.tsx`:
+
+```
+voiceActive  = isSpeaking || isListening || phase === 'responding' || phase === 'thinking'
+voiceIntensity = 1.0 (speaking) | 0.9 (responding) | 0.6 (listening) | 0.32 (thinking) | 0.0
+```
+
+- **Radiation fires only when `voiceActive && voiceIntensity > 0.05`** — idle AI Core stays dark
+- 5 concentric rings expand outward from the core center, staggered by `i/5` phase offset
+- Ring speed: 1.4× (responding) · 1.1× (listening) · 0.75× (thinking)
+- Ambient glow radius and opacity both scale with `voiceIntensity`
+
+### Active-agent focus
+
+When `activeAgentId` is set and `phase` is `thinking / responding / listening`:
+
+- Active agent node: ambient glow + 4 outward-expanding rings (canvas), 3 DOM pulse rings, scaled to `1.35×`, `z-index: 200`
+- All other agent nodes: dimmed to 30% opacity
+- Communication link: animated dotted line + pulse dot between AI Core and active agent

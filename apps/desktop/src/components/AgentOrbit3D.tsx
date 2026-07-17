@@ -425,12 +425,14 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
 
 /* ── Main component ─────────────────────────────────────────────────────── */
 export interface AgentOrbit3DProps {
-  phase:         RuntimePhase;
-  agents:        AgentDefinition[];
-  activeAgentId: string | null;
+  phase:          RuntimePhase;
+  agents:         AgentDefinition[];
+  activeAgentId:  string | null;
+  voiceActive?:   boolean;
+  voiceIntensity?: number;
 }
 
-export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps) {
+export function AgentOrbit3D({ phase, agents, activeAgentId, voiceActive = false, voiceIntensity = 0 }: AgentOrbit3DProps) {
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const pktTRef    = useRef(0);
   const rafRef     = useRef(0);
@@ -438,11 +440,15 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
   const nodeRefs   = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Live refs so the RAF always sees current props without re-subscribing
-  const phaseRef   = useRef(phase);
-  const activeRef  = useRef(activeAgentId);
+  const phaseRef    = useRef(phase);
+  const activeRef   = useRef(activeAgentId);
+  const vActiveRef  = useRef(voiceActive);
+  const vIntensRef  = useRef(voiceIntensity);
   const orbitAgsRef = useRef<AgentDefinition[]>([]);
-  phaseRef.current  = phase;
-  activeRef.current = activeAgentId;
+  phaseRef.current   = phase;
+  activeRef.current  = activeAgentId;
+  vActiveRef.current = voiceActive;
+  vIntensRef.current = voiceIntensity;
 
   // Individual agents (system excluded — it's the host process, not a tool)
   const orbitAgents = agents.filter(a => a.id !== 'system');
@@ -679,7 +685,9 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
         el.style.zIndex    = String(isActNode ? 200 : Math.round(s * 80 + 5));
         el.style.opacity   = agent.status === 'offline'
           ? String(Math.max(0.22, s * 0.45))
-          : '1';
+          : actId && !isActNode
+            ? '0.30'
+            : '1';
       }
 
       /* ── Canvas: clear ── */
@@ -740,6 +748,46 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
         ctx.restore();
       }
 
+      /* ── Canvas: active-agent radiation glow + expanding rings ── */
+      if (actPt) {
+        const t      = performance.now() / 1000;
+        const active = ph === 'responding' || ph === 'thinking' || ph === 'listening';
+        if (active) {
+          // Ambient glow centered on active agent
+          const glowR  = (55 + 20 * actPt.s) * Math.max(actPt.s, 0.7);
+          const intens = ph === 'responding' ? 0.55 : ph === 'listening' ? 0.38 : 0.24;
+          const ag2 = ctx.createRadialGradient(actPt.x, actPt.y, 0, actPt.x, actPt.y, glowR);
+          ag2.addColorStop(0,   `rgba(${pr_},${pg_},${pb_},${intens})`);
+          ag2.addColorStop(0.5, `rgba(${pr_},${pg_},${pb_},${intens * 0.35})`);
+          ag2.addColorStop(1,   `rgba(${pr_},${pg_},${pb_},0)`);
+          ctx.save();
+          ctx.fillStyle = ag2;
+          ctx.beginPath();
+          ctx.arc(actPt.x, actPt.y, glowR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          // Expanding rings radiating outward from active agent
+          const speed = ph === 'responding' ? 1.3 : ph === 'listening' ? 1.0 : 0.7;
+          const maxR  = 60 * Math.max(actPt.s, 0.7);
+          for (let i = 0; i < 4; i++) {
+            const p      = ((t * speed + i / 4) % 1);
+            const radius = 12 + p * maxR;
+            const alpha  = (1 - p) * 0.70;
+            const lw     = 1.5 + (1 - p) * 2.0;
+            ctx.save();
+            ctx.strokeStyle = `rgba(${pr_},${pg_},${pb_},${alpha})`;
+            ctx.lineWidth   = lw;
+            ctx.shadowBlur  = 14 * (1 - p);
+            ctx.shadowColor = `rgba(${pr_},${pg_},${pb_},${Math.min(1, alpha * 1.8)})`;
+            ctx.beginPath();
+            ctx.arc(actPt.x, actPt.y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+
       /* ── Canvas: orchestrator — 3-ring gyroscope + wireframe octahedron ── */
       {
         const t     = performance.now() / 1000;
@@ -747,21 +795,45 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
         const sMax  = ORC_FOV / Math.max(1, ORC_FOV - ORC_RING);
         const sSpan = Math.max(0.001, sMax - sMin);
 
-        // Ambient glow backdrop
-        const ag = ctx.createRadialGradient(CX, CY, 0, CX, CY, 120);
-        ag.addColorStop(0,    `rgba(${pr_},${pg_},${pb_},0.30)`);
-        ag.addColorStop(0.42, `rgba(${pr_},${pg_},${pb_},0.10)`);
-        ag.addColorStop(1,    `rgba(${pr_},${pg_},${pb_},0)`);
-        ctx.save();
-        ctx.fillStyle = ag;
-        ctx.beginPath();
-        ctx.arc(CX, CY, 120, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
+        // Ambient glow backdrop — only when voice is active
+        const vIntens = vIntensRef.current;
+        if (vActiveRef.current && vIntens > 0.05) {
+          const glowR = 120 + 40 * vIntens;
+          const ag = ctx.createRadialGradient(CX, CY, 0, CX, CY, glowR);
+          ag.addColorStop(0,    `rgba(${pr_},${pg_},${pb_},${0.30 + 0.25 * vIntens})`);
+          ag.addColorStop(0.42, `rgba(${pr_},${pg_},${pb_},${0.10 + 0.10 * vIntens})`);
+          ag.addColorStop(1,    `rgba(${pr_},${pg_},${pb_},0)`);
+          ctx.save();
+          ctx.fillStyle = ag;
+          ctx.beginPath();
+          ctx.arc(CX, CY, glowR, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
 
-        // Three orbital rings at different tilts + rotation speeds
+        // Voice-reactive expanding ring radiation
+        if (vActiveRef.current && vIntens > 0.05) {
+          const speed  = ph === 'responding' ? 1.4 : ph === 'listening' ? 1.1 : 0.75;
+          const maxR   = 32 + 160 * vIntens;
+          for (let i = 0; i < 5; i++) {
+            const p      = ((t * speed + i / 5) % 1);
+            const radius = 28 + p * maxR;
+            const alpha  = (1 - p) * 0.55 * vIntens;
+            const lw     = 1.5 + (1 - p) * 2.5;
+            ctx.save();
+            ctx.strokeStyle = `rgba(${pr_},${pg_},${pb_},${alpha})`;
+            ctx.lineWidth   = lw;
+            ctx.shadowBlur  = 18 * (1 - p);
+            ctx.shadowColor = `rgba(${pr_},${pg_},${pb_},${Math.min(1, alpha * 2)})`;
+            ctx.beginPath();
+            ctx.arc(CX, CY, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        // Two tilted orbital rings (equatorial ring removed — it projects as a flat horizontal line)
         const ORB_RINGS = [
-          { tilt: 0,             speed:  0.52, lw: 2.0 },   // equatorial
           { tilt: Math.PI/2.5,  speed: -0.34, lw: 1.6 },   // tilted 72°
           { tilt: Math.PI/1.35, speed:  0.70, lw: 1.4 },   // tilted 133°
         ];

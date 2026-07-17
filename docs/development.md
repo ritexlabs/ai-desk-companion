@@ -305,8 +305,13 @@ ai-desk-companion/
 │   ├── desktop/
 │   │   ├── src/
 │   │   │   ├── __tests__/        Unit tests (vitest)
-│   │   │   ├── components/       UI components (RobotAvatar, AgentBootList, …)
-│   │   │   │   └── settings/     Per-module settings panels
+│   │   │   ├── components/       UI components:
+│   │   │   │   AgentOrbit3D.tsx  — 3D orbital canvas, AI Core, agent nodes, voice radiation
+│   │   │   │   WeatherWidget.tsx — ForecastStrip (vertical, canvas overlay)
+│   │   │   │   HoloChat.tsx      — conversation history
+│   │   │   │   AgentBootList.tsx · AgentDetailModal.tsx
+│   │   │   │   SmartHomeDashboard.tsx · PortfolioDashboard.tsx
+│   │   │   │   └── settings/     Per-agent settings accordions
 │   │   │   ├── hooks/            React hooks (useOrchestratorRuntime, useVoiceLoop, …)
 │   │   │   ├── types/            Shared TypeScript types (runtime.ts)
 │   │   │   └── App.tsx           Root component

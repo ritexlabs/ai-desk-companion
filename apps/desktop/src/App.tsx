@@ -25,7 +25,6 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { AgentOrbit3D } from './components/AgentOrbit3D';
-import { WaveVisualizer } from './components/WaveVisualizer';
 import { HoloChat } from './components/HoloChat';
 import { AgentDetailModal } from './components/AgentDetailModal';
 import { SmartHomeDashboard }   from './components/SmartHomeDashboard';
@@ -98,12 +97,6 @@ const PHASE_AMBIENT: Record<RuntimePhase, string> = {
   error: 'rgba(239,68,68,0.14)',
 };
 
-function waveColor(p: RuntimePhase): 'cyan' | 'violet' | 'amber' | 'emerald' {
-  if (p === 'listening') return 'violet';
-  if (p === 'thinking') return 'amber';
-  if (p === 'ready') return 'emerald';
-  return 'cyan';
-}
 
 function useClock() {
   const [t, setT] = useState(() => new Date().toLocaleTimeString());
@@ -613,12 +606,13 @@ export default function App() {
             <motion.button
               onClick={rt.triggerWakeWord}
               disabled={rt.phase === 'booting' || rt.phase === 'wake_detected'}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
               title="Restart session"
-              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:text-amber-300 hover:border-amber-400/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-white/10 bg-white/5 text-[10px] text-slate-400 hover:text-amber-300 hover:border-amber-400/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
-              <RotateCw className="h-3.5 w-3.5" />
+              <RotateCw className="h-3 w-3" />
+              Restart
             </motion.button>
 
             {/* Wake Up / Sleep / Booting toggle */}
@@ -863,7 +857,13 @@ export default function App() {
 
             {/* 3D Orbit */}
             <div className="flex-shrink-0 flex justify-center overflow-hidden relative" style={{ height: 420 }}>
-              <AgentOrbit3D phase={displayPhase} agents={rt.agents} activeAgentId={rt.activeAgentId} />
+              <AgentOrbit3D
+                phase={displayPhase}
+                agents={rt.agents}
+                activeAgentId={rt.activeAgentId}
+                voiceActive={waveActive}
+                voiceIntensity={waveIntensity}
+              />
 
               {/* TOP-CENTER: Weather line */}
               {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
@@ -946,16 +946,6 @@ export default function App() {
                   )}
                 </motion.div>
               </AnimatePresence>
-
-              {/* Wave visualizer */}
-              <div className="w-full max-w-sm">
-                <WaveVisualizer
-                  active={waveActive}
-                  color={waveColor(displayPhase)}
-                  intensity={waveIntensity}
-                  useMic={isListening}
-                />
-              </div>
 
               {/* Routing indicator — shows which agent is processing */}
               <div className="h-5 flex items-center justify-center">
@@ -1120,15 +1110,14 @@ export default function App() {
                 </AnimatePresence>
                 <span className="text-[7px] text-slate-700">/100</span>
               </div>
-              <div className="space-y-1.5">
+              <div className="grid grid-cols-2 gap-x-2 gap-y-2">
                 {orchSys && (
                   <>
-                    <StatRow spread label="CPU"  value={`${orchSys.cpu_pct}%`} hi={orchSys.cpu_pct > 85 ? 'err' : orchSys.cpu_pct > 60 ? 'warn' : 'ok'} />
-                    <StatRow spread label="RAM"  value={`${orchSys.mem_pct}%`} hi={orchSys.mem_pct > 85 ? 'err' : orchSys.mem_pct > 70 ? 'warn' : 'ok'} />
-                    <StatRow spread label="Disk" value={`${orchSys.disk_pct}%`} hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'} />
+                    <StatRow label="CPU"  value={`${orchSys.cpu_pct}%`} hi={orchSys.cpu_pct > 85 ? 'err' : orchSys.cpu_pct > 60 ? 'warn' : 'ok'} />
+                    <StatRow label="RAM"  value={`${orchSys.mem_pct}%`} hi={orchSys.mem_pct > 85 ? 'err' : orchSys.mem_pct > 70 ? 'warn' : 'ok'} />
+                    <StatRow label="Disk" value={`${orchSys.disk_pct}%`} hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'} />
                     {orchSys.cpu_temp_c != null && (
                       <StatRow
-                        spread
                         label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
                         value={`${orchSys.cpu_temp_c}°C`}
                         hi={orchSys.temp_source === 'battery' ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok') : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')}
@@ -1138,21 +1127,18 @@ export default function App() {
                 )}
                 {rt.systemStats.battery && (
                   <StatRow
-                    spread
                     label="Battery"
                     value={`${rt.systemStats.battery.level}%${rt.systemStats.battery.charging ? '⚡' : ''}`}
                     hi={rt.systemStats.battery.level < 20 ? 'err' : rt.systemStats.battery.level < 40 ? 'warn' : 'ok'}
                   />
                 )}
                 <StatRow
-                  spread
                   label="Network"
                   value={rt.systemStats.online ? (rt.systemStats.connectionType ?? 'Online') : 'Offline'}
                   hi={rt.systemStats.online ? 'ok' : 'err'}
                 />
                 {rt.systemStats.appUptimeSec > 0 && (
                   <StatRow
-                    spread
                     label="Uptime"
                     value={rt.systemStats.appUptimeSec < 60
                       ? `${rt.systemStats.appUptimeSec}s`

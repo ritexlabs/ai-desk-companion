@@ -433,27 +433,30 @@ export function ForecastStrip({ city }: ForecastStripProps) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, x: -6 }}
+      animate={{ opacity: 1, x: 0 }}
       transition={{ delay: 0.2, duration: 0.3 }}
-      className="flex items-end justify-center gap-6 w-full"
+      className="flex flex-col gap-1.5"
     >
       {data.forecast.map((f, i) => {
         const fm   = wmoMeta(f.code);
         const Icon = fm.Icon;
+        const today = i === 0;
         return (
           <motion.div
             key={i}
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.05, duration: 0.2 }}
-            className="flex flex-col items-center gap-1"
+            className={`flex items-center gap-2 rounded-lg px-2 py-0.5 ${
+              today ? 'bg-cyan-400/8 border border-cyan-400/20' : ''
+            }`}
           >
-            <span className={`text-[10px] font-mono ${i === 0 ? 'text-cyan-400' : 'text-slate-600'}`}>
+            <span className={`text-[10px] font-mono w-8 leading-none ${today ? 'text-cyan-400' : 'text-slate-500'}`}>
               {f.day}
             </span>
-            <Icon className={`h-5 w-5 ${fm.color}`} />
-            <span className={`text-[11px] font-bold tabular-nums leading-none ${i === 0 ? 'text-cyan-300' : 'text-slate-400'}`}>
+            <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${fm.color}`} />
+            <span className={`text-[10px] font-bold tabular-nums leading-none ${today ? 'text-cyan-300' : 'text-slate-300'}`}>
               {f.high}°
             </span>
             <span className="text-[9px] tabular-nums text-slate-600 leading-none">{f.low}°</span>

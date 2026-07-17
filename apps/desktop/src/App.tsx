@@ -621,6 +621,63 @@ export default function App() {
               <RotateCw className="h-3.5 w-3.5" />
             </motion.button>
 
+            {/* Wake Up / Sleep / Booting toggle */}
+            <AnimatePresence mode="wait">
+              {rt.phase === 'booting' || rt.phase === 'wake_detected' ? (
+                <motion.button
+                  key="hdr-booting"
+                  disabled
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.15 }}
+                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-white/10 bg-white/5 text-slate-500 text-[10px] font-semibold cursor-not-allowed"
+                >
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                    className="h-3 w-3 rounded-full border border-slate-600 border-t-slate-400"
+                  />
+                  {rt.phase === 'wake_detected' ? 'Activating…' : 'Booting…'}
+                </motion.button>
+              ) : rt.phase === 'standby' || rt.phase === 'sleep' ? (
+                <motion.button
+                  key="hdr-wakeup"
+                  onClick={rt.triggerWakeWord}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="relative flex items-center gap-1.5 h-7 px-2.5 rounded-lg bg-cyan-500 text-slate-950 text-[10px] font-bold hover:bg-cyan-400 transition-colors overflow-hidden"
+                >
+                  <motion.div
+                    className="pointer-events-none absolute inset-y-0 w-8 bg-gradient-to-r from-transparent via-white/25 to-transparent skew-x-12"
+                    animate={{ left: ['-2rem', '110%'] }}
+                    transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 1.4, ease: 'easeInOut' }}
+                  />
+                  <Power className="h-3 w-3" />
+                  Wake Up
+                </motion.button>
+              ) : (
+                <motion.button
+                  key="hdr-sleep"
+                  onClick={rt.sleep}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  className="flex items-center gap-1.5 h-7 px-2.5 rounded-lg border border-slate-600/50 bg-slate-800/60 text-slate-300 text-[10px] font-semibold hover:bg-slate-700/60 hover:border-slate-500/50 transition-colors"
+                >
+                  <Moon className="h-3 w-3" />
+                  Sleep
+                </motion.button>
+              )}
+            </AnimatePresence>
+
             {/* Voice settings gear */}
             <motion.button
               onClick={() => setSettingsOpen((o) => !o)}
@@ -804,151 +861,67 @@ export default function App() {
           {/* CENTER — Orb + Controls + Transcript + Input */}
           <main className="flex flex-col min-h-0 overflow-hidden min-w-0">
 
-            {/* 3D Orbit — full canvas with corner HUD overlays */}
+            {/* 3D Orbit */}
             <div className="flex-shrink-0 flex justify-center overflow-hidden relative" style={{ height: 420 }}>
               <AgentOrbit3D phase={displayPhase} agents={rt.agents} activeAgentId={rt.activeAgentId} />
 
-              {/* ── TOP-CENTER: Weather line ───────────────────────────── */}
+              {/* TOP-CENTER: Weather line */}
               {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
                 <div className="absolute top-3 inset-x-0 z-10 flex justify-center pointer-events-none select-none">
                   <WeatherLine city={agentConfig.weather.defaultCity || 'Bengaluru'} />
                 </div>
               )}
 
-              {/* ── TOP-LEFT: System Status HUD ────────────────────────── */}
-              <motion.div
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5, duration: 0.28, ease: 'easeOut' }}
-                className="absolute top-3 left-3 z-10 w-[154px] px-2.5 py-2 pointer-events-none select-none"
-              >
-                {/* Header */}
-                <div className="flex items-center gap-1.5 mb-1.5 pb-1">
-                  <Cpu className="h-2.5 w-2.5 text-teal-400 flex-shrink-0" />
-                  <span className="text-[8px] font-mono uppercase tracking-[0.22em] text-teal-500">System</span>
-                  <AnimatePresence mode="wait">
-                    <motion.span
-                      key={rt.systemStats.healthScore}
-                      initial={{ opacity: 0, scale: 1.25 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className={`ml-auto text-[12px] font-bold tabular-nums leading-none ${
-                        rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
-                        rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
-                      }`}
-                    >
-                      {rt.systemStats.healthScore}
-                    </motion.span>
-                  </AnimatePresence>
-                  <span className="text-[7px] text-slate-700">/100</span>
+              {/* TOP-LEFT: Forecast strip */}
+              {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
+                <div className="absolute top-3 left-3 z-10 pointer-events-none select-none">
+                  <ForecastStrip city={agentConfig.weather.defaultCity || 'Bengaluru'} />
                 </div>
+              )}
 
-                {/* Metric rows */}
-                <div className="space-y-[3px]">
-                  {orchSys && (
-                    <>
-                      <StatRow label="CPU"  value={`${orchSys.cpu_pct}%`}
-                        hi={orchSys.cpu_pct  > 85 ? 'err' : orchSys.cpu_pct  > 60 ? 'warn' : 'ok'} />
-                      <StatRow label="RAM"  value={`${orchSys.mem_pct}%`}
-                        hi={orchSys.mem_pct  > 85 ? 'err' : orchSys.mem_pct  > 70 ? 'warn' : 'ok'} />
-                      <StatRow label="Disk" value={`${orchSys.disk_pct}%`}
-                        hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'} />
-                      {orchSys.cpu_temp_c != null && (
-                        <StatRow
-                          label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
-                          value={`${orchSys.cpu_temp_c}°C`}
-                          hi={
-                            orchSys.temp_source === 'battery'
-                              ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok')
-                              : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')
-                          }
-                        />
-                      )}
-                    </>
-                  )}
-                  {rt.systemStats.battery && (
-                    <StatRow
-                      label="Bat"
-                      value={`${rt.systemStats.battery.level}%${rt.systemStats.battery.charging ? '⚡' : ''}`}
-                      hi={rt.systemStats.battery.level < 20 ? 'err' : rt.systemStats.battery.level < 40 ? 'warn' : 'ok'}
-                    />
-                  )}
-                  <StatRow
-                    label="Net"
-                    value={rt.systemStats.online ? (rt.systemStats.connectionType ?? 'Online') : 'Offline'}
-                    hi={rt.systemStats.online ? 'ok' : 'err'}
-                  />
-                  {rt.systemStats.appUptimeSec > 0 && (
-                    <StatRow
-                      label="Up"
-                      value={rt.systemStats.appUptimeSec < 60
-                        ? `${rt.systemStats.appUptimeSec}s`
-                        : `${Math.floor(rt.systemStats.appUptimeSec / 60)}m ${rt.systemStats.appUptimeSec % 60}s`}
-                    />
-                  )}
-                </div>
-              </motion.div>
-
-              {/* ── TOP-RIGHT: App Status HUD ──────────────────────────── */}
-              <motion.div
-                initial={{ opacity: 0, x: 12 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.6, duration: 0.28, ease: 'easeOut' }}
-                className="absolute top-3 right-3 z-10 w-[154px] px-2.5 py-2 pointer-events-none select-none"
-              >
-                {/* Header */}
-                <div className="flex items-center gap-1.5 mb-1.5 pb-1">
-                  <Activity className="h-2.5 w-2.5 text-violet-400 flex-shrink-0" />
-                  <span className="text-[8px] font-mono uppercase tracking-[0.22em] text-violet-400">App</span>
-                  <motion.div
-                    animate={{ opacity: rt.wsConnected ? [0.45, 1, 0.45] : 0.3 }}
-                    transition={{ duration: 1.8, repeat: Infinity }}
-                    className={`ml-auto h-1.5 w-1.5 rounded-full flex-shrink-0 ${rt.wsConnected ? 'bg-teal-400' : 'bg-slate-600'}`}
-                  />
-                  <span className="text-[7.5px] text-slate-500 leading-none">
-                    {rt.wsConnected ? 'Connected' : 'Local'}
-                  </span>
-                </div>
-
-                {/* Status rows */}
-                <div className="space-y-[3px]">
-                  <StatusRow label="STT"       ok={rt.sttSupported} />
-                  <StatusRow label="TTS"       ok={rt.ttsSupported} />
-                  <StatusRow label="Session"   ok={isActive} />
-                  <StatusRow label="WebSocket" ok={rt.wsConnected} />
-
-                  {rt.wsConnected && (
-                    <div className="flex flex-wrap gap-1 pt-1 mt-0.5">
-                      {[
-                        { k: 'TTS',  on: rt.orchestratorCaps.tts,      val: rt.orchestratorCaps.tts      ? 'Server' : 'Browser' },
-                        { k: 'STT',  on: rt.orchestratorCaps.stt,      val: rt.orchestratorCaps.stt      ? 'Server' : 'Browser' },
-                        { k: 'Wake', on: rt.orchestratorCaps.wakeWord, val: rt.orchestratorCaps.wakeWord ? 'Server' : 'Browser' },
-                      ].map((p) => (
-                        <span key={p.k} className={`text-[8px] leading-none ${
-                          p.on ? 'text-teal-400' : 'text-slate-600'
-                        }`}>
-                          {p.k}: {p.val}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  {rt.orchestratorMetrics && (
-                    <div className="pt-1 mt-0.5 space-y-[3px]">
-                      <StatRow spread label="Cmds"  value={String(rt.orchestratorMetrics.commands_processed)} />
-                      <StatRow spread label="Sess"  value={String(rt.orchestratorMetrics.sessions_started)} />
-                      {rt.orchestratorMetrics.tts_calls > 0 && (
-                        <StatRow spread label="TTS calls" value={String(rt.orchestratorMetrics.tts_calls)} />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
+              {/* TOP-RIGHT: Performance HUD */}
+              {rt.orchestratorMetrics && (
+                <motion.div
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5, duration: 0.28, ease: 'easeOut' }}
+                  className="absolute top-3 right-3 z-10 pointer-events-none select-none"
+                >
+                  <div className="flex items-center justify-center gap-1.5 mb-1.5">
+                    <BarChart2 className="h-2.5 w-2.5 text-violet-400 flex-shrink-0" />
+                    <span className="text-[8px] font-mono uppercase tracking-[0.22em] text-violet-500">Performance</span>
+                  </div>
+                  <div className="space-y-[3px]">
+                    <StatRow spread label="Uptime"   value={rt.orchestratorMetrics.uptime_sec < 60 ? `${rt.orchestratorMetrics.uptime_sec}s` : `${Math.floor(rt.orchestratorMetrics.uptime_sec / 60)}m`} />
+                    <StatRow spread label="Commands" value={String(rt.orchestratorMetrics.commands_processed)} />
+                    <StatRow spread label="Sessions" value={String(rt.orchestratorMetrics.sessions_started)} />
+                    {rt.orchestratorMetrics.tts_calls > 0 && (
+                      <StatRow spread label="TTS" value={String(rt.orchestratorMetrics.tts_calls)} />
+                    )}
+                    {Object.entries(rt.orchestratorMetrics.agents).slice(0, 4).map(([id, s]) => (
+                      <div key={id} className="flex items-center justify-between gap-3 min-w-0">
+                        <span className="text-[10px] text-slate-500 capitalize flex-shrink-0 min-w-[48px]">{id}</span>
+                        <AnimatePresence mode="wait">
+                          <motion.span
+                            key={`${s.calls}-${s.avg_ms}`}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="text-[10px] font-medium tabular-nums text-violet-400"
+                          >
+                            {s.calls}× · {s.avg_ms}ms
+                          </motion.span>
+                        </AnimatePresence>
+                      </div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
             </div>
 
-            {/* Controls below orbit: speech bubble, equalizer, actions */}
-            <div className="flex-1 flex flex-col items-center justify-end gap-3 px-8 pb-6 overflow-hidden">
+            {/* Controls below orbit */}
+            <div className="flex-shrink-0 flex flex-col items-center gap-3 px-8 pt-4 pb-2">
 
               {/* Assistant speech bubble with typing animation */}
               <AnimatePresence mode="wait">
@@ -1019,65 +992,6 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              {/* Action button — single dynamic Wake Up / Sleep toggle */}
-              <div className="flex items-center justify-center mt-1">
-                <AnimatePresence mode="wait">
-                  {rt.phase === 'booting' || rt.phase === 'wake_detected' ? (
-                    <motion.button
-                      key="booting"
-                      disabled
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.92 }}
-                      transition={{ duration: 0.18 }}
-                      className="flex items-center gap-2 h-11 px-8 rounded-xl border border-white/10 bg-white/5 text-slate-500 text-sm font-semibold cursor-not-allowed"
-                    >
-                      <motion.div
-                        animate={{ rotate: 360 }}
-                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        className="h-4 w-4 rounded-full border-2 border-slate-600 border-t-slate-400"
-                      />
-                      {rt.phase === 'wake_detected' ? 'Activating…' : 'Booting…'}
-                    </motion.button>
-                  ) : rt.phase === 'standby' || rt.phase === 'sleep' ? (
-                    <motion.button
-                      key="wakeup"
-                      onClick={rt.triggerWakeWord}
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.92 }}
-                      transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="relative flex items-center gap-2.5 h-11 px-10 rounded-xl bg-cyan-500 text-slate-950 text-sm font-bold hover:bg-cyan-400 transition-colors overflow-hidden"
-                    >
-                      <motion.div
-                        className="pointer-events-none absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
-                        animate={{ left: ['-3rem', '110%'] }}
-                        transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 1.2, ease: 'easeInOut' }}
-                      />
-                      <Power className="h-4 w-4" />
-                      Wake Up
-                    </motion.button>
-                  ) : (
-                    <motion.button
-                      key="sleep"
-                      onClick={rt.sleep}
-                      initial={{ opacity: 0, scale: 0.92 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.92 }}
-                      transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                      whileHover={{ scale: 1.06 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-2.5 h-11 px-10 rounded-xl border border-slate-600/50 bg-slate-800/60 text-slate-300 text-sm font-semibold hover:bg-slate-700/60 hover:border-slate-500/50 transition-colors"
-                    >
-                      <Moon className="h-4 w-4" />
-                      Sleep
-                    </motion.button>
-                  )}
-                </AnimatePresence>
-              </div>
-
               {/* Hint text + mic listening indicator */}
               <div className="flex flex-col items-center gap-1.5">
                 <div className="text-[10px] text-slate-600 text-center max-w-xs leading-relaxed">
@@ -1106,94 +1020,10 @@ export default function App() {
                 )}
               </div>
 
-              {/* Forecast strip — bare day icons, no card */}
-              {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
-                <ForecastStrip city={agentConfig.weather.defaultCity || 'Bengaluru'} />
-              )}
             </div>
 
-          </main>
-
-          {/* RIGHT — Chat History + Quick Stats */}
-          <aside className="border-l border-white/8 flex flex-col min-h-0 bg-black/10">
-
-            {/* ── Compact stats (Performance + Config) ─────────────── */}
-            <div className="flex-shrink-0 overflow-y-auto p-3 space-y-2 scrollbar-thin border-b border-white/6">
-
-            {/* ── Performance ──────────────────────────────── */}
-            {rt.orchestratorMetrics && (
-              <motion.div
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
-                className="rounded-2xl border border-violet-400/20 bg-violet-400/5 p-3"
-              >
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <BarChart2 className="h-3 w-3 text-violet-400" />
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-violet-500">Performance</span>
-                </div>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                  <StatRow label="Uptime" value={rt.orchestratorMetrics.uptime_sec < 60 ? `${rt.orchestratorMetrics.uptime_sec}s` : `${Math.floor(rt.orchestratorMetrics.uptime_sec / 60)}m`} />
-                  <StatRow label="Commands" value={String(rt.orchestratorMetrics.commands_processed)} />
-                  <StatRow label="Sessions" value={String(rt.orchestratorMetrics.sessions_started)} />
-                  {rt.orchestratorMetrics.tts_calls > 0 && <StatRow label="TTS calls" value={String(rt.orchestratorMetrics.tts_calls)} />}
-                </div>
-                {Object.entries(rt.orchestratorMetrics.agents).length > 0 && (
-                  <div className="pt-1.5 border-t border-white/6 mt-1.5 space-y-0.5">
-                    {Object.entries(rt.orchestratorMetrics.agents).map(([id, s], idx) => (
-                      <motion.div
-                        key={id}
-                        initial={{ opacity: 0, x: 8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05, duration: 0.2 }}
-                        className="flex justify-between"
-                      >
-                        <span className="text-[9px] text-slate-500 capitalize">{id}</span>
-                        <AnimatePresence mode="wait">
-                          <motion.span
-                            key={`${s.calls}-${s.avg_ms}`}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="text-[9px] text-violet-400 tabular-nums"
-                          >
-                            {s.calls}× · {s.avg_ms}ms
-                          </motion.span>
-                        </AnimatePresence>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
-            )}
-
-            {/* ── Config ───────────────────────────────────── */}
-            <motion.div
-              initial={{ opacity: 0, x: 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12, duration: 0.4, ease: 'easeOut' }}
-              className="rounded-2xl border border-white/8 bg-white/3 p-3"
-            >
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-2">
-                <StatRow label="Wake" value={appConfig.wakeWord} />
-                <StatRow label="Name" value={appConfig.callingName} />
-                <StatRow label="Voice" value={voiceConfig.gender === 'female' ? '♀ F' : '♂ M'} />
-                <StatRow label="Speed" value={voiceConfig.speed} />
-              </div>
-              <motion.button
-                onClick={() => setSettingsOpen(true)}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.97 }}
-                className="w-full h-6 rounded-lg border border-white/8 bg-white/4 text-[10px] text-slate-400 hover:text-cyan-300 hover:border-cyan-400/25 transition"
-              >
-                Open settings →
-              </motion.button>
-            </motion.div>
-            </div>{/* end compact stats */}
-
-            {/* ── Conversation header ── */}
-            <div className="flex-shrink-0 px-3 py-1.5 flex items-center gap-1.5">
+            {/* Conversation header */}
+            <div className="flex-shrink-0 px-4 py-1.5 flex items-center gap-1.5 border-t border-white/6">
               <motion.div
                 animate={{ opacity: [0.4, 1, 0.4] }}
                 transition={{ duration: 2, repeat: Infinity }}
@@ -1209,10 +1039,10 @@ export default function App() {
               )}
             </div>
 
-            {/* ── HoloChat — takes all remaining vertical space ── */}
+            {/* HoloChat — takes all remaining vertical space */}
             <HoloChat transcript={rt.transcript} aiName={appConfig.wakeWord} />
 
-            {/* ── Input bar — anchored to bottom of right panel ── */}
+            {/* Input bar */}
             <div className="flex-shrink-0 border-t border-cyan-400/8 bg-black/20 backdrop-blur-sm px-3 py-2.5">
               <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-2.5 py-2 focus-within:border-cyan-400/22 transition-colors">
                 <motion.span
@@ -1255,6 +1085,146 @@ export default function App() {
                   Send
                 </motion.button>
               </div>
+            </div>
+
+          </main>
+
+          {/* RIGHT — Status Cards */}
+          <aside className="border-l border-white/8 bg-black/10 overflow-y-auto scrollbar-thin">
+            <div className="p-3 space-y-2">
+
+            {/* System Status card */}
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
+              className="rounded-2xl border border-teal-400/20 bg-teal-400/5 p-3"
+            >
+              <div className="flex items-center gap-1.5 mb-2">
+                <Cpu className="h-3 w-3 text-teal-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-teal-500">System</span>
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={rt.systemStats.healthScore}
+                    initial={{ opacity: 0, scale: 1.25 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.18 }}
+                    className={`ml-auto text-[12px] font-bold tabular-nums leading-none ${
+                      rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
+                      rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
+                    }`}
+                  >
+                    {rt.systemStats.healthScore}
+                  </motion.span>
+                </AnimatePresence>
+                <span className="text-[7px] text-slate-700">/100</span>
+              </div>
+              <div className="space-y-1.5">
+                {orchSys && (
+                  <>
+                    <StatRow spread label="CPU"  value={`${orchSys.cpu_pct}%`} hi={orchSys.cpu_pct > 85 ? 'err' : orchSys.cpu_pct > 60 ? 'warn' : 'ok'} />
+                    <StatRow spread label="RAM"  value={`${orchSys.mem_pct}%`} hi={orchSys.mem_pct > 85 ? 'err' : orchSys.mem_pct > 70 ? 'warn' : 'ok'} />
+                    <StatRow spread label="Disk" value={`${orchSys.disk_pct}%`} hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'} />
+                    {orchSys.cpu_temp_c != null && (
+                      <StatRow
+                        spread
+                        label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
+                        value={`${orchSys.cpu_temp_c}°C`}
+                        hi={orchSys.temp_source === 'battery' ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok') : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')}
+                      />
+                    )}
+                  </>
+                )}
+                {rt.systemStats.battery && (
+                  <StatRow
+                    spread
+                    label="Battery"
+                    value={`${rt.systemStats.battery.level}%${rt.systemStats.battery.charging ? '⚡' : ''}`}
+                    hi={rt.systemStats.battery.level < 20 ? 'err' : rt.systemStats.battery.level < 40 ? 'warn' : 'ok'}
+                  />
+                )}
+                <StatRow
+                  spread
+                  label="Network"
+                  value={rt.systemStats.online ? (rt.systemStats.connectionType ?? 'Online') : 'Offline'}
+                  hi={rt.systemStats.online ? 'ok' : 'err'}
+                />
+                {rt.systemStats.appUptimeSec > 0 && (
+                  <StatRow
+                    spread
+                    label="Uptime"
+                    value={rt.systemStats.appUptimeSec < 60
+                      ? `${rt.systemStats.appUptimeSec}s`
+                      : `${Math.floor(rt.systemStats.appUptimeSec / 60)}m ${rt.systemStats.appUptimeSec % 60}s`}
+                  />
+                )}
+              </div>
+            </motion.div>
+
+            {/* App Status card */}
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.10, duration: 0.4, ease: 'easeOut' }}
+              className="rounded-2xl border border-violet-400/20 bg-violet-400/5 p-3"
+            >
+              <div className="flex items-center gap-1.5 mb-2">
+                <Activity className="h-3 w-3 text-violet-400" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-violet-500">App Status</span>
+                <motion.div
+                  animate={{ opacity: rt.wsConnected ? [0.45, 1, 0.45] : 0.3 }}
+                  transition={{ duration: 1.8, repeat: Infinity }}
+                  className={`ml-auto h-1.5 w-1.5 rounded-full flex-shrink-0 ${rt.wsConnected ? 'bg-teal-400' : 'bg-slate-600'}`}
+                />
+                <span className="text-[7.5px] text-slate-500 leading-none">
+                  {rt.wsConnected ? 'Connected' : 'Local'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-1.5">
+                <StatusRow label="STT"       ok={rt.sttSupported} />
+                <StatusRow label="TTS"       ok={rt.ttsSupported} />
+                <StatusRow label="Session"   ok={isActive} />
+                <StatusRow label="WebSocket" ok={rt.wsConnected} />
+              </div>
+              {rt.wsConnected && (
+                <div className="flex flex-wrap gap-1.5 pt-1.5 border-t border-white/6">
+                  {[
+                    { k: 'TTS',  on: rt.orchestratorCaps.tts,      val: rt.orchestratorCaps.tts      ? 'Server' : 'Browser' },
+                    { k: 'STT',  on: rt.orchestratorCaps.stt,      val: rt.orchestratorCaps.stt      ? 'Server' : 'Browser' },
+                    { k: 'Wake', on: rt.orchestratorCaps.wakeWord, val: rt.orchestratorCaps.wakeWord ? 'Server' : 'Browser' },
+                  ].map((p) => (
+                    <span key={p.k} className={`text-[8px] leading-none ${p.on ? 'text-teal-400' : 'text-slate-600'}`}>
+                      {p.k}: {p.val}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+
+            {/* Config card */}
+            <motion.div
+              initial={{ opacity: 0, x: 24 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.20, duration: 0.4, ease: 'easeOut' }}
+              className="rounded-2xl border border-white/8 bg-white/3 p-3"
+            >
+              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-2">
+                <StatRow label="Wake"  value={appConfig.wakeWord} />
+                <StatRow label="Name"  value={appConfig.callingName} />
+                <StatRow label="Voice" value={voiceConfig.gender === 'female' ? '♀ F' : '♂ M'} />
+                <StatRow label="Speed" value={voiceConfig.speed} />
+              </div>
+              <motion.button
+                onClick={() => setSettingsOpen(true)}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.97 }}
+                className="w-full h-6 rounded-lg border border-white/8 bg-white/4 text-[10px] text-slate-400 hover:text-cyan-300 hover:border-cyan-400/25 transition"
+              >
+                Open settings →
+              </motion.button>
+            </motion.div>
+
             </div>
           </aside>
         </div>

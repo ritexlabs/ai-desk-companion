@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
@@ -52,6 +52,14 @@ import { useProactiveNotifications } from './hooks/useProactiveNotifications';
 import { useAgentVoiceConfig } from './hooks/useAgentVoiceConfig';
 
 /* ─── helpers ──────────────────────────────────────────────── */
+
+interface UpcomingReminder { id: string; title: string; due_at: number; }
+
+function minsLeft(due_at: number): string {
+  const secs = due_at - Date.now() / 1000;
+  if (secs <= 60) return 'in < 1 min';
+  return `in ${Math.ceil(secs / 60)} min`;
+}
 
 const PHASE_LABEL: Record<RuntimePhase, string> = {
   standby: 'Standby', sleep: 'Sleep', wake_detected: 'Activating',
@@ -251,6 +259,57 @@ export default function App() {
   const [whatsappDashboardOpen,    setWhatsappDashboardOpen]    = useState(false);
   const [notesDashboardOpen,       setNotesDashboardOpen]       = useState(false);
   const [portfolioPnlPct,          setPortfolioPnlPct]          = useState<number | null>(null);
+  const [upcomingReminders,        setUpcomingReminders]        = useState<UpcomingReminder[]>([]);
+
+  // Poll for reminders due within 5 minutes
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+        const res  = await fetch(`${base}/api/notes?include_completed=false`);
+        if (!res.ok) return;
+        const { items = [] } = await res.json();
+        const now      = Date.now() / 1000;
+        const cutoff   = now + 5 * 60;
+        const today    = new Date().toISOString().slice(0, 10);
+        const upcoming: UpcomingReminder[] = [];
+        for (const item of items) {
+          if (item.completed) continue;
+          if (item.type === 'note') continue;
+
+          // Snoozed items: show flash using snoozed_until as the effective due time
+          if (item.snoozed_until && item.snoozed_until > now && item.snoozed_until <= cutoff) {
+            upcoming.push({ id: item.id, title: item.title, due_at: item.snoozed_until });
+            continue;
+          }
+
+          if (item.fired) continue;
+
+          // One-time due_at items (reminder, task, onetime alarm)
+          if (item.due_at && item.due_at > now && item.due_at <= cutoff) {
+            upcoming.push({ id: item.id, title: item.title, due_at: item.due_at });
+            continue;
+          }
+          // Recurring alarm: check if repeat_time is within 5 min from now
+          if (item.type === 'alarm' && item.repeat !== 'onetime' && item.repeat_time) {
+            if (item.last_fired_date === today) continue;
+            const [h, m] = (item.repeat_time as string).split(':').map(Number);
+            const alarm  = new Date();
+            alarm.setHours(h, m, 0, 0);
+            const secs = (alarm.getTime() - Date.now()) / 1000;
+            if (secs > 0 && secs <= 5 * 60) {
+              upcoming.push({ id: item.id, title: item.title, due_at: Math.floor(alarm.getTime() / 1000) });
+            }
+          }
+        }
+        upcoming.sort((a, b) => a.due_at - b.due_at);
+        setUpcomingReminders(upcoming);
+      } catch { /* backend offline */ }
+    };
+    check();
+    const id = setInterval(check, 20_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Fetch portfolio P&L when the agent comes online
   useEffect(() => {
@@ -276,13 +335,35 @@ export default function App() {
     prevGoogleTokenRef.current = token;
   }, [agentConfig.google.accessToken, rt.wsConnected]);
 
+  const onPersonalizeAndSpeak = useCallback(async (name: string, title: string, body: string, type: string) => {
+    const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+    const res  = await fetch(`${base}/api/notes/personalize-reminder`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name, title, body, type }),
+    });
+    if (!res.ok) throw new Error('personalize failed');
+    const { message } = await res.json() as { message: string };
+    if (rt.wsConnected) {
+      rt.speak(message);
+    } else if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const utt = new SpeechSynthesisUtterance(message);
+      utt.rate  = 0.88;
+      utt.pitch = 1.05;
+      window.speechSynthesis.speak(utt);
+    }
+  }, [rt.wsConnected, rt.speak]);
+
   const { visualAlerts, countdown: alertCountdown, dismissAlert, snoozeAlert, handleVoiceCommand } = useReminders({
     phase:                    rt.phase,
-    enabled:                  rt.wsConnected,
+    enabled:                  true,
     voiceEnabled:             rt.voiceEnabled,
     callingName:              appConfig.callingName,
     externalAlerts:           rt.pendingAlerts,
     onExternalAlertConsumed:  rt.clearPendingAlert,
+    onSpeak:                  rt.wsConnected ? (text) => rt.speak(text) : undefined,
+    onPersonalizeAndSpeak,
   });
 
   // Intercept voice transcript for alert snooze / dismiss when an alert is active
@@ -563,84 +644,161 @@ export default function App() {
         <div className="flex-1 grid grid-cols-[320px_1fr_320px] min-h-0 overflow-hidden">
 
           {/* LEFT — Online Agents */}
-          <aside className="border-r border-white/8 overflow-y-auto p-4 bg-black/10 scrollbar-thin flex flex-col gap-3">
+          <aside className="border-r border-white/8 bg-black/10 flex flex-col overflow-hidden">
 
-            {/* Header */}
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-[0.3em] text-slate-600">
-                Online Agents
-              </span>
-              <span className="text-[9px] rounded-full border border-white/10 bg-white/4 px-2 py-0.5 text-slate-500 tabular-nums">
-                {onlineAgents.length}/{rt.agents.filter(a => a.id !== 'system').length}
-              </span>
+            {/* Scrollable agent content */}
+            <div className="flex-1 overflow-y-auto p-4 scrollbar-thin flex flex-col gap-3 min-h-0">
+
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-[0.3em] text-slate-600">
+                  Online Agents
+                </span>
+                <span className="text-[9px] rounded-full border border-white/10 bg-white/4 px-2 py-0.5 text-slate-500 tabular-nums">
+                  {onlineAgents.length}/{rt.agents.filter(a => a.id !== 'system').length}
+                </span>
+              </div>
+
+              {/* ALL AGENTS NOMINAL banner */}
+              {onlineAgents.length > 0 && onlineAgents.length === rt.agents.filter(a => a.id !== 'system').length && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/8 py-2"
+                >
+                  <motion.span
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 1.8, repeat: Infinity }}
+                    className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                  />
+                  <span className="text-[9px] font-mono font-bold tracking-[0.22em] text-emerald-400">
+                    ALL AGENTS NOMINAL
+                  </span>
+                </motion.div>
+              )}
+
+              {/* Agent cards */}
+              {onlineAgents.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center">
+                  <p className="text-[11px] text-slate-700 text-center">No agents online yet</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <AnimatePresence>
+                    {onlineAgents.map((agent, idx) => {
+                      const m = AGENT_PILL_META[agent.id];
+                      if (!m) return null;
+                      const Icon = m.icon;
+                      return (
+                        <motion.button
+                          key={agent.id}
+                          initial={{ opacity: 0, scale: 0.88 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.88 }}
+                          transition={{ delay: idx * 0.04, duration: 0.22 }}
+                          whileHover={{ scale: 1.04, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleAgentClick(agent.id)}
+                          className={`flex items-center gap-2 rounded-xl border ${m.border} ${m.bg} px-2.5 py-2.5 cursor-pointer w-full text-left`}
+                        >
+                          <motion.div
+                            animate={{ rotate: [0, 8, -8, 0] }}
+                            transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
+                          >
+                            <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${m.text}`} />
+                          </motion.div>
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className={`text-[11px] font-medium truncate ${m.text}`}>{agent.label}</span>
+                            {agent.id === 'portfolio' && portfolioPnlPct !== null && (
+                              <span className={`text-[10px] font-mono font-bold leading-none ${portfolioPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                {portfolioPnlPct >= 0 ? '+' : ''}{portfolioPnlPct.toFixed(1)}%
+                              </span>
+                            )}
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              )}
+
+              {onlineAgents.length > 0 && (
+                <p className="text-[9px] text-slate-700 text-center">tap card for details</p>
+              )}
             </div>
 
-            {/* ALL AGENTS NOMINAL banner */}
-            {onlineAgents.length > 0 && onlineAgents.length === rt.agents.filter(a => a.id !== 'system').length && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/8 py-2"
-              >
-                <motion.span
-                  animate={{ opacity: [0.5, 1, 0.5] }}
-                  transition={{ duration: 1.8, repeat: Infinity }}
-                  className="h-1.5 w-1.5 rounded-full bg-emerald-400"
-                />
-                <span className="text-[9px] font-mono font-bold tracking-[0.22em] text-emerald-400">
-                  ALL AGENTS NOMINAL
-                </span>
-              </motion.div>
-            )}
+            {/* ── Upcoming reminder flash — pinned to bottom ── */}
+            <AnimatePresence>
+              {upcomingReminders.length > 0 && (
+                <motion.div
+                  key="reminder-flash"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 12 }}
+                  transition={{ duration: 0.25, ease: 'easeOut' }}
+                  className="shrink-0 px-3 pb-3 pt-1 border-t border-white/6"
+                >
+                  <motion.button
+                    onClick={() => setNotesDashboardOpen(true)}
+                    animate={{
+                      boxShadow: [
+                        '0 0 0px rgba(251,191,36,0)',
+                        '0 0 18px rgba(251,191,36,0.30)',
+                        '0 0 0px rgba(251,191,36,0)',
+                      ],
+                    }}
+                    transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                    className="relative w-full overflow-hidden rounded-xl border border-amber-400/35 bg-amber-400/8 px-3 py-2.5 text-left"
+                  >
+                    {/* Sweep flash */}
+                    <motion.div
+                      className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/10 to-transparent"
+                      animate={{ x: ['-100%', '200%'] }}
+                      transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 0.6, ease: 'easeInOut' }}
+                    />
 
-            {/* Agent cards */}
-            {onlineAgents.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
-                <p className="text-[11px] text-slate-700 text-center">No agents online yet</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <AnimatePresence>
-                  {onlineAgents.map((agent, idx) => {
-                    const m = AGENT_PILL_META[agent.id];
-                    if (!m) return null;
-                    const Icon = m.icon;
-                    return (
-                      <motion.button
-                        key={agent.id}
-                        initial={{ opacity: 0, scale: 0.88 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.88 }}
-                        transition={{ delay: idx * 0.04, duration: 0.22 }}
-                        whileHover={{ scale: 1.04, y: -2 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => handleAgentClick(agent.id)}
-                        className={`flex items-center gap-2 rounded-xl border ${m.border} ${m.bg} px-2.5 py-2.5 cursor-pointer w-full text-left`}
+                    <div className="relative flex items-center gap-2.5">
+                      {/* Shaking bell */}
+                      <motion.div
+                        animate={{ rotate: [-14, 14, -10, 10, -4, 4, 0, 0, 0] }}
+                        transition={{ duration: 1.0, repeat: Infinity, repeatDelay: 1.2 }}
+                        className="shrink-0"
                       >
-                        <motion.div
-                          animate={{ rotate: [0, 8, -8, 0] }}
-                          transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
-                        >
-                          <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${m.text}`} />
-                        </motion.div>
-                        <div className="flex flex-col min-w-0 flex-1">
-                          <span className={`text-[11px] font-medium truncate ${m.text}`}>{agent.label}</span>
-                          {agent.id === 'portfolio' && portfolioPnlPct !== null && (
-                            <span className={`text-[10px] font-mono font-bold leading-none ${portfolioPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {portfolioPnlPct >= 0 ? '+' : ''}{portfolioPnlPct.toFixed(1)}%
+                        <Bell className="h-4 w-4 text-amber-400" />
+                      </motion.div>
+
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[9px] font-mono font-bold uppercase tracking-[0.22em] text-amber-400/70 mb-0.5">
+                          Due Soon
+                          {upcomingReminders.length > 1 && (
+                            <span className="ml-1.5 rounded-full bg-amber-400/20 px-1.5 py-px text-amber-300">
+                              {upcomingReminders.length}
                             </span>
                           )}
-                        </div>
-                      </motion.button>
-                    );
-                  })}
-                </AnimatePresence>
-              </div>
-            )}
+                        </p>
+                        <p className="text-[12px] font-semibold text-white/90 truncate leading-tight">
+                          {upcomingReminders[0].title}
+                        </p>
+                        <p className="text-[10px] font-mono text-amber-300/80 mt-0.5">
+                          {minsLeft(upcomingReminders[0].due_at)}
+                          {upcomingReminders.length > 1 && (
+                            <span className="text-white/30"> · +{upcomingReminders.length - 1} more</span>
+                          )}
+                        </p>
+                      </div>
 
-            {onlineAgents.length > 0 && (
-              <p className="text-[9px] text-slate-700 text-center">tap card for details</p>
-            )}
+                      {/* Pulsing dot */}
+                      <motion.div
+                        animate={{ scale: [1, 1.6, 1], opacity: [0.7, 1, 0.7] }}
+                        transition={{ duration: 1.0, repeat: Infinity }}
+                        className="shrink-0 h-2 w-2 rounded-full bg-amber-400"
+                      />
+                    </div>
+                  </motion.button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
           </aside>
 
           {/* CENTER — Orb + Controls + Transcript + Input */}

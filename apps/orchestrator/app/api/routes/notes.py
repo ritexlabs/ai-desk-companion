@@ -4,6 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.services import notes_service as _ns
+from app.services.llm import llm_service
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -94,3 +96,47 @@ async def snooze_note(item_id: str, body: _SnoozeRequest) -> dict:
 @router.get('/api/notes/pending-alerts')
 async def get_pending_alerts() -> dict:
     return {'alerts': _ns.pop_pending_alerts()}
+
+
+_PERSONALIZE_SYSTEM = (
+    'You are a warm, friendly AI assistant speaking aloud to the user. '
+    'Your job is to announce a reminder or alarm. '
+    'Always follow this structure: first say "Hey [name]! You have a [Reminder/Alarm] for [title]." '
+    'then immediately add 1 short, warm, relevant, encouraging sentence about it — like a caring friend nudging them. '
+    'Total length: 2 sentences max. No markdown. Plain spoken English only. '
+    'Vary the second sentence every time so it never sounds repetitive.'
+)
+
+
+class _PersonalizeRequest(BaseModel):
+    name:  str
+    title: str
+    body:  str = ''
+    type:  str = 'reminder'
+
+
+@router.post('/api/notes/personalize-reminder')
+async def personalize_reminder(req: _PersonalizeRequest) -> dict:
+    llm_config = {
+        'provider': settings.llm_provider,
+        'api_key':  settings.openai_api_key,
+        'model':    settings.llm_model,
+        'base_url': settings.llm_base_url,
+    }
+    label   = 'Alarm' if req.type == 'alarm' else 'Reminder'
+    detail  = f' Additional context: {req.body}.' if req.body else ''
+    user_msg = (
+        f"Announce this to {req.name}: they have a {label} for \"{req.title}\".{detail} "
+        f"Start exactly with: \"Hey {req.name}! You have a {label} for {req.title}.\" "
+        f"Then add one warm, relevant, encouraging sentence."
+    )
+    message = await llm_service.complete(
+        user_message=user_msg,
+        llm_config=llm_config,
+        system_prompt=_PERSONALIZE_SYSTEM,
+        max_tokens=120,
+        temperature=0.9,
+    )
+    if not message:
+        message = f"Hey {req.name}! You have a {label} for {req.title}."
+    return {'message': message}

@@ -101,7 +101,8 @@ def complete_item(item_id: str) -> dict | None:
 
 def snooze_item(item_id: str, minutes: int = 10) -> bool:
     until = int(datetime.now().timestamp()) + minutes * 60
-    result = update_item(item_id, snoozed_until=until)
+    # Reset fired so the scheduler re-triggers when the snooze window expires
+    result = update_item(item_id, snoozed_until=until, fired=False)
     return result is not None
 
 

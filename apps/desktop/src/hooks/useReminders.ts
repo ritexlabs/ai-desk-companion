@@ -68,6 +68,14 @@ interface UseRemindersOptions {
   externalAlerts?:          ExternalAlert[];
   /** Called after an external alert has been merged into the visual queue */
   onExternalAlertConsumed?: (id: string) => void;
+  /** LLM/orchestrator speak — preferred over browser TTS when provided */
+  onSpeak?:                 (text: string) => void;
+  /**
+   * When provided, fetches a personalized LLM-generated message then speaks it.
+   * Signature: async (name, title, body, type) => void
+   * Falls back to onSpeak / browser TTS / beep when this returns/throws.
+   */
+  onPersonalizeAndSpeak?:   (name: string, title: string, body: string, type: string) => Promise<void>;
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────
@@ -79,6 +87,8 @@ export function useReminders({
   callingName,
   externalAlerts = [],
   onExternalAlertConsumed,
+  onSpeak,
+  onPersonalizeAndSpeak,
 }: UseRemindersOptions) {
   const [visualAlerts, setVisualAlerts] = useState<PendingAlert[]>([]);
   const [countdown, setCountdown]       = useState(REPEAT_SEC);
@@ -90,16 +100,29 @@ export function useReminders({
   // The first alarm in the queue is "active" and drives the repeat timer
   const activeAlarm = visualAlerts.find((a) => a.type === 'alarm') ?? null;
 
-  /* ── Remind: beep (voice off) or speak (voice on) ── */
+  /* ── Remind: personalized LLM → plain LLM speak → browser TTS → beep ── */
   const remind = useCallback((alert: PendingAlert) => {
-    if (voiceEnabled) {
-      const name = callingName.trim() || 'there';
-      const what = alert.body ? `${alert.title}. ${alert.body}` : alert.title;
-      speakText(`Hey ${name}! ${alert.type === 'alarm' ? 'Alarm' : 'Reminder'}: ${what}`);
+    const name = callingName.trim() || 'there';
+    const what = alert.body ? `${alert.title}. ${alert.body}` : alert.title;
+    const fallbackMsg = `Hey ${name}! ${alert.type === 'alarm' ? 'Alarm' : 'Reminder'}: ${what}`;
+
+    if (onPersonalizeAndSpeak) {
+      onPersonalizeAndSpeak(name, alert.title, alert.body ?? '', alert.type).catch(() => {
+        // If personalization fails, fall through to plain speak
+        if (onSpeak) { onSpeak(fallbackMsg); }
+        else if (voiceEnabled) { speakText(fallbackMsg); }
+        else { beepAlarm(audioCtxRef); }
+      });
+      return;
+    }
+    if (onSpeak) {
+      onSpeak(fallbackMsg);
+    } else if (voiceEnabled) {
+      speakText(fallbackMsg);
     } else {
       beepAlarm(audioCtxRef);
     }
-  }, [voiceEnabled, callingName]);
+  }, [voiceEnabled, callingName, onSpeak, onPersonalizeAndSpeak]);
 
   /* ── Dismiss ── */
   const dismissAlert = useCallback((alertKey: string) => {
@@ -183,11 +206,21 @@ export function useReminders({
   const prevNonAlarmCountRef = useRef(0);
   useEffect(() => {
     const nonAlarms = visualAlerts.filter((a) => a.type !== 'alarm');
-    if (nonAlarms.length > prevNonAlarmCountRef.current && voiceEnabled) {
+    if (nonAlarms.length > prevNonAlarmCountRef.current) {
       const latest = nonAlarms[nonAlarms.length - 1];
       const name   = callingName.trim() || 'there';
       const what   = latest.body ? `${latest.title}. ${latest.body}` : latest.title;
-      speakText(`Hey ${name}! You have a reminder: ${what}`);
+      const fallbackMsg = `Hey ${name}! You have a reminder: ${what}`;
+      if (onPersonalizeAndSpeak) {
+        onPersonalizeAndSpeak(name, latest.title, latest.body ?? '', latest.type).catch(() => {
+          if (onSpeak) { onSpeak(fallbackMsg); }
+          else if (voiceEnabled) { speakText(fallbackMsg); }
+        });
+      } else if (onSpeak) {
+        onSpeak(fallbackMsg);
+      } else if (voiceEnabled) {
+        speakText(fallbackMsg);
+      }
     }
     prevNonAlarmCountRef.current = nonAlarms.length;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -215,7 +248,7 @@ export function useReminders({
   useEffect(() => {
     if (!enabled) return;
     poll();
-    const id = setInterval(poll, 30_000);
+    const id = setInterval(poll, 10_000);
     return () => clearInterval(id);
   }, [enabled, poll]);
 

@@ -59,12 +59,14 @@ const FILTERS: { id: Filter; label: string }[] = [
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 
 function fmtDue(ts: number): string {
-  const d = new Date(ts * 1000);
-  const now = new Date();
+  const d    = new Date(ts * 1000);
+  const now  = new Date();
   const diff = d.getTime() - now.getTime();
-  if (diff < 60_000) return 'In < 1 min';
-  if (diff < 3_600_000) return `In ${Math.round(diff / 60_000)}m`;
-  if (diff < 86_400_000) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const abs  = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (diff <= 0)         return fmtAbsolute(ts);
+  if (diff < 60_000)     return `${abs} · in < 1 min`;
+  if (diff < 3_600_000)  return `${abs} · in ${Math.round(diff / 60_000)}m`;
+  if (diff < 86_400_000) return abs;
   return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
@@ -304,12 +306,61 @@ interface ItemCardProps {
   onComplete: (id: string) => void;
   onDelete:   (id: string) => void;
   onEdit:     (item: NoteItem) => void;
+  onUpdate:   (id: string, updates: Record<string, unknown>) => void;
 }
 
-function ItemCard({ item, onComplete, onDelete, onEdit }: ItemCardProps) {
-  const [expanded, setExpanded] = useState(false);
+function ItemCard({ item, onComplete, onDelete, onEdit, onUpdate }: ItemCardProps) {
+  const [expanded,     setExpanded]     = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft,   setTitleDraft]   = useState(item.title);
+  const [editingTime,  setEditingTime]  = useState(false);
+  const [timeDraft,    setTimeDraft]    = useState('');
+
   const m    = TYPE_META[item.type];
-  const over = item.due_at && item.due_at * 1000 < Date.now() && !item.fired && !item.completed;
+  const over = !!(item.due_at && item.due_at * 1000 < Date.now() && !item.fired && !item.completed);
+
+  const isRecurringAlarm = item.type === 'alarm' && item.repeat !== 'onetime';
+
+  const hasInlineTime =
+    (isRecurringAlarm && !!item.repeat_time) ||
+    (!isRecurringAlarm && !!item.due_at && item.type !== 'note');
+
+  const timeDisplay = (() => {
+    if (isRecurringAlarm && item.repeat_time) {
+      return `${item.repeat_time} · ${(item.repeat ?? 'daily').charAt(0).toUpperCase() + (item.repeat ?? 'daily').slice(1)}`;
+    }
+    if (item.due_at) return over ? fmtAbsolute(item.due_at) : fmtDue(item.due_at);
+    return null;
+  })();
+
+  const initTimeDraft = () => {
+    if (isRecurringAlarm && item.repeat_time) {
+      setTimeDraft(item.repeat_time);
+    } else if (item.due_at) {
+      const d   = new Date(item.due_at * 1000);
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setTimeDraft(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      );
+    }
+  };
+
+  const saveTitle = () => {
+    const t = titleDraft.trim();
+    if (t && t !== item.title) onUpdate(item.id, { title: t });
+    setEditingTitle(false);
+  };
+
+  const saveTime = () => {
+    if (!timeDraft) { setEditingTime(false); return; }
+    if (isRecurringAlarm) {
+      if (timeDraft !== (item.repeat_time ?? '')) onUpdate(item.id, { repeat_time: timeDraft });
+    } else {
+      const ts = localToUnix(timeDraft);
+      if (ts && ts !== item.due_at) onUpdate(item.id, { due_at: ts, fired: false });
+    }
+    setEditingTime(false);
+  };
 
   return (
     <motion.div
@@ -322,7 +373,7 @@ function ItemCard({ item, onComplete, onDelete, onEdit }: ItemCardProps) {
           ? 'border-white/5 bg-white/[0.02] opacity-50'
           : over
           ? 'border-red-500/30 bg-red-500/5'
-          : `border-white/8 bg-white/[0.04] hover:bg-white/[0.07]`
+          : 'border-white/8 bg-white/[0.04] hover:bg-white/[0.07]'
       }`}
     >
       <div className="flex items-start gap-3 px-3.5 py-3">
@@ -335,10 +386,7 @@ function ItemCard({ item, onComplete, onDelete, onEdit }: ItemCardProps) {
             }`}
             aria-label={item.completed ? 'Completed' : 'Mark complete'}
           >
-            {item.completed
-              ? <CheckCircle2 className="h-4 w-4" />
-              : <Square       className="h-4 w-4" />
-            }
+            {item.completed ? <CheckCircle2 className="h-4 w-4" /> : <Square className="h-4 w-4" />}
           </button>
         ) : (
           <div className={`mt-0.5 shrink-0 rounded-md ${m.bg} p-1.5`}>
@@ -348,50 +396,109 @@ function ItemCard({ item, onComplete, onDelete, onEdit }: ItemCardProps) {
 
         {/* Content */}
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Type label + overdue badge */}
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className={`text-[10px] font-semibold uppercase tracking-wider ${m.color}`}>
               {m.label}
             </span>
-            {/* Recurring alarm: show HH:MM · Repeat pattern */}
-            {item.type === 'alarm' && item.repeat !== 'onetime' && item.repeat_time && (
-              <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-white/40">
-                {item.repeat_time} · {(item.repeat ?? 'daily').charAt(0).toUpperCase() + (item.repeat ?? 'daily').slice(1)}
+            {over && (
+              <span className="rounded-full px-2 py-0.5 text-[10px] font-medium bg-red-500/20 text-red-400">
+                Overdue
               </span>
             )}
-            {/* One-time alarm or reminder/task: show overdue badge + absolute time */}
-            {(item.type === 'reminder' || item.type === 'task' ||
-              (item.type === 'alarm' && item.repeat === 'onetime')) && item.due_at && (
-              <>
-                {over && (
-                  <span className="rounded-full px-2 py-0.5 text-[10px] font-medium bg-red-500/20 text-red-400">
-                    Overdue
-                  </span>
-                )}
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                  over ? 'bg-white/5 text-white/30' : 'bg-white/5 text-white/40'
-                }`}>
-                  {over ? fmtAbsolute(item.due_at) : fmtDue(item.due_at)}
-                </span>
-              </>
-            )}
           </div>
-          <p className={`mt-0.5 text-sm font-medium leading-snug ${
-            item.completed ? 'line-through text-white/30' : 'text-white/90'
-          }`}>
-            {item.title}
-          </p>
+
+          {/* Title — click to rename inline */}
+          {editingTitle ? (
+            <input
+              autoFocus
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); saveTitle(); }
+                if (e.key === 'Escape') { setTitleDraft(item.title); setEditingTitle(false); }
+              }}
+              className="w-full rounded-md bg-black/40 border border-violet-500/50 px-2 py-0.5
+                text-sm text-white outline-none focus:ring-1 focus:ring-violet-500/40"
+            />
+          ) : (
+            <p
+              onClick={() => {
+                if (!item.completed) { setTitleDraft(item.title); setEditingTitle(true); }
+              }}
+              title={item.completed ? undefined : 'Click to rename'}
+              className={`text-sm font-medium leading-snug ${
+                item.completed
+                  ? 'line-through text-white/30'
+                  : 'text-white/90 hover:text-white cursor-text'
+              }`}
+            >
+              {item.title}
+            </p>
+          )}
+
+          {/* Time row — prominent, click to adjust */}
+          {!item.completed && hasInlineTime && timeDisplay && (
+            <div className="mt-1.5">
+              {editingTime ? (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <input
+                    autoFocus
+                    type={isRecurringAlarm ? 'time' : 'datetime-local'}
+                    value={timeDraft}
+                    onChange={(e) => setTimeDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setEditingTime(false);
+                    }}
+                    className="rounded-md bg-black/40 border border-violet-500/50 px-2 py-1 text-xs
+                      text-white outline-none focus:ring-1 focus:ring-violet-500/40 [color-scheme:dark]"
+                  />
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); saveTime(); }}
+                    className="rounded-md bg-violet-600 px-2 py-1 text-xs font-semibold text-white
+                      hover:bg-violet-500 transition-colors"
+                  >
+                    Set
+                  </button>
+                  <button
+                    onMouseDown={(e) => { e.preventDefault(); setEditingTime(false); }}
+                    className="rounded-md p-1 text-white/30 hover:text-white/60 transition-colors"
+                    aria-label="Cancel"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { initTimeDraft(); setEditingTime(true); }}
+                  title="Click to adjust time"
+                  className={`flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium
+                    transition-colors hover:bg-white/8 ${
+                    over ? 'text-red-400' : m.color
+                  }`}
+                >
+                  <Clock className="h-3.5 w-3.5 shrink-0" />
+                  {timeDisplay}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Body text */}
           {item.body && (
-            <p className={`mt-0.5 text-xs text-white/50 leading-relaxed ${expanded ? '' : 'line-clamp-1'}`}>
+            <p className={`mt-1 text-xs text-white/50 leading-relaxed ${expanded ? '' : 'line-clamp-1'}`}>
               {item.body}
             </p>
           )}
           {item.body && item.body.length > 60 && (
             <button
               onClick={() => setExpanded((p) => !p)}
-              className="mt-0.5 flex items-center gap-0.5 text-[10px] text-white/30
-                hover:text-white/60 transition-colors"
+              className="mt-0.5 flex items-center gap-0.5 text-[10px] text-white/30 hover:text-white/60 transition-colors"
             >
-              {expanded ? <><ChevronUp className="h-3 w-3" /> Less</> : <><ChevronDown className="h-3 w-3" /> More</>}
+              {expanded
+                ? <><ChevronUp className="h-3 w-3" /> Less</>
+                : <><ChevronDown className="h-3 w-3" /> More</>}
             </button>
           )}
         </div>
@@ -402,7 +509,7 @@ function ItemCard({ item, onComplete, onDelete, onEdit }: ItemCardProps) {
             <button
               onClick={() => onEdit(item)}
               className="rounded-lg p-1.5 text-white/30 hover:text-white/70 hover:bg-white/10 transition-colors"
-              aria-label="Edit"
+              aria-label="Full edit"
             >
               <Edit3 className="h-3.5 w-3.5" />
             </button>
@@ -539,6 +646,20 @@ export function NotesDashboard({ onClose, onVoiceCmd }: Props) {
     } catch {}
     setSaving(false);
   }, [editItem]);
+
+  const handleUpdate = useCallback(async (id: string, updates: Record<string, unknown>) => {
+    try {
+      const r = await fetch(`${BASE}/api/notes/${id}`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(updates),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setItems((p) => p.map((i) => i.id === id ? d.item : i));
+      }
+    } catch {}
+  }, []);
 
   const handleComplete = useCallback(async (id: string) => {
     try {
@@ -738,6 +859,7 @@ export function NotesDashboard({ onClose, onVoiceCmd }: Props) {
                   onComplete={handleComplete}
                   onDelete={handleDelete}
                   onEdit={(i) => { setEditItem(i); setShowAdd(false); }}
+                  onUpdate={handleUpdate}
                 />
               ))}
             </AnimatePresence>

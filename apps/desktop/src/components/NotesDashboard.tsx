@@ -317,9 +317,23 @@ function ItemCard({ item, onComplete, onDelete, onEdit, onUpdate }: ItemCardProp
   const [timeDraft,    setTimeDraft]    = useState('');
 
   const m    = TYPE_META[item.type];
-  const over = !!(item.due_at && item.due_at * 1000 < Date.now() && !item.fired && !item.completed);
 
   const isRecurringAlarm = item.type === 'alarm' && item.repeat !== 'onetime';
+
+  // Recurring alarms cycle forever — they are never "overdue"
+  const over = !isRecurringAlarm && !!(
+    item.due_at && item.due_at * 1000 < Date.now() && !item.fired && !item.completed
+  );
+
+  // Next occurrence timestamp for recurring alarms
+  const nextRecurringMs = (() => {
+    if (!isRecurringAlarm || !item.repeat_time) return null;
+    const [h, mm] = (item.repeat_time as string).split(':').map(Number);
+    const next = new Date();
+    next.setHours(h, mm, 0, 0);
+    if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+    return next.getTime();
+  })();
 
   const hasInlineTime =
     (isRecurringAlarm && !!item.repeat_time) ||
@@ -327,7 +341,15 @@ function ItemCard({ item, onComplete, onDelete, onEdit, onUpdate }: ItemCardProp
 
   const timeDisplay = (() => {
     if (isRecurringAlarm && item.repeat_time) {
-      return `${item.repeat_time} · ${(item.repeat ?? 'daily').charAt(0).toUpperCase() + (item.repeat ?? 'daily').slice(1)}`;
+      const repeatLabel = REPEAT_OPTS.find(r => r.value === item.repeat)?.label ?? (item.repeat ?? 'Daily');
+      if (nextRecurringMs) {
+        const diffMs = nextRecurringMs - Date.now();
+        const hrs    = Math.floor(diffMs / 3_600_000);
+        const mins   = Math.round((diffMs % 3_600_000) / 60_000);
+        const count  = hrs > 0 ? `next in ${hrs}h ${mins}m` : `next in ${mins}m`;
+        return `${item.repeat_time} · ${repeatLabel} · ${count}`;
+      }
+      return `${item.repeat_time} · ${repeatLabel}`;
     }
     if (item.due_at) return over ? fmtAbsolute(item.due_at) : fmtDue(item.due_at);
     return null;
@@ -372,8 +394,8 @@ function ItemCard({ item, onComplete, onDelete, onEdit, onUpdate }: ItemCardProp
         item.completed
           ? 'border-white/5 bg-white/[0.02] opacity-50'
           : over
-          ? 'border-red-500/30 bg-red-500/5'
-          : 'border-white/8 bg-white/[0.04] hover:bg-white/[0.07]'
+            ? 'border-red-500/30 bg-red-500/5'
+            : 'border-white/8 bg-white/[0.04] hover:bg-white/[0.07]'
       }`}
     >
       <div className="flex items-start gap-3 px-3.5 py-3">
@@ -396,11 +418,22 @@ function ItemCard({ item, onComplete, onDelete, onEdit, onUpdate }: ItemCardProp
 
         {/* Content */}
         <div className="min-w-0 flex-1">
-          {/* Type label + overdue badge */}
+          {/* Type label + recurring/onetime badge + overdue badge */}
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className={`text-[10px] font-semibold uppercase tracking-wider ${m.color}`}>
               {m.label}
             </span>
+            {(item.type === 'alarm' || item.type === 'reminder') && (
+              isRecurringAlarm ? (
+                <span className={`rounded-full px-2 py-0.5 text-[9px] font-medium ${m.bg} ${m.color} opacity-80`}>
+                  Recurring · {REPEAT_OPTS.find(r => r.value === item.repeat)?.label ?? item.repeat}
+                </span>
+              ) : (
+                <span className="rounded-full px-2 py-0.5 text-[9px] font-medium bg-white/6 text-white/35">
+                  One-time
+                </span>
+              )
+            )}
             {over && (
               <span className="rounded-full px-2 py-0.5 text-[10px] font-medium bg-red-500/20 text-red-400">
                 Overdue
@@ -621,6 +654,11 @@ export function NotesDashboard({ onClose, onVoiceCmd }: Props) {
       }
 
       if (editItem) {
+        // When type changes (e.g. reminder → alarm), reset firing state
+        if (editItem.type !== effectiveType) {
+          payload.fired           = false;
+          payload.last_fired_date = null;
+        }
         const r = await fetch(`${BASE}/api/notes/${editItem.id}`, {
           method:  'PUT',
           headers: { 'Content-Type': 'application/json' },

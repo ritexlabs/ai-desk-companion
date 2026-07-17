@@ -124,10 +124,25 @@ export function useReminders({
     }
   }, [voiceEnabled, callingName, onSpeak, onPersonalizeAndSpeak]);
 
+  // Ref so dismiss/snooze can read current alerts without stale closure
+  const visualAlertsRef = useRef<PendingAlert[]>([]);
+  visualAlertsRef.current = visualAlerts;
+
   /* ── Dismiss ── */
-  const dismissAlert = useCallback((alertKey: string) => {
+  const dismissAlert = useCallback(async (alertKey: string) => {
     window.speechSynthesis?.cancel();
+    const alert = visualAlertsRef.current.find((a) => a.alertKey === alertKey);
     setVisualAlerts((prev) => prev.filter((a) => a.alertKey !== alertKey));
+
+    if (!alert || alert.id.startsWith('ws-')) return;
+    const isRecurring = alert.type === 'alarm' && alert.repeat && alert.repeat !== 'onetime';
+    if (!isRecurring) {
+      // Non-recurring: delete from backend so it never reappears
+      try {
+        const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+        await fetch(`${base}/api/notes/${alert.id}`, { method: 'DELETE' });
+      } catch { /* best-effort */ }
+    }
   }, []);
 
   /* ── Snooze ── */
@@ -135,30 +150,32 @@ export function useReminders({
     window.speechSynthesis?.cancel();
     setVisualAlerts((prev) => prev.filter((a) => a.alertKey !== alert.alertKey));
 
-    // Notify backend only for poll-based (notes agent) alerts
-    if (!alert.id.startsWith('ws-')) {
-      try {
-        const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
-        await fetch(`${base}/api/notes/${alert.id}/snooze`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ minutes }),
-        });
-      } catch { /* best-effort */ }
+    if (alert.id.startsWith('ws-')) {
+      // WebSocket alerts: re-add client-side only (no backend record)
+      setTimeout(() => {
+        const snoozed: PendingAlert = { ...alert, fired_at: Date.now(), alertKey: `${alert.id}-${Date.now()}` };
+        setVisualAlerts((prev) => prev.some((a) => a.alertKey === snoozed.alertKey) ? prev : [...prev, snoozed]);
+      }, minutes * 60_000);
+      return;
     }
 
-    // Re-add after the snooze delay
-    setTimeout(() => {
-      const snoozed: PendingAlert = {
-        ...alert,
-        fired_at: Date.now(),
-        alertKey: `${alert.id}-${Date.now()}`,
-      };
-      setVisualAlerts((prev) => {
-        if (prev.some((a) => a.alertKey === snoozed.alertKey)) return prev;
-        return [...prev, snoozed];
+    try {
+      const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+      await fetch(`${base}/api/notes/${alert.id}/snooze`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ minutes }),
       });
-    }, minutes * 60_000);
+      // Backend now owns the new due_at; the scheduler+poll will re-trigger at the right time.
+      // For recurring alarms (snoozed_until approach) also add client-side fallback.
+      const isRecurring = alert.type === 'alarm' && alert.repeat && alert.repeat !== 'onetime';
+      if (isRecurring) {
+        setTimeout(() => {
+          const snoozed: PendingAlert = { ...alert, fired_at: Date.now(), alertKey: `${alert.id}-${Date.now()}` };
+          setVisualAlerts((prev) => prev.some((a) => a.alertKey === snoozed.alertKey) ? prev : [...prev, snoozed]);
+        }, minutes * 60_000);
+      }
+    } catch { /* best-effort */ }
   }, []);
 
   /* ── Voice command interception — returns true if the text was handled ── */

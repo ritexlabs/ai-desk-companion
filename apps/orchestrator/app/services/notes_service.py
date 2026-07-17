@@ -100,9 +100,17 @@ def complete_item(item_id: str) -> dict | None:
 
 
 def snooze_item(item_id: str, minutes: int = 10) -> bool:
-    until = int(datetime.now().timestamp()) + minutes * 60
-    # Reset fired so the scheduler re-triggers when the snooze window expires
-    result = update_item(item_id, snoozed_until=until, fired=False)
+    until  = int(datetime.now().timestamp()) + minutes * 60
+    item   = get_item(item_id)
+    if not item:
+        return False
+    is_recurring = item.get('type') == 'alarm' and item.get('repeat') not in (None, 'onetime')
+    if is_recurring:
+        # Recurring alarms: defer via snoozed_until so the repeat schedule is unchanged
+        result = update_item(item_id, snoozed_until=until, fired=False)
+    else:
+        # One-time items: move due_at forward to the snooze time so the card and flash reflect it
+        result = update_item(item_id, due_at=until, fired=False, snoozed_until=None)
     return result is not None
 
 

@@ -21,14 +21,16 @@ class _CreateRequest(BaseModel):
 
 
 class _UpdateRequest(BaseModel):
-    title:       str | None = None
-    body:        str | None = None
-    due_at:      int | None = None
-    repeat:      str | None = None
-    repeat_time: str | None = None
-    repeat_days: list[int] | None = None
-    completed:   bool | None = None
-    fired:       bool | None = None
+    type:            str | None = None
+    title:           str | None = None
+    body:            str | None = None
+    due_at:          int | None = None
+    repeat:          str | None = None
+    repeat_time:     str | None = None
+    repeat_days:     list[int] | None = None
+    completed:       bool | None = None
+    fired:           bool | None = None
+    last_fired_date: str | None = None
 
 
 class _SnoozeRequest(BaseModel):
@@ -64,7 +66,10 @@ async def create_note(body: _CreateRequest) -> dict:
 
 @router.put('/api/notes/{item_id}')
 async def update_note(item_id: str, body: _UpdateRequest) -> dict:
-    kwargs = {k: v for k, v in body.model_dump().items() if v is not None}
+    # Exclude unset fields; keep explicit None only for last_fired_date (clearing it)
+    raw = body.model_dump()
+    set_fields = body.model_fields_set
+    kwargs = {k: v for k, v in raw.items() if k in set_fields}
     item = _ns.update_item(item_id, **kwargs)
     if not item:
         raise HTTPException(status_code=404, detail='Item not found.')

@@ -133,21 +133,23 @@ function project(p: V3, cx: number, cy: number, fov: number): [number, number, n
 
 /* ── Layout constants ───────────────────────────────────────────────────── */
 const W   = 700;
-const H   = 500;
-const CX  = W / 2;   // 350
-const CY  = H / 2;   // 250
+const H   = 420;    // matches the App.tsx container height exactly — no bottom clip
+const CX  = W / 2; // 350
+const CY  = H / 2; // 210
 
 // Large FOV → near-orthographic projection: back-hemisphere agents stay
 // visible and spread instead of collapsing to the centre.
 const FOV = 1100;
 
-// Flat ellipsoid: wide in X and Y, shallow in Z so depth projection
-// doesn't pull polar agents toward the centre.
-const RX  = 335;     // horizontal — fills canvas edge-to-edge
-const RY  = 205;     // vertical   — near canvas edges (H=460)
-const RZ  = 70;      // depth      — shallow keeps scale variance < 15 %
+// Ellipsoid sized so ALL surface points project within the canvas with margin:
+//   X range: CX ± RX = 350 ± 285  → [65, 635]  (W=700, margin 65px each side)
+//   Y range: CY ± RY = 210 ± 148  → [62, 358]  (H=420, margin 62px top/bottom)
+const RX  = 285;
+const RY  = 148;
+const RZ  = 70;     // depth — shallow keeps scale variance < 15 %
 
-const NODE_SIZE = 50;   // px at depth-scale 1.0
+const NODE_SIZE   = 26;  // px at depth-scale 1.0  (smaller circle, text unchanged)
+const SAFE_MARGIN = 44;  // minimum gap between node centre and canvas edge
 
 /* ── Orchestrator gyroscope constants (separate inner FOV) ───────────────── */
 const ORC_FOV  = 265;   // inner perspective for the gyroscope rings
@@ -169,15 +171,20 @@ function orcProj(p: V3): [number, number, number] {
 }
 
 /* ── Agent floating physics ─────────────────────────────────────────────── */
-const MIN_CENTER_DIST = 175;   // stay clear of orchestrator gyroscope (≥ ORC_RING)
-const MIN_AGENT_DIST  = 95;    // minimum 3-D separation between any two agents
-const FLOAT_SPRING    = 0.006; // spring pull toward wandering target
-const FLOAT_DAMP      = 0.965; // per-frame velocity damping
-const FLOAT_REPEL     = 0.030; // radial push from centre when too close
-const AGENT_REPEL     = 0.018; // push between agents when they crowd each other
-const MAX_SPEED       = 0.90;  // cap to keep movement visually consistent
-const MIN_SPEED       = 0.22;  // floor so agents always visibly drift
-const TARGET_FRAMES   = 200;   // avg frames between target changes (~3.3 s at 60 fps)
+// Agents must keep their SCREEN projection outside this radius from (CX,CY).
+// With FOV=1100 and RZ=70 the near-orthographic projection means
+// screen_xy ≈ 3d_xy × 1.0 ± 7%, so the XY-plane 3D distance ≈ screen distance.
+// The gyroscope rings reach ~118 screen-px; add 50px node-radius + 10px margin.
+const MIN_SCREEN_DIST = 162;   // px: exclusion radius from AI core in screen/XY space
+const MIN_AGENT_DIST  = 125;   // minimum XY-plane (≈ screen) separation between agents
+const FLOAT_SPRING    = 0.004; // spring pull toward wandering target (gentler = smoother)
+const FLOAT_DAMP      = 0.975; // per-frame velocity damping (higher = less oscillation)
+const CORE_REPEL      = 0.060; // XY-plane push from centre
+const AGENT_REPEL     = 0.042; // push between agents when they crowd each other
+const BOUND_REPEL     = 0.10;  // canvas edge pushback — strong enough to never need hard clamp
+const MAX_SPEED       = 0.55;  // lower cap → less overshoot, smoother arcs
+const MIN_SPEED       = 0.16;  // floor so agents always visibly drift
+const TARGET_FRAMES   = 240;   // avg frames between target changes (~4 s at 60 fps)
 
 interface FloatState { pos: V3; vel: V3; target: V3; timer: number; }
 
@@ -189,6 +196,26 @@ function randOnEllipsoid(): V3 {
     RY * Math.sin(θ) * Math.sin(φ),
     RZ * Math.cos(θ),
   ];
+}
+
+/** Returns a random ellipsoid position that is:
+ *  - outside the AI core exclusion zone (XY distance ≥ MIN_SCREEN_DIST)
+ *  - inside the safe canvas viewport (screen position within SAFE_MARGIN of all edges)
+ */
+function randOnEllipsoidExcluding(): V3 {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const p  = randOnEllipsoid();
+    const dxy = Math.sqrt(p[0]*p[0] + p[1]*p[1]);
+    if (dxy < MIN_SCREEN_DIST) continue;
+    const s  = FOV / (p[2] + FOV);
+    const sx = CX + p[0] * s;
+    const sy = CY + p[1] * s;
+    if (sx < SAFE_MARGIN || sx > W - SAFE_MARGIN) continue;
+    if (sy < SAFE_MARGIN || sy > H - SAFE_MARGIN) continue;
+    return p;
+  }
+  // Guaranteed safe fallback: right-centre of ellipsoid
+  return [RX * 0.85, 0, 0] as V3;
 }
 
 /* ── AgentNode — DOM element positioned imperatively by RAF ─────────────── */
@@ -275,12 +302,12 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
           <motion.div
             style={{
               position:'absolute',
-              width: 120, height: 120,
+              width: 64, height: 64,
               top:'50%', left:'50%',
-              marginTop:-60, marginLeft:-60,
+              marginTop:-32, marginLeft:-32,
               borderRadius:'50%',
-              background:`radial-gradient(circle, rgba(${phaseRgb},0.50) 0%, rgba(${phaseRgb},0) 68%)`,
-              filter:'blur(12px)',
+              background:`radial-gradient(circle, rgba(${phaseRgb},0.45) 0%, rgba(${phaseRgb},0) 68%)`,
+              filter:'blur(8px)',
               pointerEvents:'none',
             }}
             animate={{ opacity:[0.45,1,0.45], scale:[0.82,1.18,0.82] }}
@@ -292,17 +319,17 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
         {isActive && (
           <>
             <motion.div
-              style={{ position:'absolute', inset:-10, borderRadius:'50%', border:`2px solid rgba(${phaseRgb},0.90)` }}
+              style={{ position:'absolute', inset:-6, borderRadius:'50%', border:`1.5px solid rgba(${phaseRgb},0.90)` }}
               animate={{ scale:[1,1.45,1], opacity:[1,0.05,1] }}
               transition={{ duration:ringDur, repeat:Infinity, ease:'easeInOut' }}
             />
             <motion.div
-              style={{ position:'absolute', inset:-22, borderRadius:'50%', border:`1.5px solid rgba(${phaseRgb},0.55)` }}
+              style={{ position:'absolute', inset:-12, borderRadius:'50%', border:`1px solid rgba(${phaseRgb},0.55)` }}
               animate={{ scale:[1,1.3,1], opacity:[0.6,0,0.6] }}
               transition={{ duration:ringDur * 1.25, repeat:Infinity, ease:'easeInOut', delay:ringDur * 0.28 }}
             />
             <motion.div
-              style={{ position:'absolute', inset:-38, borderRadius:'50%', border:`1px solid rgba(${phaseRgb},0.28)` }}
+              style={{ position:'absolute', inset:-20, borderRadius:'50%', border:`1px solid rgba(${phaseRgb},0.28)` }}
               animate={{ scale:[1,1.18,1], opacity:[0.35,0,0.35] }}
               transition={{ duration:ringDur * 1.55, repeat:Infinity, ease:'easeInOut', delay:ringDur * 0.55 }}
             />
@@ -318,19 +345,19 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
             background: `radial-gradient(circle at 38% 32%,
               rgba(${isActive ? phaseRgb : rgb},${online ? (isActive ? 0.38 : 0.13) : 0.04}) 0%,
               rgba(10,16,30,${online ? 0.72 : 0.92}) 100%)`,
-            border: `${isActive ? '2.5px' : '1px'} solid rgba(${isActive ? phaseRgb : rgb},${online ? (isActive ? 1 : 0.42) : 0.14})`,
+            border: `${isActive ? '2px' : '1px'} solid rgba(${isActive ? phaseRgb : rgb},${online ? (isActive ? 1 : 0.42) : 0.14})`,
             boxShadow: isActive
               ? [
-                  `0 0 55px rgba(${phaseRgb},0.80)`,
-                  `0 0 25px rgba(${phaseRgb},0.55)`,
-                  `0 0 10px rgba(${phaseRgb},0.35)`,
-                  `0 0 30px rgba(${rgb},0.30)`,
-                  `inset 0 0 18px rgba(${phaseRgb},0.18)`,
+                  `0 0 40px rgba(${phaseRgb},0.75)`,
+                  `0 0 18px rgba(${phaseRgb},0.50)`,
+                  `0 0 8px rgba(${phaseRgb},0.30)`,
+                  `0 0 22px rgba(${rgb},0.28)`,
+                  `inset 0 0 12px rgba(${phaseRgb},0.15)`,
                 ].join(', ')
               : isNewlyOnline
-                ? `0 0 20px rgba(${rgb},0.55)`
+                ? `0 0 16px rgba(${rgb},0.55)`
                 : online
-                  ? `0 0 10px rgba(${rgb},0.22)`
+                  ? `0 0 8px rgba(${rgb},0.22)`
                   : 'none',
             display: 'flex',
             alignItems: 'center',
@@ -341,8 +368,8 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
         >
           {/* Lucide icon */}
           <IconFC
-            size={isActive ? 22 : 20}
-            strokeWidth={isActive ? 2.0 : 1.6}
+            size={isActive ? 11 : 9}
+            strokeWidth={isActive ? 2.0 : 1.5}
             color={`rgba(${isActive ? phaseRgb : rgb},${online ? (isActive ? 1 : 0.72) : 0.2})`}
           />
 
@@ -350,12 +377,12 @@ const AgentNode = memo(function AgentNode({ agent, isActive, isNewlyOnline, phas
           <motion.div
             style={{
               position: 'absolute',
-              bottom: 2, right: 2,
-              width: 11, height: 11,
+              bottom: 0, right: 0,
+              width: 6, height: 6,
               borderRadius: '50%',
               background: `rgb(${statusRgb})`,
-              border: '1.5px solid rgba(8,12,24,0.85)',
-              boxShadow: `0 0 7px rgba(${statusRgb},0.85)`,
+              border: '1px solid rgba(8,12,24,0.85)',
+              boxShadow: `0 0 4px rgba(${statusRgb},0.85)`,
               zIndex: 2,
             }}
             animate={online
@@ -482,13 +509,29 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
       const pkt = pktTRef.current;
       const fm  = floatRef.current;
 
-      // Initialise state for newly-seen agents
+      // Initialise state for newly-seen agents.
+      // For each new agent, try 25 candidate positions and pick the one
+      // whose XY distance to the nearest already-placed agent is greatest,
+      // which spreads agents out evenly from the start.
       for (const ag of ags) {
         if (!fm.has(ag.id)) {
+          let bestPos = randOnEllipsoidExcluding();
+          let bestMinDist = -1;
+          for (let attempt = 0; attempt < 25; attempt++) {
+            const cand = randOnEllipsoidExcluding();
+            let minDist = Infinity;
+            for (const [, other] of fm) {
+              const dx = cand[0] - other.pos[0];
+              const dy = cand[1] - other.pos[1];
+              minDist = Math.min(minDist, Math.sqrt(dx*dx + dy*dy));
+            }
+            if (fm.size === 0) { bestPos = cand; break; } // first agent, any position ok
+            if (minDist > bestMinDist) { bestMinDist = minDist; bestPos = cand; }
+          }
           fm.set(ag.id, {
-            pos:    randOnEllipsoid(),
+            pos:    bestPos,
             vel:    [0, 0, 0] as V3,
-            target: randOnEllipsoid(),
+            target: randOnEllipsoidExcluding(),
             timer:  Math.random() * TARGET_FRAMES,
           });
         }
@@ -499,10 +542,27 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
       for (const ag of ags) {
         const fs = fm.get(ag.id)!;
 
-        // Pick a new random target when the timer expires
+        // Pick a new target when the timer expires — choose the candidate
+        // that is furthest in XY from all other agents' current positions,
+        // which discourages agents from drifting into the same region.
         fs.timer--;
         if (fs.timer <= 0) {
-          fs.target = randOnEllipsoid();
+          let bestTarget = randOnEllipsoidExcluding();
+          let bestMinDist = -1;
+          for (let attempt = 0; attempt < 12; attempt++) {
+            const cand = randOnEllipsoidExcluding();
+            let minDist = Infinity;
+            for (const other of ags) {
+              if (other.id === ag.id) continue;
+              const ofs2 = fm.get(other.id);
+              if (!ofs2) continue;
+              const ddx = cand[0] - ofs2.pos[0];
+              const ddy = cand[1] - ofs2.pos[1];
+              minDist = Math.min(minDist, Math.sqrt(ddx*ddx + ddy*ddy));
+            }
+            if (minDist > bestMinDist) { bestMinDist = minDist; bestTarget = cand; }
+          }
+          fs.target = bestTarget;
           fs.timer  = TARGET_FRAMES * (0.5 + Math.random());
         }
 
@@ -513,28 +573,54 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
         fs.vel[1] += (ty - py) * FLOAT_SPRING;
         fs.vel[2] += (tz - pz) * FLOAT_SPRING;
 
-        // Radial repulsion from orchestrator centre
-        const d = Math.sqrt(px*px + py*py + pz*pz);
-        if (d < MIN_CENTER_DIST && d > 0.1) {
-          const rep = FLOAT_REPEL * (MIN_CENTER_DIST - d) / d;
+        // XY-plane repulsion from AI core — only push in X and Y because
+        // pushing in Z does NOT move the screen projection away from centre.
+        // (screen_x ≈ CX + 3d_x × scale, screen_y ≈ CY + 3d_y × scale)
+        const dxy = Math.sqrt(px*px + py*py);
+        if (dxy < MIN_SCREEN_DIST && dxy > 0.1) {
+          const rep = CORE_REPEL * (MIN_SCREEN_DIST - dxy) / dxy;
           fs.vel[0] += px * rep;
           fs.vel[1] += py * rep;
-          fs.vel[2] += pz * rep;
+          // Z is intentionally NOT repelled — depth doesn't affect screen XY position
         }
 
-        // Agent-to-agent separation — push apart when crowding
+        // Canvas boundary soft pushback — grows quadratically as agent nears each edge
+        const scale_  = FOV / (pz + FOV);
+        const invSc_  = 1 / Math.max(scale_, 0.01);
+        const sx_ = CX + px * scale_;
+        const sy_ = CY + py * scale_;
+        if (sx_ < SAFE_MARGIN) {
+          const pen = (SAFE_MARGIN - sx_) / SAFE_MARGIN;
+          fs.vel[0] += pen * pen * invSc_ * BOUND_REPEL * SAFE_MARGIN;
+        }
+        if (sx_ > W - SAFE_MARGIN) {
+          const pen = (sx_ - (W - SAFE_MARGIN)) / SAFE_MARGIN;
+          fs.vel[0] -= pen * pen * invSc_ * BOUND_REPEL * SAFE_MARGIN;
+        }
+        if (sy_ < SAFE_MARGIN) {
+          const pen = (SAFE_MARGIN - sy_) / SAFE_MARGIN;
+          fs.vel[1] += pen * pen * invSc_ * BOUND_REPEL * SAFE_MARGIN;
+        }
+        if (sy_ > H - SAFE_MARGIN) {
+          const pen = (sy_ - (H - SAFE_MARGIN)) / SAFE_MARGIN;
+          fs.vel[1] -= pen * pen * invSc_ * BOUND_REPEL * SAFE_MARGIN;
+        }
+
+        // Agent-to-agent separation — push apart when crowding.
+        // Use XY-plane distance only (≈ screen distance) because two agents
+        // at the same XY but different Z appear at the same screen position;
+        // full 3D distance would miss that overlap entirely.
         for (const other of ags) {
           if (other.id === ag.id) continue;
           const ofs = fm.get(other.id)!;
           const dx = px - ofs.pos[0];
           const dy = py - ofs.pos[1];
-          const dz = pz - ofs.pos[2];
-          const dd = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          const dd = Math.sqrt(dx*dx + dy*dy); // XY only ≈ screen separation
           if (dd < MIN_AGENT_DIST && dd > 0.1) {
             const rep = AGENT_REPEL * (MIN_AGENT_DIST - dd) / dd;
             fs.vel[0] += dx * rep;
             fs.vel[1] += dy * rep;
-            fs.vel[2] += dz * rep;
+            // Z deliberately excluded — depth change has no screen separation effect
           }
         }
 
@@ -558,6 +644,21 @@ export function AgentOrbit3D({ phase, agents, activeAgentId }: AgentOrbit3DProps
         fs.pos[0] += fs.vel[0];
         fs.pos[1] += fs.vel[1];
         fs.pos[2] += fs.vel[2];
+
+        // Smooth core nudge — if overshoot carries agent inside the core despite
+        // soft repulsion, gently push outward without snapping (no visible flicker).
+        const dxyH = Math.sqrt(fs.pos[0]**2 + fs.pos[1]**2);
+        if (dxyH > 0.1 && dxyH < MIN_SCREEN_DIST) {
+          const nx = fs.pos[0] / dxyH;
+          const ny = fs.pos[1] / dxyH;
+          // Lerp outward at 35% per frame — smooth, not an instant snap
+          const push = (MIN_SCREEN_DIST - dxyH) * 0.35;
+          fs.pos[0] += nx * push;
+          fs.pos[1] += ny * push;
+          // Dampen (not zero) the inward velocity component
+          const vDotN = fs.vel[0]*nx + fs.vel[1]*ny;
+          if (vDotN < 0) { fs.vel[0] -= vDotN * nx * 0.6; fs.vel[1] -= vDotN * ny * 0.6; }
+        }
       }
 
       // Project each agent's float position to screen space

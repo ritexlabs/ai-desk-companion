@@ -1,30 +1,93 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home,
-  MessageCircle, Globe, Calculator, Brain, Layers, PieChart, Loader2, RotateCw,
+  MessageCircle, Globe, Globe2, Calculator, Brain, Layers, PieChart,
+  Bell, Wrench, Loader2, RotateCw,
 } from 'lucide-react';
-import type { AgentDefinition } from '../types/runtime';
+import type { AgentDefinition, AgentStatus } from '../types/runtime';
 
 const AGENT_META: Record<
   string,
   { icon: React.ReactNode; text: string; border: string; bg: string; dot: string; rgb: string }
 > = {
-  system:     { icon: <Monitor    className="h-4 w-4" />, text: 'text-teal-400',   border: 'border-teal-400/40',   bg: 'bg-teal-400/10',   dot: 'bg-teal-400',   rgb: '45,212,191'  },
-  weather:    { icon: <Cloud      className="h-4 w-4" />, text: 'text-cyan-400',   border: 'border-cyan-400/40',   bg: 'bg-cyan-400/10',   dot: 'bg-cyan-400',   rgb: '34,211,238'  },
-  calendar:   { icon: <Calendar   className="h-4 w-4" />, text: 'text-violet-400', border: 'border-violet-400/40', bg: 'bg-violet-400/10', dot: 'bg-violet-400', rgb: '167,139,250' },
-  email:      { icon: <Mail       className="h-4 w-4" />, text: 'text-emerald-400',border: 'border-emerald-400/40',bg: 'bg-emerald-400/10',dot: 'bg-emerald-400',rgb: '52,211,153'  },
-  github:     { icon: <Github     className="h-4 w-4" />, text: 'text-amber-400',  border: 'border-amber-400/40',  bg: 'bg-amber-400/10',  dot: 'bg-amber-400',  rgb: '251,191,36'  },
-  stock:      { icon: <TrendingUp className="h-4 w-4" />, text: 'text-green-400',  border: 'border-green-400/40',  bg: 'bg-green-400/10',  dot: 'bg-green-400',  rgb: '74,222,128'  },
-  news:       { icon: <Newspaper  className="h-4 w-4" />, text: 'text-sky-400',    border: 'border-sky-400/40',    bg: 'bg-sky-400/10',    dot: 'bg-sky-400',    rgb: '56,189,248'  },
-  smarthome:  { icon: <Home       className="h-4 w-4" />, text: 'text-orange-400', border: 'border-orange-400/40', bg: 'bg-orange-400/10', dot: 'bg-orange-400', rgb: '251,146,60'  },
-  whatsapp:   { icon: <MessageCircle className="h-4 w-4" />, text: 'text-green-400', border: 'border-green-400/40', bg: 'bg-green-400/10', dot: 'bg-green-400', rgb: '74,222,128'   },
-  portfolio:  { icon: <PieChart   className="h-4 w-4" />, text: 'text-rose-400',   border: 'border-rose-400/40',   bg: 'bg-rose-400/10',   dot: 'bg-rose-400',   rgb: '251,113,133' },
-  websearch:  { icon: <Globe      className="h-4 w-4" />, text: 'text-blue-400',   border: 'border-blue-400/40',   bg: 'bg-blue-400/10',   dot: 'bg-blue-400',   rgb: '96,165,250'  },
-  calculator: { icon: <Calculator className="h-4 w-4" />, text: 'text-amber-400',  border: 'border-amber-400/40',  bg: 'bg-amber-400/10',  dot: 'bg-amber-400',  rgb: '251,191,36'  },
-  memory:     { icon: <Brain      className="h-4 w-4" />, text: 'text-purple-400', border: 'border-purple-400/40', bg: 'bg-purple-400/10', dot: 'bg-purple-400', rgb: '192,132,252' },
-  briefing:   { icon: <Layers     className="h-4 w-4" />, text: 'text-cyan-400',   border: 'border-cyan-400/40',   bg: 'bg-cyan-400/10',   dot: 'bg-cyan-400',   rgb: '34,211,238'  },
-  general:    { icon: <Monitor    className="h-4 w-4" />, text: 'text-slate-400',  border: 'border-slate-400/40',  bg: 'bg-slate-400/10',  dot: 'bg-slate-400',  rgb: '148,163,184' },
+  system:   { icon: <Monitor    className="h-4 w-4" />, text: 'text-teal-400',   border: 'border-teal-400/40',   bg: 'bg-teal-400/10',   dot: 'bg-teal-400',   rgb: '45,212,191'  },
+  weather:  { icon: <Cloud      className="h-4 w-4" />, text: 'text-cyan-400',   border: 'border-cyan-400/40',   bg: 'bg-cyan-400/10',   dot: 'bg-cyan-400',   rgb: '34,211,238'  },
+  google:   { icon: <Globe2     className="h-4 w-4" />, text: 'text-blue-400',   border: 'border-blue-400/40',   bg: 'bg-blue-400/10',   dot: 'bg-blue-400',   rgb: '96,165,250'  },
+  github:   { icon: <Github     className="h-4 w-4" />, text: 'text-amber-400',  border: 'border-amber-400/40',  bg: 'bg-amber-400/10',  dot: 'bg-amber-400',  rgb: '251,191,36'  },
+  stock:    { icon: <TrendingUp className="h-4 w-4" />, text: 'text-green-400',  border: 'border-green-400/40',  bg: 'bg-green-400/10',  dot: 'bg-green-400',  rgb: '74,222,128'  },
+  news:     { icon: <Newspaper  className="h-4 w-4" />, text: 'text-sky-400',    border: 'border-sky-400/40',    bg: 'bg-sky-400/10',    dot: 'bg-sky-400',    rgb: '56,189,248'  },
+  smarthome:{ icon: <Home       className="h-4 w-4" />, text: 'text-orange-400', border: 'border-orange-400/40', bg: 'bg-orange-400/10', dot: 'bg-orange-400', rgb: '251,146,60'  },
+  whatsapp: { icon: <MessageCircle className="h-4 w-4" />, text: 'text-green-400', border: 'border-green-400/40', bg: 'bg-green-400/10', dot: 'bg-green-400', rgb: '74,222,128'   },
+  portfolio:{ icon: <PieChart   className="h-4 w-4" />, text: 'text-rose-400',   border: 'border-rose-400/40',   bg: 'bg-rose-400/10',   dot: 'bg-rose-400',   rgb: '251,113,133' },
+  utility:  { icon: <Wrench     className="h-4 w-4" />, text: 'text-indigo-400', border: 'border-indigo-400/40', bg: 'bg-indigo-400/10', dot: 'bg-indigo-400', rgb: '129,140,248' },
+  general:  { icon: <Monitor    className="h-4 w-4" />, text: 'text-slate-400',  border: 'border-slate-400/40',  bg: 'bg-slate-400/10',  dot: 'bg-slate-400',  rgb: '148,163,184' },
 };
+
+// Sub-service chips for Google card
+const GOOGLE_SUB_META: Record<string, { icon: React.ReactNode; label: string; dot: string }> = {
+  calendar: { icon: <Calendar className="h-2.5 w-2.5" />, label: 'Cal',   dot: 'bg-violet-400'  },
+  email:    { icon: <Mail     className="h-2.5 w-2.5" />, label: 'Gmail', dot: 'bg-emerald-400' },
+};
+
+// Sub-tool chips for Utility card
+const UTILITY_SUB_META: Record<string, { icon: React.ReactNode; label: string; dot: string }> = {
+  websearch:  { icon: <Globe       className="h-2.5 w-2.5" />, label: 'Search',   dot: 'bg-blue-400'   },
+  calculator: { icon: <Calculator  className="h-2.5 w-2.5" />, label: 'Calc',     dot: 'bg-amber-400'  },
+  memory:     { icon: <Brain       className="h-2.5 w-2.5" />, label: 'Memory',   dot: 'bg-purple-400' },
+  briefing:   { icon: <Layers      className="h-2.5 w-2.5" />, label: 'Briefing', dot: 'bg-cyan-400'   },
+  notes:      { icon: <Bell        className="h-2.5 w-2.5" />, label: 'Notes',    dot: 'bg-violet-400' },
+};
+
+const GOOGLE_IDS  = new Set(['calendar', 'email', 'drive']);
+const UTILITY_IDS = new Set(['websearch', 'calculator', 'memory', 'briefing', 'notes']);
+
+const STATUS_RANK: Record<AgentStatus, number> = { online: 0, starting: 1, degraded: 2, failed: 3, offline: 4 };
+
+function bestOf(subs: AgentDefinition[]): AgentStatus {
+  return subs.reduce<AgentStatus>(
+    (best, a) => STATUS_RANK[a.status] < STATUS_RANK[best] ? a.status : best,
+    'offline',
+  );
+}
+
+function mergeGoogleAgents(agents: AgentDefinition[]): {
+  list: AgentDefinition[];
+  googleSubs: AgentDefinition[];
+} {
+  const googleSubs = agents.filter(a => GOOGLE_IDS.has(a.id));
+  if (googleSubs.length === 0) return { list: agents, googleSubs: [] };
+
+  const googleEntry: AgentDefinition = {
+    id: 'google', label: 'Google',
+    description: '', example: '', color: '',
+    status: bestOf(googleSubs),
+  };
+
+  const firstIdx = agents.findIndex(a => GOOGLE_IDS.has(a.id));
+  const list = agents.filter(a => !GOOGLE_IDS.has(a.id));
+  list.splice(firstIdx, 0, googleEntry);
+  return { list, googleSubs };
+}
+
+function mergeUtilityAgents(agents: AgentDefinition[]): {
+  list: AgentDefinition[];
+  utilitySubs: AgentDefinition[];
+} {
+  const utilitySubs = agents.filter(a => UTILITY_IDS.has(a.id));
+  if (utilitySubs.length === 0) return { list: agents, utilitySubs: [] };
+
+  const utilityEntry: AgentDefinition = {
+    id: 'utility', label: 'Skill Hub',
+    description: '', example: '', color: '',
+    status: bestOf(utilitySubs),
+  };
+
+  // Insert at the position of the first utility agent
+  const firstIdx = agents.findIndex(a => UTILITY_IDS.has(a.id));
+  const list = agents.filter(a => !UTILITY_IDS.has(a.id));
+  list.splice(firstIdx >= 0 ? firstIdx : list.length, 0, utilityEntry);
+  return { list, utilitySubs };
+}
 
 function StatusLED({ status, dot }: { status: AgentDefinition['status']; dot: string }) {
   if (status === 'online')
@@ -60,11 +123,14 @@ interface AgentBootListProps {
 }
 
 export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootListProps) {
-  const sorted = [...agents].sort((a, b) => {
+  const presorted = [...agents].sort((a, b) => {
     if (a.id === 'system') return -1;
     if (b.id === 'system') return 1;
     return 0;
   });
+
+  const { list: afterGoogle, googleSubs } = mergeGoogleAgents(presorted);
+  const { list: sorted, utilitySubs } = mergeUtilityAgents(afterGoogle);
 
   const onlineCount = sorted.filter(a => a.status === 'online').length;
   const allOnline = onlineCount === sorted.length && sorted.length > 0;
@@ -108,7 +174,7 @@ export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootList
               transition={{ duration: 2.2, repeat: Infinity, repeatDelay: 2, ease: 'easeInOut' }}
             />
             <span className="text-[9px] font-mono text-emerald-300 tracking-widest uppercase">
-              ✦ all systems nominal
+              ✦ all agents nominal
             </span>
           </motion.div>
         )}
@@ -188,43 +254,83 @@ export function AgentBootList({ agents, activeAgentId, onReload }: AgentBootList
                   {agent.label}
                 </div>
 
-                <AnimatePresence mode="wait">
-                  {isActive ? (
-                    <motion.div
-                      key="active"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className="flex items-center gap-1 mt-0.5"
-                    >
-                      {[0, 1, 2].map(j => (
-                        <motion.div
-                          key={j}
-                          className={`h-1 w-1 rounded-full ${meta.dot}`}
-                          animate={{ opacity: [0.3, 1, 0.3] }}
-                          transition={{ duration: 0.55, repeat: Infinity, delay: j * 0.14 }}
-                        />
-                      ))}
-                      <span className={`text-[8px] font-mono uppercase tracking-[0.22em] ${meta.text} opacity-90 ml-0.5`}>
-                        active
-                      </span>
-                    </motion.div>
-                  ) : (
-                    <motion.div
-                      key="status"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      className="text-[9px] font-mono text-slate-600 mt-0.5"
-                    >
-                      {agent.status === 'online'   ? 'online'
-                       : agent.status === 'starting' ? 'booting…'
-                       : agent.status === 'degraded' ? 'degraded'
-                       : agent.status === 'failed'   ? 'failed'
-                       : 'offline'}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                {/* Google sub-service dots */}
+                {agent.id === 'google' && googleSubs.length > 0 ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {googleSubs.map(sub => {
+                      const sm = GOOGLE_SUB_META[sub.id];
+                      if (!sm) return null;
+                      const subOn = sub.status === 'online';
+                      return (
+                        <span key={sub.id} className="flex items-center gap-0.5">
+                          <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${subOn ? sm.dot : 'bg-slate-700'}`} />
+                          <span className={`text-[8px] font-mono ${subOn ? 'text-slate-400' : 'text-slate-600'}`}>
+                            {sm.label}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                ) : agent.id === 'utility' && utilitySubs.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                    {utilitySubs.map(sub => {
+                      const sm = UTILITY_SUB_META[sub.id];
+                      if (!sm) return null;
+                      const subOn = sub.status === 'online';
+                      return (
+                        <span key={sub.id} className={`flex items-center gap-0.5 rounded px-1 py-0.5 border transition-colors ${
+                          subOn
+                            ? 'border-white/8 bg-white/4 text-slate-400'
+                            : 'border-white/4 bg-transparent text-slate-700'
+                        }`}>
+                          <span className={`flex-shrink-0 ${subOn ? 'opacity-80' : 'opacity-30'}`}>{sm.icon}</span>
+                          <span className="text-[7.5px] font-mono leading-none">{sm.label}</span>
+                          <span className={`ml-0.5 h-1 w-1 rounded-full flex-shrink-0 ${subOn ? sm.dot : 'bg-slate-700'}`} />
+                        </span>
+                      );
+                    })}
+                  </div>
+
+                ) : (
+                  <AnimatePresence mode="wait">
+                    {isActive ? (
+                      <motion.div
+                        key="active"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.18 }}
+                        className="flex items-center gap-1 mt-0.5"
+                      >
+                        {[0, 1, 2].map(j => (
+                          <motion.div
+                            key={j}
+                            className={`h-1 w-1 rounded-full ${meta.dot}`}
+                            animate={{ opacity: [0.3, 1, 0.3] }}
+                            transition={{ duration: 0.55, repeat: Infinity, delay: j * 0.14 }}
+                          />
+                        ))}
+                        <span className={`text-[8px] font-mono uppercase tracking-[0.22em] ${meta.text} opacity-90 ml-0.5`}>
+                          active
+                        </span>
+                      </motion.div>
+                    ) : (
+                      <motion.div
+                        key="status"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="text-[9px] font-mono text-slate-600 mt-0.5"
+                      >
+                        {agent.status === 'online'   ? 'online'
+                         : agent.status === 'starting' ? 'booting…'
+                         : agent.status === 'degraded' ? 'degraded'
+                         : agent.status === 'failed'   ? 'failed'
+                         : 'offline'}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                )}
               </div>
 
               {/* Status LED */}

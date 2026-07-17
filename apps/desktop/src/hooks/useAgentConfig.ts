@@ -13,7 +13,7 @@
  * a real token, or log it to the console.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   verifyWeather,
   connectGoogle,
@@ -48,6 +48,7 @@ export interface WeatherCreds {
 export interface GoogleCreds {
   calendarEnabled: boolean;
   emailEnabled: boolean;
+  driveEnabled: boolean;
   clientId: string;
   clientSecret: string;
   accessToken: string;
@@ -71,6 +72,8 @@ export interface GitHubCreds {
 export interface StockCreds {
   enabled: boolean;
   defaultMarket: 'IN' | 'US';
+  spreadsheetId: string;
+  spreadsheetName: string;
   status: ConnectionStatus;
   info: string;
 }
@@ -167,6 +170,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   google: {
     calendarEnabled: false,
     emailEnabled: false,
+    driveEnabled: false,
     clientId: '',
     clientSecret: '',
     accessToken: '',
@@ -188,6 +192,8 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   stock: {
     enabled: false,
     defaultMarket: 'IN',
+    spreadsheetId: '',
+    spreadsheetName: '',
     status: 'connected',
     info: 'Yahoo Finance (free, no key required)',
   },
@@ -280,7 +286,13 @@ function load(): AgentConfig {
       },
     };
     if (cfg.weather.apiKey)          cfg.weather.status   = 'connected';
-    if (cfg.google.connectedEmail)   cfg.google.status    = 'connected';
+    if (cfg.google.connectedEmail) {
+      cfg.google.status = 'connected';
+      // Ensure drive scope is always included so sheet browsing works after re-sign
+      if (!cfg.google.scopes.includes('drive')) {
+        cfg.google.scopes = [...cfg.google.scopes, 'drive'];
+      }
+    }
     if (cfg.github.username)         cfg.github.status    = 'connected';
     if (cfg.news.apiKey)             cfg.news.status      = 'connected';
     if (cfg.smarthome.token)              cfg.smarthome.status = 'connected';
@@ -303,6 +315,10 @@ function save(cfg: AgentConfig) {
 export function useAgentConfig() {
   const [config, setConfig] = useState<AgentConfig>(load);
 
+  // Keep a ref so the interval always reads the latest config without re-registering.
+  const configRef = useRef(config);
+  configRef.current = config;
+
   const patch = useCallback(<K extends keyof AgentConfig>(
     agent: K,
     partial: Partial<AgentConfig[K]>,
@@ -314,8 +330,25 @@ export function useAgentConfig() {
     });
   }, []);
 
+  // Auto-refresh Google token on mount (catches every restart) and every 50 min.
+  useEffect(() => {
+    const tryRefreshGoogle = () => {
+      const g = configRef.current.google;
+      if (!g.clientId || !g.refreshToken) return;
+      const expiredOrExpiringSoon =
+        !g.accessToken ||
+        (g.tokenExpiresAt > 0 && Date.now() >= g.tokenExpiresAt - 5 * 60 * 1000);
+      if (expiredOrExpiringSoon) {
+        refreshGoogleToken(g, patch);
+      }
+    };
+    tryRefreshGoogle();
+    const id = setInterval(tryRefreshGoogle, 50 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [patch]); // patch is stable
+
   const registeredAgentIds = useMemo<string[]>(() => {
-    const ids: string[] = [];
+    const ids: string[] = ['notes']; // always-on built-in skill, no credentials required
     if (config.system.enabled)  ids.push('system');
     if (config.weather.enabled) ids.push('weather');
     if (config.google.connectedEmail && config.google.accessToken) {

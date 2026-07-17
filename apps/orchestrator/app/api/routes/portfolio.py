@@ -99,6 +99,67 @@ async def ping(token: str = Query(..., description='INDmoney OAuth access token'
         raise HTTPException(status_code=503, detail=str(exc)[:200])
 
 
+def _extract_pnl_pct(data: object, depth: int = 0) -> float | None:
+    """Recursively search common P&L percentage field names in MCP response data."""
+    if depth > 4:
+        return None
+    if isinstance(data, (int, float)):
+        return None
+    if isinstance(data, str):
+        try:
+            import json as _json
+            data = _json.loads(data)
+        except Exception:
+            return None
+    if not isinstance(data, dict):
+        if isinstance(data, list):
+            for item in data:
+                r = _extract_pnl_pct(item, depth + 1)
+                if r is not None:
+                    return r
+        return None
+    candidates = [
+        'absoluteReturnsPercentage', 'totalReturnsPercent', 'total_returns_percent',
+        'returns_pct', 'total_return_pct', 'returnPct', 'return_percentage',
+        'total_gain_percent', 'gain_percent', 'net_pnl_percent', 'pnl_percent',
+        'overall_return_pct', 'overallReturnPercent', 'overallGainPercent',
+        'dayGainPercent', 'xirr', 'absoluteReturn', 'absoluteReturnPercentage',
+    ]
+    for key in candidates:
+        if key in data:
+            try:
+                return float(data[key])
+            except (ValueError, TypeError):
+                pass
+    for v in data.values():
+        r = _extract_pnl_pct(v, depth + 1)
+        if r is not None:
+            return r
+    return None
+
+
+@router.get('/pnl')
+async def portfolio_pnl(token: str = Query(..., description='INDmoney OAuth access token')):
+    """Return total portfolio P&L percentage for the status badge."""
+    try:
+        tools    = await indmoney_mcp.list_tools(_DEFAULT_ENDPOINT, token)
+        tool_map = {t['name'].lower(): t['name'] for t in tools}
+
+        for keyword in ['pnl', 'p_l', 'profit', 'gain', 'return', 'networth', 'net_worth', 'summary', 'overview']:
+            matched = next((real for lower, real in tool_map.items() if keyword in lower), None)
+            if matched:
+                data   = await indmoney_mcp.call_tool(_DEFAULT_ENDPOINT, token, matched)
+                pct    = _extract_pnl_pct(data)
+                if pct is not None:
+                    return {'ok': True, 'pnl_pct': round(pct, 2)}
+
+        return {'ok': False, 'pnl_pct': None, 'detail': 'No P&L data found in available tools'}
+    except PermissionError:
+        raise HTTPException(status_code=401, detail='Access token expired. Please reconnect in Settings.')
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc)[:200])
+
+
 @router.get('/summary')
 async def portfolio_summary(token: str = Query(..., description='INDmoney OAuth access token')):
     """Fetch portfolio summary / net-worth data via INDmoney MCP."""

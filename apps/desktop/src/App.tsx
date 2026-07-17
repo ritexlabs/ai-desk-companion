@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Activity,
   AlertTriangle,
   BarChart2,
+  Bell,
   Briefcase,
   Calendar,
   Cloud,
@@ -16,19 +17,26 @@ import {
   Moon,
   Newspaper,
   Power,
+  RotateCw,
   Send,
   Settings,
   TrendingUp,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import { AICore } from './components/AICore';
+import { AgentOrbit3D } from './components/AgentOrbit3D';
 import { WaveVisualizer } from './components/WaveVisualizer';
-import { AgentBootList } from './components/AgentBootList';
 import { HoloChat } from './components/HoloChat';
 import { AgentDetailModal } from './components/AgentDetailModal';
-import { SmartHomeDashboard } from './components/SmartHomeDashboard';
-import { PortfolioDashboard } from './components/PortfolioDashboard';
+import { SmartHomeDashboard }   from './components/SmartHomeDashboard';
+import { PortfolioDashboard }   from './components/PortfolioDashboard';
+import { StocksPortfolio }      from './components/StocksPortfolio';
+import { WhatsAppDashboard }    from './components/WhatsAppDashboard';
+import { NotesDashboard }       from './components/NotesDashboard';
+import { ReminderAlert }        from './components/ReminderAlert';
+import { ForecastStrip, WeatherLine } from './components/WeatherWidget';
+import { AgentConfigModal }     from './components/AgentConfigModal';
+import { useReminders }         from './hooks/useReminders';
 import { ParticleField } from './components/ParticleField';
 import { TypingText } from './components/TypingText';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -102,11 +110,11 @@ function useClock() {
 
 /* ─── Quick Stats helpers ───────────────────────────────────── */
 
-function StatRow({ label, value, hi }: { label: string; value: string; hi?: 'ok' | 'warn' | 'err' }) {
+function StatRow({ label, value, hi, spread }: { label: string; value: string; hi?: 'ok' | 'warn' | 'err'; spread?: boolean }) {
   const vc = hi === 'ok' ? 'text-emerald-400' : hi === 'warn' ? 'text-amber-400' : hi === 'err' ? 'text-red-400' : 'text-teal-300';
   return (
-    <div className="flex items-center justify-between gap-1 min-w-0">
-      <span className="text-[10px] text-slate-500 flex-shrink-0">{label}</span>
+    <div className={`flex items-center gap-1 min-w-0 ${spread ? 'justify-between' : ''}`}>
+      <span className="text-[10px] text-slate-500 flex-shrink-0 min-w-[48px]">{label}</span>
       <AnimatePresence mode="wait">
         <motion.span
           key={value}
@@ -126,7 +134,7 @@ function StatRow({ label, value, hi }: { label: string; value: string; hi?: 'ok'
 function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   return (
     <div className="flex items-center justify-between gap-1">
-      <span className="text-[10px] text-slate-500">{label}</span>
+      <span className="text-[10px] text-slate-500 flex-shrink-0">{label}</span>
       <span className={`text-[10px] font-medium ${ok ? 'text-emerald-400' : 'text-slate-600'}`}>{ok ? 'OK' : '—'}</span>
     </div>
   );
@@ -142,6 +150,7 @@ const AGENT_PILL_META: Record<string, { icon: LucideIcon; text: string; bg: stri
   smarthome: { icon: Home,       text: 'text-orange-400',  bg: 'bg-orange-400/10',  border: 'border-orange-400/20' },
   portfolio: { icon: Briefcase,  text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
   whatsapp:  { icon: Send,       text: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/20' },
+  notes:     { icon: Bell,       text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
   general:   { icon: Zap,        text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
 };
 
@@ -187,6 +196,7 @@ export default function App() {
   const orchSys = useOrchSystemStats(5000);
   const clock = useClock();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [agentConfigOpen, setAgentConfigOpen] = useState(false);
 
   useProactiveNotifications(agentConfig, ({ text, agentId }) => rt.pushNotification(text, agentId));
 
@@ -235,14 +245,69 @@ export default function App() {
   const onlineAgents = rt.agents.filter((a) => a.id !== 'system' && a.status === 'online');
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const selectedAgent = selectedAgentId ? rt.agents.find((a) => a.id === selectedAgentId) : null;
-  const [smartHomeDashboardOpen,  setSmartHomeDashboardOpen]  = useState(false);
-  const [portfolioDashboardOpen, setPortfolioDashboardOpen] = useState(false);
+  const [smartHomeDashboardOpen,   setSmartHomeDashboardOpen]   = useState(false);
+  const [portfolioDashboardOpen,   setPortfolioDashboardOpen]   = useState(false);
+  const [stocksPortfolioOpen,      setStocksPortfolioOpen]      = useState(false);
+  const [whatsappDashboardOpen,    setWhatsappDashboardOpen]    = useState(false);
+  const [notesDashboardOpen,       setNotesDashboardOpen]       = useState(false);
+  const [portfolioPnlPct,          setPortfolioPnlPct]          = useState<number | null>(null);
+
+  // Fetch portfolio P&L when the agent comes online
+  useEffect(() => {
+    const portfolioAgent = rt.agents.find(a => a.id === 'portfolio');
+    if (portfolioAgent?.status !== 'online') { setPortfolioPnlPct(null); return; }
+    const token = agentConfig.portfolio.accessToken;
+    if (!token) return;
+    const backendBase = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
+    fetch(`${backendBase}/api/portfolio/pnl?token=${encodeURIComponent(token)}`)
+      .then(r => r.json())
+      .then(d => { if (d.ok && d.pnl_pct != null) setPortfolioPnlPct(d.pnl_pct); })
+      .catch(() => {});
+  }, [rt.agents, agentConfig.portfolio.accessToken]);
+
+  // Auto-reload calendar + email agents when Google token is freshly provided
+  const prevGoogleTokenRef = useRef('');
+  useEffect(() => {
+    const token = agentConfig.google.accessToken;
+    if (token && !prevGoogleTokenRef.current && rt.wsConnected) {
+      rt.reloadAgent('calendar');
+      rt.reloadAgent('email');
+    }
+    prevGoogleTokenRef.current = token;
+  }, [agentConfig.google.accessToken, rt.wsConnected]);
+
+  const { visualAlerts, countdown: alertCountdown, dismissAlert, snoozeAlert, handleVoiceCommand } = useReminders({
+    phase:                    rt.phase,
+    enabled:                  rt.wsConnected,
+    voiceEnabled:             rt.voiceEnabled,
+    callingName:              appConfig.callingName,
+    externalAlerts:           rt.pendingAlerts,
+    onExternalAlertConsumed:  rt.clearPendingAlert,
+  });
+
+  // Intercept voice transcript for alert snooze / dismiss when an alert is active
+  const prevTranscriptLenRef = useRef(0);
+  useEffect(() => {
+    const turns = rt.transcript;
+    if (turns.length <= prevTranscriptLenRef.current) { prevTranscriptLenRef.current = turns.length; return; }
+    prevTranscriptLenRef.current = turns.length;
+    const last = turns[turns.length - 1];
+    if (last?.speaker === 'user' && visualAlerts.length > 0) {
+      handleVoiceCommand(last.text);
+    }
+  }, [rt.transcript, visualAlerts.length, handleVoiceCommand]);
 
   const handleAgentClick = (agentId: string) => {
     if (agentId === 'portfolio') {
       setPortfolioDashboardOpen(true);
     } else if (agentId === 'smarthome') {
       setSmartHomeDashboardOpen(true);
+    } else if (agentId === 'stock') {
+      setStocksPortfolioOpen(true);
+    } else if (agentId === 'whatsapp') {
+      setWhatsappDashboardOpen(true);
+    } else if (agentId === 'notes') {
+      setNotesDashboardOpen(true);
     } else {
       setSelectedAgentId(agentId);
     }
@@ -304,6 +369,7 @@ export default function App() {
       <SettingsPanel
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        onOpenAgents={() => { setSettingsOpen(false); setAgentConfigOpen(true); }}
         appConfig={appConfig}
         onAppUpdate={updateAppConfig}
         voiceConfig={voiceConfig}
@@ -379,46 +445,52 @@ export default function App() {
 
           {/* Right controls */}
           <div className="flex items-center gap-3">
-            {/* Mic / speaking indicator */}
-            <AnimatePresence>
-              {isListening && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-1.5 text-violet-300 text-xs"
-                >
-                  <motion.div animate={{ scale: [1, 1.4, 1] }} transition={{ duration: 0.7, repeat: Infinity }}>
-                    <Mic className="h-3.5 w-3.5" />
-                  </motion.div>
-                  <span>Listening</span>
-                </motion.div>
-              )}
-              {isSpeaking && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.8 }}
-                  className="flex items-center gap-1.5 text-cyan-300 text-xs"
-                >
-                  <motion.div animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 0.5, repeat: Infinity }}>
-                    <Activity className="h-3.5 w-3.5" />
-                  </motion.div>
-                  <span>Speaking</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             <span className="text-xs text-slate-500 tabular-nums">{clock}</span>
 
-            {/* Phase badge */}
+            {/* Phase badge — single status indicator with per-state icon */}
             <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] ${PHASE_BADGE[displayPhase]}`}>
-              <motion.div
-                animate={{ opacity: isActive ? [0.4, 1, 0.4] : 0.4 }}
-                transition={{ duration: 1.4, repeat: Infinity }}
-                className={`h-1.5 w-1.5 rounded-full ${PHASE_DOT[displayPhase]}`}
-              />
-              {PHASE_LABEL[displayPhase]}
+              {displayPhase === 'booting' ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  className="h-2.5 w-2.5 flex-shrink-0 rounded-full border border-current border-t-transparent"
+                />
+              ) : displayPhase === 'listening' ? (
+                <motion.div
+                  animate={{ scale: [1, 1.45, 1] }}
+                  transition={{ duration: 0.7, repeat: Infinity }}
+                  className="flex-shrink-0"
+                >
+                  <Mic className="h-2.5 w-2.5" />
+                </motion.div>
+              ) : isSpeaking || displayPhase === 'responding' ? (
+                <motion.div
+                  animate={{ opacity: [0.45, 1, 0.45] }}
+                  transition={{ duration: 0.45, repeat: Infinity }}
+                  className="flex-shrink-0"
+                >
+                  <Activity className="h-2.5 w-2.5" />
+                </motion.div>
+              ) : displayPhase === 'thinking' ? (
+                <motion.div
+                  animate={{ opacity: [0.35, 1, 0.35] }}
+                  transition={{ duration: 0.9, repeat: Infinity }}
+                  className="flex-shrink-0"
+                >
+                  <Zap className="h-2.5 w-2.5" />
+                </motion.div>
+              ) : displayPhase === 'wake_detected' ? (
+                <Zap className="h-2.5 w-2.5 flex-shrink-0" />
+              ) : (
+                <motion.div
+                  animate={{ opacity: isActive ? [0.4, 1, 0.4] : 0.4 }}
+                  transition={{ duration: 1.4, repeat: Infinity }}
+                  className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PHASE_DOT[displayPhase]}`}
+                />
+              )}
+              {isSpeaking && displayPhase !== 'responding'
+                ? `${PHASE_LABEL[displayPhase]} · Speaking`
+                : PHASE_LABEL[displayPhase]}
             </div>
 
             {/* Orchestrator connection badge */}
@@ -456,6 +528,18 @@ export default function App() {
               </motion.button>
             )}
 
+            {/* Restart button */}
+            <motion.button
+              onClick={rt.triggerWakeWord}
+              disabled={rt.phase === 'booting' || rt.phase === 'wake_detected'}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              title="Restart session"
+              className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-slate-400 hover:text-amber-300 hover:border-amber-400/30 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              <RotateCw className="h-3.5 w-3.5" />
+            </motion.button>
+
             {/* Voice settings gear */}
             <motion.button
               onClick={() => setSettingsOpen((o) => !o)}
@@ -478,19 +562,235 @@ export default function App() {
         {/* ── MAIN 3-COLUMN ─────────────────────────────────────── */}
         <div className="flex-1 grid grid-cols-[320px_1fr_320px] min-h-0 overflow-hidden">
 
-          {/* LEFT — Agent Roster */}
-          <aside className="border-r border-white/8 overflow-y-auto p-4 bg-black/10 scrollbar-thin">
-            <AgentBootList agents={rt.agents} activeAgentId={rt.activeAgentId} onReload={rt.reloadAgent} />
+          {/* LEFT — Online Agents */}
+          <aside className="border-r border-white/8 overflow-y-auto p-4 bg-black/10 scrollbar-thin flex flex-col gap-3">
+
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] uppercase tracking-[0.3em] text-slate-600">
+                Online Agents
+              </span>
+              <span className="text-[9px] rounded-full border border-white/10 bg-white/4 px-2 py-0.5 text-slate-500 tabular-nums">
+                {onlineAgents.length}/{rt.agents.filter(a => a.id !== 'system').length}
+              </span>
+            </div>
+
+            {/* ALL AGENTS NOMINAL banner */}
+            {onlineAgents.length > 0 && onlineAgents.length === rt.agents.filter(a => a.id !== 'system').length && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="flex items-center justify-center gap-2 rounded-xl border border-emerald-400/25 bg-emerald-400/8 py-2"
+              >
+                <motion.span
+                  animate={{ opacity: [0.5, 1, 0.5] }}
+                  transition={{ duration: 1.8, repeat: Infinity }}
+                  className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+                />
+                <span className="text-[9px] font-mono font-bold tracking-[0.22em] text-emerald-400">
+                  ALL AGENTS NOMINAL
+                </span>
+              </motion.div>
+            )}
+
+            {/* Agent cards */}
+            {onlineAgents.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-[11px] text-slate-700 text-center">No agents online yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <AnimatePresence>
+                  {onlineAgents.map((agent, idx) => {
+                    const m = AGENT_PILL_META[agent.id];
+                    if (!m) return null;
+                    const Icon = m.icon;
+                    return (
+                      <motion.button
+                        key={agent.id}
+                        initial={{ opacity: 0, scale: 0.88 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.88 }}
+                        transition={{ delay: idx * 0.04, duration: 0.22 }}
+                        whileHover={{ scale: 1.04, y: -2 }}
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleAgentClick(agent.id)}
+                        className={`flex items-center gap-2 rounded-xl border ${m.border} ${m.bg} px-2.5 py-2.5 cursor-pointer w-full text-left`}
+                      >
+                        <motion.div
+                          animate={{ rotate: [0, 8, -8, 0] }}
+                          transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
+                        >
+                          <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${m.text}`} />
+                        </motion.div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className={`text-[11px] font-medium truncate ${m.text}`}>{agent.label}</span>
+                          {agent.id === 'portfolio' && portfolioPnlPct !== null && (
+                            <span className={`text-[10px] font-mono font-bold leading-none ${portfolioPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {portfolioPnlPct >= 0 ? '+' : ''}{portfolioPnlPct.toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {onlineAgents.length > 0 && (
+              <p className="text-[9px] text-slate-700 text-center">tap card for details</p>
+            )}
           </aside>
 
           {/* CENTER — Orb + Controls + Transcript + Input */}
-          <main className="flex flex-col min-h-0 overflow-hidden">
+          <main className="flex flex-col min-h-0 overflow-hidden min-w-0">
 
-            {/* Top: orb + controls (fixed height) */}
-            <div className="flex flex-col items-center justify-center gap-4 px-8 py-4 flex-shrink-0">
+            {/* 3D Orbit — full canvas with corner HUD overlays */}
+            <div className="flex-shrink-0 flex justify-center overflow-hidden relative" style={{ height: 420 }}>
+              <AgentOrbit3D phase={displayPhase} agents={rt.agents} activeAgentId={rt.activeAgentId} />
 
-              {/* Neural plasma orb */}
-              <AICore phase={displayPhase} />
+              {/* ── TOP-CENTER: Weather line ───────────────────────────── */}
+              {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
+                <div className="absolute top-3 inset-x-0 z-10 flex justify-center pointer-events-none select-none">
+                  <WeatherLine city={agentConfig.weather.defaultCity || 'Bengaluru'} />
+                </div>
+              )}
+
+              {/* ── TOP-LEFT: System Status HUD ────────────────────────── */}
+              <motion.div
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5, duration: 0.28, ease: 'easeOut' }}
+                className="absolute top-3 left-3 z-10 w-[154px] px-2.5 py-2 pointer-events-none select-none"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-1.5 mb-1.5 pb-1">
+                  <Cpu className="h-2.5 w-2.5 text-teal-400 flex-shrink-0" />
+                  <span className="text-[8px] font-mono uppercase tracking-[0.22em] text-teal-500">System</span>
+                  <AnimatePresence mode="wait">
+                    <motion.span
+                      key={rt.systemStats.healthScore}
+                      initial={{ opacity: 0, scale: 1.25 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.18 }}
+                      className={`ml-auto text-[12px] font-bold tabular-nums leading-none ${
+                        rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
+                        rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
+                      }`}
+                    >
+                      {rt.systemStats.healthScore}
+                    </motion.span>
+                  </AnimatePresence>
+                  <span className="text-[7px] text-slate-700">/100</span>
+                </div>
+
+                {/* Metric rows */}
+                <div className="space-y-[3px]">
+                  {orchSys && (
+                    <>
+                      <StatRow label="CPU"  value={`${orchSys.cpu_pct}%`}
+                        hi={orchSys.cpu_pct  > 85 ? 'err' : orchSys.cpu_pct  > 60 ? 'warn' : 'ok'} />
+                      <StatRow label="RAM"  value={`${orchSys.mem_pct}%`}
+                        hi={orchSys.mem_pct  > 85 ? 'err' : orchSys.mem_pct  > 70 ? 'warn' : 'ok'} />
+                      <StatRow label="Disk" value={`${orchSys.disk_pct}%`}
+                        hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'} />
+                      {orchSys.cpu_temp_c != null && (
+                        <StatRow
+                          label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
+                          value={`${orchSys.cpu_temp_c}°C`}
+                          hi={
+                            orchSys.temp_source === 'battery'
+                              ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok')
+                              : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')
+                          }
+                        />
+                      )}
+                    </>
+                  )}
+                  {rt.systemStats.battery && (
+                    <StatRow
+                      label="Bat"
+                      value={`${rt.systemStats.battery.level}%${rt.systemStats.battery.charging ? '⚡' : ''}`}
+                      hi={rt.systemStats.battery.level < 20 ? 'err' : rt.systemStats.battery.level < 40 ? 'warn' : 'ok'}
+                    />
+                  )}
+                  <StatRow
+                    label="Net"
+                    value={rt.systemStats.online ? (rt.systemStats.connectionType ?? 'Online') : 'Offline'}
+                    hi={rt.systemStats.online ? 'ok' : 'err'}
+                  />
+                  {rt.systemStats.appUptimeSec > 0 && (
+                    <StatRow
+                      label="Up"
+                      value={rt.systemStats.appUptimeSec < 60
+                        ? `${rt.systemStats.appUptimeSec}s`
+                        : `${Math.floor(rt.systemStats.appUptimeSec / 60)}m ${rt.systemStats.appUptimeSec % 60}s`}
+                    />
+                  )}
+                </div>
+              </motion.div>
+
+              {/* ── TOP-RIGHT: App Status HUD ──────────────────────────── */}
+              <motion.div
+                initial={{ opacity: 0, x: 12 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.6, duration: 0.28, ease: 'easeOut' }}
+                className="absolute top-3 right-3 z-10 w-[154px] px-2.5 py-2 pointer-events-none select-none"
+              >
+                {/* Header */}
+                <div className="flex items-center gap-1.5 mb-1.5 pb-1">
+                  <Activity className="h-2.5 w-2.5 text-violet-400 flex-shrink-0" />
+                  <span className="text-[8px] font-mono uppercase tracking-[0.22em] text-violet-400">App</span>
+                  <motion.div
+                    animate={{ opacity: rt.wsConnected ? [0.45, 1, 0.45] : 0.3 }}
+                    transition={{ duration: 1.8, repeat: Infinity }}
+                    className={`ml-auto h-1.5 w-1.5 rounded-full flex-shrink-0 ${rt.wsConnected ? 'bg-teal-400' : 'bg-slate-600'}`}
+                  />
+                  <span className="text-[7.5px] text-slate-500 leading-none">
+                    {rt.wsConnected ? 'Connected' : 'Local'}
+                  </span>
+                </div>
+
+                {/* Status rows */}
+                <div className="space-y-[3px]">
+                  <StatusRow label="STT"       ok={rt.sttSupported} />
+                  <StatusRow label="TTS"       ok={rt.ttsSupported} />
+                  <StatusRow label="Session"   ok={isActive} />
+                  <StatusRow label="WebSocket" ok={rt.wsConnected} />
+
+                  {rt.wsConnected && (
+                    <div className="flex flex-wrap gap-1 pt-1 mt-0.5">
+                      {[
+                        { k: 'TTS',  on: rt.orchestratorCaps.tts,      val: rt.orchestratorCaps.tts      ? 'Server' : 'Browser' },
+                        { k: 'STT',  on: rt.orchestratorCaps.stt,      val: rt.orchestratorCaps.stt      ? 'Server' : 'Browser' },
+                        { k: 'Wake', on: rt.orchestratorCaps.wakeWord, val: rt.orchestratorCaps.wakeWord ? 'Server' : 'Browser' },
+                      ].map((p) => (
+                        <span key={p.k} className={`text-[8px] leading-none ${
+                          p.on ? 'text-teal-400' : 'text-slate-600'
+                        }`}>
+                          {p.k}: {p.val}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {rt.orchestratorMetrics && (
+                    <div className="pt-1 mt-0.5 space-y-[3px]">
+                      <StatRow spread label="Cmds"  value={String(rt.orchestratorMetrics.commands_processed)} />
+                      <StatRow spread label="Sess"  value={String(rt.orchestratorMetrics.sessions_started)} />
+                      {rt.orchestratorMetrics.tts_calls > 0 && (
+                        <StatRow spread label="TTS calls" value={String(rt.orchestratorMetrics.tts_calls)} />
+                      )}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+
+            {/* Controls below orbit: speech bubble, equalizer, actions */}
+            <div className="flex-1 flex flex-col items-center justify-end gap-3 px-8 pb-6 overflow-hidden">
 
               {/* Assistant speech bubble with typing animation */}
               <AnimatePresence mode="wait">
@@ -518,7 +818,12 @@ export default function App() {
 
               {/* Wave visualizer */}
               <div className="w-full max-w-sm">
-                <WaveVisualizer active={waveActive} color={waveColor(displayPhase)} intensity={waveIntensity} />
+                <WaveVisualizer
+                  active={waveActive}
+                  color={waveColor(displayPhase)}
+                  intensity={waveIntensity}
+                  useMic={isListening}
+                />
               </div>
 
               {/* Routing indicator — shows which agent is processing */}
@@ -556,39 +861,63 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              {/* Action buttons */}
-              <div className="flex items-center gap-3 mt-1">
-                <motion.button
-                  onClick={rt.triggerWakeWord}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.96 }}
-                  disabled={rt.phase === 'booting' || rt.phase === 'wake_detected'}
-                  className="flex items-center gap-2 h-10 px-5 rounded-xl bg-cyan-500 text-slate-950 text-sm font-semibold hover:bg-cyan-400 disabled:opacity-50 transition-colors"
-                >
-                  <Power className="h-4 w-4" />
-                  {rt.phase === 'standby' || rt.phase === 'sleep' ? 'Wake Up' : 'Restart'}
-                </motion.button>
-
-                <motion.button
-                  onClick={() => rt.ask()}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.96 }}
-                  disabled={!isActive || rt.phase === 'booting' || rt.phase === 'thinking' || rt.phase === 'responding'}
-                  className="flex items-center gap-2 h-10 px-5 rounded-xl border border-violet-400/40 bg-violet-400/10 text-violet-300 text-sm hover:bg-violet-400/20 disabled:opacity-40 transition-colors"
-                >
-                  {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-                  {isListening ? 'Listening…' : rt.sttSupported ? 'Voice Ask' : 'No Mic'}
-                </motion.button>
-
-                <motion.button
-                  onClick={rt.sleep}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="flex items-center gap-2 h-10 px-4 rounded-xl border border-white/10 bg-white/4 text-slate-300 text-sm hover:bg-white/8 transition-colors"
-                >
-                  <Moon className="h-4 w-4" />
-                  Sleep
-                </motion.button>
+              {/* Action button — single dynamic Wake Up / Sleep toggle */}
+              <div className="flex items-center justify-center mt-1">
+                <AnimatePresence mode="wait">
+                  {rt.phase === 'booting' || rt.phase === 'wake_detected' ? (
+                    <motion.button
+                      key="booting"
+                      disabled
+                      initial={{ opacity: 0, scale: 0.92 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.92 }}
+                      transition={{ duration: 0.18 }}
+                      className="flex items-center gap-2 h-11 px-8 rounded-xl border border-white/10 bg-white/5 text-slate-500 text-sm font-semibold cursor-not-allowed"
+                    >
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        className="h-4 w-4 rounded-full border-2 border-slate-600 border-t-slate-400"
+                      />
+                      {rt.phase === 'wake_detected' ? 'Activating…' : 'Booting…'}
+                    </motion.button>
+                  ) : rt.phase === 'standby' || rt.phase === 'sleep' ? (
+                    <motion.button
+                      key="wakeup"
+                      onClick={rt.triggerWakeWord}
+                      initial={{ opacity: 0, scale: 0.92 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.92 }}
+                      transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="relative flex items-center gap-2.5 h-11 px-10 rounded-xl bg-cyan-500 text-slate-950 text-sm font-bold hover:bg-cyan-400 transition-colors overflow-hidden"
+                    >
+                      <motion.div
+                        className="pointer-events-none absolute inset-y-0 w-12 bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12"
+                        animate={{ left: ['-3rem', '110%'] }}
+                        transition={{ duration: 1.6, repeat: Infinity, repeatDelay: 1.2, ease: 'easeInOut' }}
+                      />
+                      <Power className="h-4 w-4" />
+                      Wake Up
+                    </motion.button>
+                  ) : (
+                    <motion.button
+                      key="sleep"
+                      onClick={rt.sleep}
+                      initial={{ opacity: 0, scale: 0.92 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.92 }}
+                      transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+                      whileHover={{ scale: 1.06 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="flex items-center gap-2.5 h-11 px-10 rounded-xl border border-slate-600/50 bg-slate-800/60 text-slate-300 text-sm font-semibold hover:bg-slate-700/60 hover:border-slate-500/50 transition-colors"
+                    >
+                      <Moon className="h-4 w-4" />
+                      Sleep
+                    </motion.button>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* Hint text + mic listening indicator */}
@@ -596,8 +925,8 @@ export default function App() {
                 <div className="text-[10px] text-slate-600 text-center max-w-xs leading-relaxed">
                   {(displayPhase === 'standby' || displayPhase === 'sleep')
                     ? rt.sttSupported
-                      ? `Say "${appConfig.wakeWord}" or press Wake Up to start`
-                      : 'Press Wake Up • Enable mic for wake-word detection'
+                      ? `Say "${appConfig.wakeWord}" or tap Wake Up to start`
+                      : 'Tap Wake Up to start • Enable mic for voice detection'
                     : displayPhase === 'ready'
                       ? 'Ask a question by voice or type below · Gear icon → voice settings'
                       : null}
@@ -618,213 +947,27 @@ export default function App() {
                   </div>
                 )}
               </div>
+
+              {/* Forecast strip — bare day icons, no card */}
+              {rt.agents.find(a => a.id === 'weather')?.status === 'online' && (
+                <ForecastStrip city={agentConfig.weather.defaultCity || 'Bengaluru'} />
+              )}
             </div>
 
-            {/* Holographic chat transcript */}
-            <HoloChat transcript={rt.transcript} aiName={appConfig.wakeWord} />
-
-            {/* Input bar — sci-fi terminal */}
-            <div className="flex-shrink-0 border-t border-cyan-400/8 bg-black/20 backdrop-blur-sm px-4 py-3">
-              <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-3 py-2 focus-within:border-cyan-400/22 transition-colors">
-                {/* Blinking terminal cursor prefix */}
-                <motion.span
-                  animate={{ opacity: [1, 0.2, 1] }}
-                  transition={{ duration: 1.1, repeat: Infinity }}
-                  className="text-cyan-400 font-mono text-sm flex-shrink-0 select-none"
-                >
-                  ❯
-                </motion.span>
-                <input
-                  value={rt.command}
-                  onChange={(e) => rt.setCommand(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && rt.command.trim()) {
-                      if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
-                      else rt.ask();
-                    }
-                  }}
-                  placeholder={
-                    isActive && rt.phase !== 'booting'
-                      ? 'Ask about weather, calendar, email, stocks, or anything…'
-                      : 'Type a message — system wakes automatically…'
-                  }
-                  className="flex-1 bg-transparent text-[13px] text-white/90 outline-none placeholder:text-slate-700 font-mono"
-                />
-                <motion.button
-                  onClick={() => {
-                    if (!rt.command.trim()) return;
-                    if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
-                    else rt.ask();
-                  }}
-                  disabled={!rt.command.trim()}
-                  whileHover={{ scale: 1.06 }}
-                  whileTap={{ scale: 0.94 }}
-                  animate={rt.command.trim() ? { boxShadow: ['0 0 0px rgba(139,92,246,0)', '0 0 8px rgba(139,92,246,0.4)', '0 0 0px rgba(139,92,246,0)'] } : {}}
-                  transition={{ duration: 1.8, repeat: Infinity }}
-                  className="flex items-center gap-1.5 h-7 px-3 rounded-lg bg-violet-500/20 border border-violet-400/30 text-violet-300 text-xs font-medium hover:bg-violet-500/30 disabled:opacity-30 transition-colors"
-                >
-                  <Send className="h-3 w-3" />
-                  Send
-                </motion.button>
-              </div>
-            </div>
           </main>
 
-          {/* RIGHT — Quick Stats */}
-          <aside className="border-l border-white/8 overflow-y-auto p-3 space-y-2 bg-black/10 scrollbar-thin">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.4 }}
-              className="text-[10px] uppercase tracking-[0.3em] text-slate-600 text-center mb-1"
-            >
-              Quick Stats
-            </motion.div>
+          {/* RIGHT — Chat History + Quick Stats */}
+          <aside className="border-l border-white/8 flex flex-col min-h-0 bg-black/10">
 
-            {/* ── System Health ─────────────────────────────── */}
-            <motion.div
-              initial={{ opacity: 0, x: 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
-              className="relative overflow-hidden rounded-2xl border border-teal-400/20 bg-teal-400/5 p-3"
-            >
-              {/* slow background shimmer — always running on this card */}
-              <motion.div
-                className="pointer-events-none absolute inset-y-0 w-28 bg-gradient-to-r from-transparent via-teal-400/5 to-transparent skew-x-12"
-                animate={{ left: ['-7rem', '120%'] }}
-                transition={{ duration: 4, repeat: Infinity, repeatDelay: 3, ease: 'linear' }}
-              />
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5">
-                  <motion.div
-                    animate={{ rotate: systemOnline ? [0, 15, -15, 0] : 0 }}
-                    transition={{ duration: 3, repeat: Infinity, repeatDelay: 4 }}
-                  >
-                    <Cpu className="h-3 w-3 text-teal-400" />
-                  </motion.div>
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-teal-500">System Health</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <AnimatePresence mode="wait">
-                    <motion.span
-                      key={rt.systemStats.healthScore}
-                      initial={{ opacity: 0, scale: 1.3 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.3 }}
-                      className={`text-base font-bold tabular-nums leading-none ${
-                        rt.systemStats.healthScore >= 80 ? 'text-emerald-400' :
-                        rt.systemStats.healthScore >= 60 ? 'text-amber-400' : 'text-red-400'
-                      }`}
-                    >
-                      {rt.systemStats.healthScore}
-                    </motion.span>
-                  </AnimatePresence>
-                  <span className="text-[9px] text-slate-500">/100</span>
-                  {/* ping dot */}
-                  <span className="relative ml-1 h-1.5 w-1.5 flex-shrink-0">
-                    <motion.span
-                      className={`absolute inset-0 rounded-full ${systemOnline ? 'bg-teal-400' : 'bg-slate-600'}`}
-                      animate={systemOnline ? { scale: [1, 2.4], opacity: [0.6, 0] } : {}}
-                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
-                    />
-                    <span className={`absolute inset-0 rounded-full ${systemOnline ? 'bg-teal-400' : 'bg-slate-600'}`} />
-                  </span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                <StatRow label="OS" value={rt.systemStats.os} />
-                <StatRow label="Cores" value={`${rt.systemStats.cores}`} />
-
-                {/* Live metrics from orchestrator backend */}
-                {orchSys && (
-                  <>
-                    <StatRow
-                      label="CPU"
-                      value={`${orchSys.cpu_pct}%`}
-                      hi={orchSys.cpu_pct > 85 ? 'err' : orchSys.cpu_pct > 60 ? 'warn' : 'ok'}
-                    />
-                    <StatRow
-                      label={orchSys.temp_source === 'battery' ? 'Bat°C' : 'Temp'}
-                      value={orchSys.cpu_temp_c != null ? `${orchSys.cpu_temp_c}°C` : 'N/A'}
-                      hi={
-                        orchSys.cpu_temp_c == null ? undefined :
-                        orchSys.temp_source === 'battery'
-                          ? (orchSys.cpu_temp_c > 45 ? 'warn' : 'ok')
-                          : (orchSys.cpu_temp_c > 90 ? 'err' : orchSys.cpu_temp_c > 75 ? 'warn' : 'ok')
-                      }
-                    />
-                    <StatRow
-                      label="RAM"
-                      value={`${orchSys.mem_pct}%`}
-                      hi={orchSys.mem_pct > 85 ? 'err' : orchSys.mem_pct > 70 ? 'warn' : 'ok'}
-                    />
-                    <StatRow
-                      label="Disk"
-                      value={`${orchSys.disk_pct}%`}
-                      hi={orchSys.disk_pct > 90 ? 'err' : orchSys.disk_pct > 75 ? 'warn' : 'ok'}
-                    />
-                  </>
-                )}
-
-                {rt.systemStats.battery && (
-                  <StatRow
-                    label="Battery"
-                    value={`${rt.systemStats.battery.level}%${rt.systemStats.battery.charging ? '⚡' : ''}`}
-                    hi={rt.systemStats.battery.level < 20 ? 'err' : rt.systemStats.battery.level < 40 ? 'warn' : 'ok'}
-                  />
-                )}
-                <StatRow
-                  label="Network"
-                  value={rt.systemStats.online ? (rt.systemStats.connectionType ?? 'Online') : 'Offline'}
-                  hi={rt.systemStats.online ? 'ok' : 'err'}
-                />
-                {rt.systemStats.appUptimeSec > 0 && (
-                  <StatRow
-                    label="Uptime"
-                    value={rt.systemStats.appUptimeSec < 60
-                      ? `${rt.systemStats.appUptimeSec}s`
-                      : `${Math.floor(rt.systemStats.appUptimeSec / 60)}m ${rt.systemStats.appUptimeSec % 60}s`}
-                  />
-                )}
-              </div>
-            </motion.div>
-
-            {/* ── App Status ───────────────────────────────── */}
-            <motion.div
-              initial={{ opacity: 0, x: 24 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12, duration: 0.4, ease: 'easeOut' }}
-              className="rounded-2xl border border-white/8 bg-white/3 p-3"
-            >
-              <div className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1.5">App Status</div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-1.5">
-                <StatusRow label="STT" ok={rt.sttSupported} />
-                <StatusRow label="TTS" ok={rt.ttsSupported} />
-                <StatusRow label="Session" ok={isActive} />
-                <StatusRow label="WebSocket" ok={rt.wsConnected} />
-              </div>
-              {rt.wsConnected && (
-                <div className="flex flex-wrap gap-1 pt-1.5 border-t border-white/6">
-                  {[
-                    { k: 'TTS',  active: rt.orchestratorCaps.tts,      val: rt.orchestratorCaps.tts      ? 'Server' : 'Browser' },
-                    { k: 'STT',  active: rt.orchestratorCaps.stt,      val: rt.orchestratorCaps.stt      ? 'Server' : 'Browser' },
-                    { k: 'Wake', active: rt.orchestratorCaps.wakeWord, val: rt.orchestratorCaps.wakeWord ? 'Server' : 'Browser' },
-                  ].map((p) => (
-                    <span key={p.k} className={`text-[9px] rounded-full px-1.5 py-0.5 ${p.active ? 'bg-teal-400/15 text-teal-300' : 'bg-slate-700/30 text-slate-500'}`}>
-                      {p.k}: {p.val}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </motion.div>
+            {/* ── Compact stats (Performance + Config) ─────────────── */}
+            <div className="flex-shrink-0 overflow-y-auto p-3 space-y-2 scrollbar-thin border-b border-white/6">
 
             {/* ── Performance ──────────────────────────────── */}
             {rt.orchestratorMetrics && (
               <motion.div
                 initial={{ opacity: 0, x: 24 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.19, duration: 0.4, ease: 'easeOut' }}
+                transition={{ delay: 0.05, duration: 0.4, ease: 'easeOut' }}
                 className="rounded-2xl border border-violet-400/20 bg-violet-400/5 p-3"
               >
                 <div className="flex items-center gap-1.5 mb-1.5">
@@ -867,58 +1010,11 @@ export default function App() {
               </motion.div>
             )}
 
-            {/* ── Online Agents — appear dynamically as each comes online ── */}
-            {onlineAgents.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, x: 24 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.26, duration: 0.4, ease: 'easeOut' }}
-                className="rounded-2xl border border-white/8 bg-white/3 p-3"
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-                    Online Agents <span className="text-slate-600">({onlineAgents.length})</span>
-                  </span>
-                  <span className="text-[9px] text-slate-600">tap for details</span>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <AnimatePresence>
-                    {onlineAgents.map((agent, idx) => {
-                      const m = AGENT_PILL_META[agent.id];
-                      if (!m) return null;
-                      const Icon = m.icon;
-                      return (
-                        <motion.button
-                          key={agent.id}
-                          initial={{ opacity: 0, scale: 0.88 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.88 }}
-                          transition={{ delay: idx * 0.05, duration: 0.22 }}
-                          whileHover={{ scale: 1.06, y: -2 }}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => handleAgentClick(agent.id)}
-                          className={`flex items-center gap-1.5 rounded-xl border ${m.border} ${m.bg} px-2 py-1.5 cursor-pointer w-full text-left`}
-                        >
-                          <motion.div
-                            animate={{ rotate: [0, 8, -8, 0] }}
-                            transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
-                          >
-                            <Icon className={`h-3 w-3 flex-shrink-0 ${m.text}`} style={{ width: 12, height: 12 }} />
-                          </motion.div>
-                          <span className={`text-[10px] font-medium truncate ${m.text}`}>{agent.label}</span>
-                        </motion.button>
-                      );
-                    })}
-                  </AnimatePresence>
-                </div>
-              </motion.div>
-            )}
-
             {/* ── Config ───────────────────────────────────── */}
             <motion.div
               initial={{ opacity: 0, x: 24 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.33, duration: 0.4, ease: 'easeOut' }}
+              transition={{ delay: 0.12, duration: 0.4, ease: 'easeOut' }}
               className="rounded-2xl border border-white/8 bg-white/3 p-3"
             >
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 mb-2">
@@ -936,6 +1032,72 @@ export default function App() {
                 Open settings →
               </motion.button>
             </motion.div>
+            </div>{/* end compact stats */}
+
+            {/* ── Conversation header ── */}
+            <div className="flex-shrink-0 px-3 py-1.5 flex items-center gap-1.5">
+              <motion.div
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className="h-1.5 w-1.5 rounded-full bg-cyan-400"
+              />
+              <span className="text-[9px] font-mono uppercase tracking-[0.28em] text-slate-600">
+                Conversation
+              </span>
+              {rt.transcript.filter(t => t.speaker !== 'system').length > 0 && (
+                <span className="ml-auto text-[8px] font-mono text-slate-700 tabular-nums">
+                  {rt.transcript.filter(t => t.speaker !== 'system').length} turns
+                </span>
+              )}
+            </div>
+
+            {/* ── HoloChat — takes all remaining vertical space ── */}
+            <HoloChat transcript={rt.transcript} aiName={appConfig.wakeWord} />
+
+            {/* ── Input bar — anchored to bottom of right panel ── */}
+            <div className="flex-shrink-0 border-t border-cyan-400/8 bg-black/20 backdrop-blur-sm px-3 py-2.5">
+              <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-black/30 px-2.5 py-2 focus-within:border-cyan-400/22 transition-colors">
+                <motion.span
+                  animate={{ opacity: [1, 0.2, 1] }}
+                  transition={{ duration: 1.1, repeat: Infinity }}
+                  className="text-cyan-400 font-mono text-sm flex-shrink-0 select-none"
+                >
+                  ❯
+                </motion.span>
+                <input
+                  value={rt.command}
+                  onChange={(e) => rt.setCommand(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && rt.command.trim()) {
+                      if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
+                      else rt.ask();
+                    }
+                  }}
+                  placeholder={
+                    isActive && rt.phase !== 'booting'
+                      ? 'Ask anything…'
+                      : 'Type to wake…'
+                  }
+                  className="flex-1 bg-transparent text-[12px] text-white/90 outline-none placeholder:text-slate-700 font-mono min-w-0"
+                />
+                <motion.button
+                  onClick={() => {
+                    if (!rt.command.trim()) return;
+                    if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
+                    else rt.ask();
+                  }}
+                  disabled={!rt.command.trim()}
+                  whileHover={{ scale: 1.06 }}
+                  whileTap={{ scale: 0.94 }}
+                  animate={rt.command.trim() ? { boxShadow: ['0 0 0px rgba(139,92,246,0)', '0 0 8px rgba(139,92,246,0.4)', '0 0 0px rgba(139,92,246,0)'] } : {}}
+                  transition={{ duration: 1.8, repeat: Infinity }}
+                  className="flex items-center gap-1 h-7 px-2.5 rounded-lg bg-violet-500/20 border border-violet-400/30 text-violet-300 text-xs font-medium hover:bg-violet-500/30 disabled:opacity-30 transition-colors flex-shrink-0"
+                >
+                  <Send className="h-3 w-3" />
+                  Send
+                </motion.button>
+              </div>
+            </div>
           </aside>
         </div>
       </div>
@@ -949,7 +1111,11 @@ export default function App() {
             metrics={rt.orchestratorMetrics?.agents[selectedAgent.id]}
             onClose={() => setSelectedAgentId(null)}
             onReload={rt.reloadAgent ? () => rt.reloadAgent(selectedAgent.id) : undefined}
-            onOpenDashboard={selectedAgent.id === 'smarthome' ? () => setSmartHomeDashboardOpen(true) : undefined}
+            onOpenDashboard={
+              selectedAgent.id === 'smarthome' ? () => setSmartHomeDashboardOpen(true) :
+              selectedAgent.id === 'stock'     ? () => { setSelectedAgentId(null); setStocksPortfolioOpen(true); } :
+              undefined
+            }
             agentConfig={agentConfig}
             notificationsEnabled={notificationsEnabledFor(selectedAgent.id)}
             onToggleNotifications={
@@ -987,6 +1153,74 @@ export default function App() {
               setPortfolioDashboardOpen(false);
               rt.ask(text);
             }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Stocks portfolio side panel */}
+      <AnimatePresence>
+        {stocksPortfolioOpen && (
+          <StocksPortfolio
+            spreadsheetId={agentConfig.stock.spreadsheetId}
+            googleToken={agentConfig.google.accessToken}
+            onClose={() => setStocksPortfolioOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* WhatsApp dashboard */}
+      <AnimatePresence>
+        {whatsappDashboardOpen && (
+          <WhatsAppDashboard onClose={() => setWhatsappDashboardOpen(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Notes & Reminders dashboard */}
+      <AnimatePresence>
+        {notesDashboardOpen && (
+          <NotesDashboard
+            onClose={() => setNotesDashboardOpen(false)}
+            onVoiceCmd={(text) => { setNotesDashboardOpen(false); rt.ask(text); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Reminder / alarm visual alerts — always shown, with voice reminders and countdown */}
+      <ReminderAlert
+        alerts={visualAlerts}
+        countdown={alertCountdown}
+        voiceEnabled={rt.voiceEnabled}
+        onDismiss={dismissAlert}
+        onSnooze={snoozeAlert}
+      />
+
+      {/* Agent configuration modal */}
+      <AnimatePresence>
+        {agentConfigOpen && (
+          <AgentConfigModal
+            cfg={agentConfig}
+            onPatch={patchAgent}
+            onClose={() => setAgentConfigOpen(false)}
+            onReload={rt.reloadAgent}
+            onVerifyWeather={verifyWeather}
+            onConnectGoogle={connectGoogle}
+            onDisconnectGoogle={disconnectGoogle}
+            onVerifyGitHub={verifyGitHub}
+            onDisconnectGitHub={disconnectGitHub}
+            onVerifyNews={verifyNews}
+            onVerifySmartHome={verifySmartHome}
+            onConnectPortfolio={connectPortfolio}
+            onDisconnectPortfolio={disconnectPortfolio}
+            onRefreshPortfolio={refreshPortfolioToken}
+            onVerifyWhatsApp={verifyWhatsApp}
+            onCheckTunnel={checkTunnelStatus}
+            onStartTunnel={startTunnel}
+            onStopTunnel={stopTunnel}
+            agentVoices={agentVoices}
+            onAgentVoiceUpdate={updateAgentVoice}
+            onAgentVoiceReset={resetAgentVoice}
+            voices={voices}
+            onTestAgentVoice={(text, agentId) => rt.speak(text, agentId)}
           />
         )}
       </AnimatePresence>

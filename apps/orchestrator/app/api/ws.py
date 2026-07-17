@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import time
+import uuid
 from collections import deque
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -26,6 +28,7 @@ from app.services.session import (
     strip_agent_prefix,
     is_agent_error,
     test_agent,
+    reload_agent,
 )
 
 router = APIRouter()
@@ -167,20 +170,8 @@ async def _handle_retry_agent(
     tts: TTSProvider,
     agent_voices: dict | None = None,
 ) -> None:
-    label = AGENT_LABELS.get(agent_id, agent_id.title())
     await _send(ws, 'agent_status_changed', {'agent': agent_id, 'status': 'starting'})
-    boot_query = AGENT_BOOT_QUERY.get(agent_id, '')
-    if boot_query:
-        _, status, msg = await test_agent(agent_id)
-        if status == 'online':
-            msg = f"{label} reloaded successfully. {strip_agent_prefix(msg.split('. ', 1)[-1])}"
-        elif status == 'degraded':
-            msg = f"{label} reloaded — configuration still needed."
-        else:
-            msg = f"{label} failed to reload."
-    else:
-        status = 'online'
-        msg    = f"{label} is ready."
+    status, msg = await reload_agent(agent_id)
     await _speak_event(
         ws, 'boot_status', msg,
         {'agent_id': agent_id, 'agent_status': status},
@@ -289,6 +280,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 agent_id = payload.get('agent', '')
                 if agent_id:
                     await _handle_retry_agent(ws, agent_id, session_tts, session_agent_voices)
+
+            elif command == 'schedule_alert':
+                title    = str(payload.get('title', 'Reminder'))[:200]
+                body     = str(payload.get('body',  ''))[:500]
+                delay_s  = max(1, min(int(payload.get('delay_seconds', 60)), 86400))
+                alert_id = str(payload.get('id', str(uuid.uuid4())))[:64]
+
+                async def _fire_alert(ws_ref: WebSocket = ws, aid: str = alert_id,
+                                      atitle: str = title, abody: str = body,
+                                      delay: int = delay_s) -> None:
+                    await asyncio.sleep(delay)
+                    try:
+                        await _send(ws_ref, 'alert', {'id': aid, 'title': atitle, 'body': abody})
+                    except Exception:
+                        pass
+
+                asyncio.create_task(_fire_alert())
+                await _send(ws, 'alert_scheduled', {
+                    'id': alert_id, 'delay_seconds': delay_s,
+                })
 
     except WebSocketDisconnect:
         pass

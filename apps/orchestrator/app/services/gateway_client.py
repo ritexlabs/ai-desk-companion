@@ -46,6 +46,19 @@ class GatewayClient:
             logger.warning('Gateway list_tools failed: %s', exc)
             return []
 
+    async def update_google_session(self, access_token: str, refresh_token: str = '') -> bool:
+        """Push a per-session Google OAuth token to the gateway (in-memory only)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/google',
+                    json={'access_token': access_token, 'refresh_token': refresh_token},
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.post(

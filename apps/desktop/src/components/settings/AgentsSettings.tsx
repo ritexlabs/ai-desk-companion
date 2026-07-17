@@ -4,7 +4,7 @@ import {
   Bot, Brain, Calculator, ChevronLeft, ChevronRight,
   Cloud, Github, Globe, Globe2, Home, Layers,
   Loader2, Lock, MessageCircle, Monitor, Newspaper,
-  PieChart, Search, Sparkles, TrendingUp, Zap,
+  PieChart, RefreshCw, Search, Sparkles, TrendingUp, Zap,
 } from 'lucide-react';
 import type { AgentConfig, ConnectionStatus } from '../../hooks/useAgentConfig';
 import type { AgentVoiceMap, AgentVoiceSetting } from '../../hooks/useAgentVoiceConfig';
@@ -310,6 +310,7 @@ const slide = {
 interface Props {
   config:              AgentConfig;
   onPatch:             <K extends keyof AgentConfig>(agent: K, p: Partial<AgentConfig[K]>) => void;
+  onReload:            (agentId: string) => void;
   onVerifyWeather:     () => void;
   onConnectGoogle:     () => void;
   onDisconnectGoogle:  () => void;
@@ -334,7 +335,7 @@ interface Props {
 // ── Detail view ───────────────────────────────────────────────────────────────
 
 function DetailView({
-  agentId, dir, onBack, config, onPatch,
+  agentId, dir, onBack, config, onPatch, onReload,
   onVerifyWeather, onConnectGoogle, onDisconnectGoogle,
   onVerifyGitHub, onDisconnectGitHub, onVerifyNews,
   onVerifySmartHome,
@@ -343,6 +344,16 @@ function DetailView({
   onCheckTunnel, onStartTunnel, onStopTunnel,
   agentVoices, onAgentVoiceUpdate, onAgentVoiceReset, voices, onTestAgentVoice,
 }: Props & { agentId: string; dir: number; onBack: () => void }) {
+  const [reloading, setReloading] = useState(false);
+
+  function handleReload() {
+    if (reloading) return;
+    setReloading(true);
+    // Google config maps to two runtime agents
+    const ids = agentId === 'google' ? ['calendar', 'email'] : [agentId];
+    ids.forEach(id => onReload(id));
+    setTimeout(() => setReloading(false), 3000);
+  }
   const meta  = AGENT_META[agentId] ?? AGENT_META.general;
   const state = getState(agentId, config);
   const isSkill = (SKILLS as readonly string[]).includes(agentId);
@@ -358,7 +369,7 @@ function DetailView({
       case 'github':
         return <GithubSettings config={config.github} onPatch={(p) => onPatch('github', p)} onVerify={onVerifyGitHub} onDisconnect={onDisconnectGitHub} />;
       case 'stock':
-        return <StockSettings config={config.stock} onPatch={(p) => onPatch('stock', p)} />;
+        return <StockSettings config={config.stock} onPatch={(p) => onPatch('stock', p)} googleToken={config.google.accessToken} />;
       case 'news':
         return <NewsSettings config={config.news} onPatch={(p) => onPatch('news', p)} onVerify={onVerifyNews} />;
       case 'smarthome':
@@ -413,6 +424,19 @@ function DetailView({
 
       {/* Form */}
       {renderForm()}
+
+      {/* Reload button — available for all configurable agents */}
+      {!isSkill && agentId !== 'general' && (
+        <button
+          type="button"
+          onClick={handleReload}
+          disabled={reloading}
+          className="flex items-center gap-2 w-full justify-center rounded-xl border border-white/10 bg-white/4 hover:bg-white/8 hover:border-white/20 px-3 py-2 text-xs text-slate-400 hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${reloading ? 'animate-spin' : ''}`} />
+          {reloading ? 'Reloading…' : `Reload ${AGENT_META[agentId]?.label ?? agentId} agent`}
+        </button>
+      )}
 
       {/* Voice row */}
       <div className="pt-1 border-t border-white/6">

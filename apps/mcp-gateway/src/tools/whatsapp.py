@@ -175,6 +175,16 @@ class WhatsAppTool(BaseTool):
                     },
                 },
             },
+            {
+                'name': 'get_conversations',
+                'description': 'Get WhatsApp message history grouped by contact as structured data for the dashboard.',
+                'inputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'limit': {'type': 'integer', 'description': 'Max conversations to return (default 30)'},
+                    },
+                },
+            },
         ]
 
     def _require_creds(self) -> tuple[str, str]:
@@ -190,6 +200,10 @@ class WhatsAppTool(BaseTool):
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         if tool_name == 'get_messages':
             return self._format_messages(arguments.get('limit', 10))
+
+        if tool_name == 'get_conversations':
+            limit = arguments.get('limit', 30)
+            return get_conversations()[:limit]
 
         phone_id, token = self._require_creds()
 

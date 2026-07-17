@@ -1,7 +1,10 @@
 import { useCallback, useRef } from 'react';
+import { connectElement, disconnectTts } from '../lib/audioAnalyser';
 
 /**
  * Plays audio received as a base64 string from the orchestrator TTS provider.
+ * The audio element is piped through the shared Web Audio analyser so
+ * WaveVisualizer can display real-time frequency data.
  * Falls back silently on any error so the caller's Promise always resolves.
  */
 export function useAudioPlayer() {
@@ -12,6 +15,7 @@ export function useAudioPlayer() {
       currentAudioRef.current.pause();
       currentAudioRef.current.src = '';
       currentAudioRef.current = null;
+      disconnectTts();
     }
   }, []);
 
@@ -22,8 +26,12 @@ export function useAudioPlayer() {
       const audio = new Audio(`data:audio/${format};base64,${audio_b64}`);
       currentAudioRef.current = audio;
 
+      // Pipe through the singleton analyser BEFORE play() so the first frame is captured
+      connectElement(audio);
+
       const cleanup = () => {
         currentAudioRef.current = null;
+        disconnectTts();
         resolve();
       };
 

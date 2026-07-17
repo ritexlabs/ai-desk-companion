@@ -230,6 +230,26 @@ async def call_tool(tool_name: str, body: ToolCallRequest) -> Any:
         raise HTTPException(status_code=503, detail=sanitize_error(exc, max_len=300))
 
 
+# ── Session credentials (per-session overrides from the orchestrator) ─────────
+
+class GoogleSessionRequest(BaseModel):
+    access_token:  str = ''
+    refresh_token: str = ''
+
+
+@app.put('/session/google')
+async def update_google_session(body: GoogleSessionRequest) -> dict:
+    """Accept a per-session Google OAuth token from the orchestrator.
+
+    Updates the in-memory settings so tool calls in this session use the
+    user's token without writing to the .env file.
+    """
+    settings.google_access_token  = body.access_token.strip()
+    settings.google_refresh_token = body.refresh_token.strip()
+    configured = bool(settings.google_access_token)
+    return {'ok': True, 'configured': configured}
+
+
 # ── WhatsApp webhook ──────────────────────────────────────────────────────────
 
 @app.get('/webhook/whatsapp')

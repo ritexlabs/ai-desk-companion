@@ -1,10 +1,40 @@
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
+
+import httpx
 
 from src.config.settings import settings
 from src.tools.base import BaseTool
+from src.utils.errors import ToolAuthError
+
+_SHEETS_BASE = 'https://sheets.googleapis.com/v4/spreadsheets'
+_DRIVE_BASE  = 'https://www.googleapis.com/drive/v3/files'
+_ENV_PATH    = Path(__file__).parents[2] / '.env'
+
+
+def _google_auth(override_token: str = '') -> dict[str, str]:
+    token = override_token.strip() or settings.google_access_token.strip()
+    if not token:
+        raise ToolAuthError(
+            'Google not connected. Sign in via Settings → Google and make sure Drive scope is enabled.'
+        )
+    return {'Authorization': f'Bearer {token}'}
+
+
+def _write_env(key: str, value: str) -> None:
+    if not _ENV_PATH.exists():
+        return
+    content = _ENV_PATH.read_text()
+    new_line = f'{key}={value}'
+    if re.search(rf'^{re.escape(key)}=', content, re.MULTILINE):
+        content = re.sub(rf'^{re.escape(key)}=.*', new_line, content, flags=re.MULTILINE)
+    else:
+        content = content.rstrip('\n') + f'\n{new_line}\n'
+    _ENV_PATH.write_text(content)
 
 _IN_ALIASES: dict[str, str] = {
     'nifty': '^NSEI', 'nifty 50': '^NSEI', 'nifty50': '^NSEI',
@@ -122,10 +152,52 @@ class StocksTool(BaseTool):
                     },
                     'required': ['query'],
                 },
-            }
+            },
+            {
+                'name': 'get_portfolio',
+                'description': (
+                    'Read the user\'s personal stock portfolio from a Google Sheet. '
+                    'Returns all holdings with broker, symbol, quantity, buy price, '
+                    'current price, and P&L. Use for "my portfolio", "my holdings", '
+                    '"my stocks", "how are my investments doing".'
+                ),
+                'inputSchema': {'type': 'object', 'properties': {}, 'required': []},
+            },
+            {
+                'name': 'list_sheets',
+                'description': 'List all Google Sheets in the user\'s Google Drive for portfolio selection.',
+                'inputSchema': {'type': 'object', 'properties': {}, 'required': []},
+            },
+            {
+                'name': 'get_current_sheet',
+                'description': 'Get the currently configured portfolio Google Sheet ID and name.',
+                'inputSchema': {'type': 'object', 'properties': {}, 'required': []},
+            },
+            {
+                'name': 'save_sheet',
+                'description': 'Save a Google Sheet ID as the default portfolio sheet.',
+                'inputSchema': {
+                    'type': 'object',
+                    'properties': {
+                        'spreadsheet_id': {'type': 'string', 'description': 'Google Sheet ID to save'},
+                    },
+                    'required': ['spreadsheet_id'],
+                },
+            },
         ]
 
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
+        if tool_name == 'get_portfolio':
+            return await self._get_portfolio(
+                arguments.get('spreadsheet_id', ''),
+                arguments.get('token', ''),
+            )
+        if tool_name == 'list_sheets':
+            return await self._list_sheets(arguments.get('token', ''))
+        if tool_name == 'get_current_sheet':
+            return await self._get_current_sheet()
+        if tool_name == 'save_sheet':
+            return self._save_sheet(arguments.get('spreadsheet_id', ''))
         try:
             import yfinance as yf
         except ImportError:
@@ -187,3 +259,131 @@ class StocksTool(BaseTool):
 
         except Exception as exc:
             return f"Could not fetch data for '{raw_query}' (ticker: {ticker}). {str(exc)[:120]}"
+
+    async def _get_portfolio(self, spreadsheet_id: str = '', token: str = '') -> list[dict]:
+        headers = _google_auth(token)
+        sid = spreadsheet_id.strip() or settings.mystocks_spreadsheet_id.strip()
+        if not sid:
+            raise ToolAuthError(
+                'Portfolio sheet not configured. '
+                'Add MYSTOCKS_SPREADSHEET_ID to the gateway .env or Settings → Stocks.'
+            )
+
+        rng = settings.mystocks_range or 'A:Z'
+        url = f'{_SHEETS_BASE}/{sid}/values/{rng}'
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 401:
+                raise ToolAuthError('Google access token expired. Re-sign in via Settings → Google.')
+            resp.raise_for_status()
+
+        rows = resp.json().get('values', [])
+        if not rows:
+            return []
+
+        # Find the header row — identified by having a "broker" column
+        header_idx = 0
+        for i, row in enumerate(rows):
+            if any('broker' in str(cell).lower() for cell in row):
+                header_idx = i
+                break
+
+        headers = [str(h).strip().lower() for h in rows[header_idx]]
+        data_rows = rows[header_idx + 1:]
+
+        def _col(*kws: str) -> int:
+            for i, h in enumerate(headers):
+                for kw in kws:
+                    if kw in h:
+                        return i
+            return -1
+
+        ci_broker = _col('broker')
+        ci_symbol = _col('exchange:symbol', 'symbol', 'ticker', 'stock')
+        ci_qty    = _col('qty', 'quantity', 'shares')
+        ci_rate   = _col('rate', 'avg', 'purchase price', 'buy price')
+        ci_buy    = _col('buy')
+        ci_curr   = _col('current price', 'current', 'ltp', 'price')
+        ci_pnl    = _col('p&l', 'pnl', 'profit')
+        ci_pct    = _col('% change', '% p&l', 'change%', 'return%')
+
+        def _get(row: list, idx: int) -> str:
+            return row[idx].strip() if idx >= 0 and idx < len(row) else ''
+
+        def _num(s: str) -> float:
+            try:
+                return float(re.sub(r'[^\d.\-]', '', s)) if s else 0.0
+            except ValueError:
+                return 0.0
+
+        result = []
+        for row in data_rows:
+            broker = _get(row, ci_broker)
+            if not broker:
+                continue
+            raw_sym = _get(row, ci_symbol)
+            sym = raw_sym.split(':')[1] if ':' in raw_sym else raw_sym
+            if not sym:
+                continue
+
+            qty     = _num(_get(row, ci_qty))
+            rate    = _num(_get(row, ci_rate))
+            buy_tot = _num(_get(row, ci_buy))
+            curr    = _num(_get(row, ci_curr))
+            pnl_a   = _num(_get(row, ci_pnl))
+            pnl_p   = _num(_get(row, ci_pct))
+
+            invested = buy_tot if buy_tot > 0 else qty * rate
+            current  = qty * curr if curr > 0 else 0.0
+            pnl      = pnl_a if pnl_a != 0.0 else (current - invested)
+            pnl_pct  = pnl_p if pnl_p != 0.0 else ((pnl / invested * 100) if invested > 0 else 0.0)
+
+            result.append({
+                'sym':    sym,
+                'name':   sym,
+                'broker': broker,
+                'qty':    qty,
+                'buy':    rate if rate > 0 else (invested / qty if qty > 0 else 0.0),
+                'curr':   curr,
+                'pnl':    round(pnl, 2),
+                'pnlPct': round(pnl_pct, 2),
+            })
+
+        return result
+
+    async def _list_sheets(self, token: str = '') -> list[dict]:
+        headers = _google_auth(token)
+        params = {
+            'q': "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+            'fields': 'files(id,name,modifiedTime)',
+            'orderBy': 'modifiedTime desc',
+            'pageSize': '50',
+        }
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(_DRIVE_BASE, headers=headers, params=params)
+            if resp.status_code == 401:
+                raise ToolAuthError('Google access token expired. Re-sign in via Settings → Google.')
+            resp.raise_for_status()
+        files = resp.json().get('files', [])
+        current_id = settings.mystocks_spreadsheet_id.strip()
+        return [
+            {
+                'id': f['id'],
+                'name': f['name'],
+                'modifiedTime': f.get('modifiedTime', ''),
+                'selected': f['id'] == current_id,
+            }
+            for f in files
+        ]
+
+    def _get_current_sheet(self) -> dict:
+        sid = settings.mystocks_spreadsheet_id.strip()
+        return {'spreadsheet_id': sid, 'configured': bool(sid)}
+
+    def _save_sheet(self, spreadsheet_id: str) -> dict:
+        sid = spreadsheet_id.strip()
+        if not sid:
+            raise ValueError('spreadsheet_id is required')
+        _write_env('MYSTOCKS_SPREADSHEET_ID', sid)
+        settings.mystocks_spreadsheet_id = sid
+        return {'saved': True, 'spreadsheet_id': sid}

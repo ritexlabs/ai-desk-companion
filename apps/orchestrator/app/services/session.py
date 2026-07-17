@@ -21,6 +21,7 @@ AGENT_LABELS: dict[str, str] = {
     'calculator': 'Calculator',
     'memory':     'Memory',
     'briefing':   'Briefing',
+    'notes':      'Notes & Reminders',
     'general':    'General AI',
 }
 
@@ -31,6 +32,7 @@ AGENT_BOOT_QUERY: dict[str, str] = {
     'calculator': '',
     'memory':     '',
     'briefing':   '',
+    'notes':      '',
     'general':    '',
 }
 
@@ -48,6 +50,10 @@ _GATEWAY_AGENT_MAP: dict[str, str] = {
     'smarthome': 'smarthome',
     'whatsapp':  'whatsapp',
 }
+
+# Per-session Google token — stored so reload_agent can re-push it to the gateway
+_session_google_access_token:  str = ''
+_session_google_refresh_token: str = ''
 
 # Human-readable labels for gateway-served agents (used in boot messages)
 _GATEWAY_LABELS: dict[str, str] = {
@@ -107,7 +113,7 @@ _GW_BOOT_CALLS: dict[str, tuple[str, dict]] = {
     'stock':     ('stocks__get_quote',               {'query': 'Nifty 50'}),
     'news':      ('news__get_news',                  {'query': 'top news today'}),
     'github':    ('github__get_summary',             {}),
-    'calendar':  ('google__get_calendar_events',     {'query': 'next event'}),
+    'calendar':  ('google__get_calendar_events',     {'query': "today's schedule"}),
     'email':     ('google__get_emails',              {'query': 'unread emails'}),
     'system':    ('system__get_system_info',         {'query': 'system status'}),
     'portfolio': ('indmoney__query_portfolio',       {'query': 'portfolio overview'}),
@@ -179,9 +185,12 @@ def _snip_weather(raw: str) -> str:
 def _snip_stock(raw: str) -> str:
     # "NIFTY 50 — ₹24,100.50  +₹150.20 (+0.62%)"
     first = raw.split('\n')[0]
-    m = re.search(r'—\s*(\S+)\s+.*?(\([+-][\d.]+%\))', first)
+    m = re.search(r'\(([+-][\d.]+)%\)', first)
     if m:
-        return f'Nifty {m.group(1)} {m.group(2)}'
+        pct  = float(m.group(1))
+        sign = '+' if pct >= 0 else ''
+        dirn = 'up' if pct >= 0 else 'down'
+        return f'Nifty {dirn} {sign}{pct:.2f}% today'
     return first[:55]
 
 def _snip_news(raw: str) -> str:
@@ -199,16 +208,35 @@ def _snip_github(raw: str) -> str:
     return raw.split('.')[0][:75]
 
 def _snip_calendar(raw: str) -> str:
-    # "Next event: 'Team standup' at 10:00 AM." or "No upcoming events."
-    return raw.split('\n')[0][:75]
+    lines = [l.strip() for l in raw.split('\n') if l.strip()]
+    if not lines:
+        return ''
+    first = lines[0]
+    # "N event(s) for Wednesday, July 16:"
+    m_count = re.match(r'(\d+) events? for .+', first)
+    if m_count:
+        count = int(m_count.group(1))
+        label = f'{count} event{"s" if count != 1 else ""} today'
+        if len(lines) > 1:
+            m_event = re.match(r'\d+\.\s*(.+?)\s*[—-]\s*(.+)', lines[1])
+            if m_event:
+                title = m_event.group(1).strip()
+                time  = m_event.group(2).strip().rstrip('.')
+                more  = f', and {count - 1} more' if count > 1 else ''
+                return f'{label} — {title} at {time}{more}'
+        return label
+    if 'no events' in first.lower():
+        return 'no events today'
+    # fallback: "Next event: 'Title' at time."
+    return first[:75]
 
 def _snip_email(raw: str) -> str:
-    # "12 unread emails — 'Sub1', ..."
-    m = re.match(r'(\d+ (?:unread|important) emails?)', raw)
-    if m:
-        return m.group(1)
     if 'no unread' in raw.lower() or 'inbox is clear' in raw.lower():
         return 'inbox clear'
+    m = re.match(r'(\d+) (unread|important) emails?', raw)
+    if m:
+        count = m.group(1)
+        return f'{count} unread email{"s" if count != "1" else ""}'
     return raw.split('.')[0][:55]
 
 def _snip_system(raw: str) -> str:
@@ -220,9 +248,56 @@ def _snip_system(raw: str) -> str:
     if ram: parts.append(f'RAM {ram.group(1)}%')
     return ' · '.join(parts) if parts else raw.split('\n')[0][:50]
 
+_PNL_CANDIDATES = (
+    'absoluteReturnsPercentage', 'totalReturnsPercent', 'total_returns_percent',
+    'returns_pct', 'total_return_pct', 'returnPct', 'return_percentage',
+    'total_gain_percent', 'gain_percent', 'net_pnl_percent', 'pnl_percent',
+    'overall_return_pct', 'overallReturnPercent', 'overallGainPercent',
+    'absoluteReturn', 'absoluteReturnPercentage', 'xirr',
+)
+
+def _extract_pnl_pct(data: object, depth: int = 0) -> float | None:
+    if depth > 4:
+        return None
+    if isinstance(data, str):
+        try:
+            import json as _j; data = _j.loads(data)
+        except Exception:
+            return None
+    if isinstance(data, list):
+        for item in data:
+            r = _extract_pnl_pct(item, depth + 1)
+            if r is not None:
+                return r
+        return None
+    if not isinstance(data, dict):
+        return None
+    for key in _PNL_CANDIDATES:
+        if key in data:
+            try:
+                return float(data[key])
+            except (ValueError, TypeError):
+                pass
+    for v in data.values():
+        r = _extract_pnl_pct(v, depth + 1)
+        if r is not None:
+            return r
+    return None
+
 def _snip_portfolio(raw: str) -> str:
+    import json as _json
     text = str(raw).strip()
+    data = None
     if text.startswith(('{', '[')):
+        try:
+            data = _json.loads(text)
+        except Exception:
+            pass
+    if data is not None:
+        pct = _extract_pnl_pct(data)
+        if pct is not None:
+            sign = '+' if pct >= 0 else ''
+            return f'portfolio {sign}{pct:.1f}% overall returns'
         return ''
     for line in text.split('\n'):
         line = line.strip()
@@ -266,11 +341,55 @@ _GW_SNIP_FN: dict[str, Callable[[str], str]] = {
 }
 
 
-async def _fetch_boot_snippet(agent_id: str) -> str:
-    """Call the agent's boot tool and return a short live-data snippet, or '' on any failure."""
+async def _fetch_stock_boot_snippet() -> tuple[bool, str]:
+    """Fetch Nifty quote + Google Sheet portfolio in parallel and combine."""
+    import json as _json
+    async def _safe(coro):
+        try:
+            return await asyncio.wait_for(coro, timeout=8.0)
+        except Exception:
+            return None
+
+    nifty_raw, sheet_raw = await asyncio.gather(
+        _safe(gateway_client.call_tool('stocks__get_quote',     {'query': 'Nifty 50'})),
+        _safe(gateway_client.call_tool('stocks__get_portfolio', {})),
+    )
+
+    parts: list[str] = []
+    ok = False
+
+    if nifty_raw and not is_agent_error(str(nifty_raw)):
+        snip = _snip_stock(str(nifty_raw))
+        if snip:
+            parts.append(snip)
+            ok = True
+
+    if isinstance(sheet_raw, list) and sheet_raw:
+        total_invested = sum(h.get('buy', 0) * h.get('qty', 0) for h in sheet_raw)
+        total_current  = sum(h.get('curr', 0) * h.get('qty', 0) for h in sheet_raw)
+        if total_invested > 0:
+            overall_pct = (total_current - total_invested) / total_invested * 100
+            sign = '+' if overall_pct >= 0 else ''
+            dirn = 'up' if overall_pct >= 0 else 'down'
+            parts.append(f'your stocks {dirn} {sign}{overall_pct:.1f}%')
+            ok = True
+
+    return ok, ' · '.join(parts)
+
+
+async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
+    """Call the agent's boot tool; returns (success, snippet).
+
+    success=False means the agent is unconfigured or the call failed — the
+    gateway may be up but this specific integration has no working credentials.
+    snippet may be empty even on success when there is no useful live data.
+    """
+    if agent_id == 'stock':
+        return await _fetch_stock_boot_snippet()
+
     call = _GW_BOOT_CALLS.get(agent_id)
     if not call:
-        return ''
+        return True, ''
     tool_name, args = call
     try:
         raw = await asyncio.wait_for(
@@ -278,16 +397,15 @@ async def _fetch_boot_snippet(agent_id: str) -> str:
             timeout=5.0,
         )
         if not raw:
-            return ''
-        # Serialize dicts/lists as JSON so snippet fns get valid JSON strings
+            return True, ''
         import json as _json
         text = _json.dumps(raw) if isinstance(raw, (dict, list)) else str(raw)
         if is_agent_error(text):
-            return ''
+            return False, ''
         fn = _GW_SNIP_FN.get(agent_id)
-        return fn(text) if fn else text[:55]
+        return True, (fn(text) if fn else text[:55])
     except Exception:
-        return ''
+        return False, ''
 
 
 def _time_of_day() -> str:
@@ -361,8 +479,35 @@ async def test_agent(agent_id: str) -> tuple[str, str, str]:
         return agent_id, 'failed', f"{label} agent failed to start: {str(exc)[:60]}"
 
 
+async def reload_agent(agent_id: str) -> tuple[str, str]:
+    """Reload any agent (gateway or local) and return (status, spoken_message)."""
+    label = AGENT_LABELS.get(agent_id) or _GATEWAY_LABELS.get(agent_id) or agent_id.title()
+
+    if agent_id in _GATEWAY_AGENT_MAP:
+        # Re-push Google token before checking calendar/email so the gateway has it
+        if agent_id in ('calendar', 'email') and _session_google_access_token:
+            await gateway_client.update_google_session(_session_google_access_token, _session_google_refresh_token)
+        ok, snippet = await _fetch_boot_snippet(agent_id)
+        if ok:
+            phrase = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
+            msg    = phrase if not snippet else f"{phrase} — {snippet.rstrip('.')}."
+            return 'online', msg
+        return 'degraded', f"{label} reloaded — configuration still needed."
+
+    boot_query = AGENT_BOOT_QUERY.get(agent_id, '')
+    if boot_query:
+        _, status, msg = await test_agent(agent_id)
+        if status == 'online':
+            return 'online', f"{label} reloaded. {strip_agent_prefix(msg.split('. ', 1)[-1])}"
+        if status == 'degraded':
+            return 'degraded', f"{label} reloaded — configuration still needed."
+        return 'failed', f"{label} failed to reload."
+
+    return 'online', f"{label} is ready."
+
+
 # Built-in skills that are always available regardless of user configuration
-_ALWAYS_ON_SKILLS = ('websearch', 'calculator', 'memory', 'briefing')
+_ALWAYS_ON_SKILLS = ('websearch', 'calculator', 'memory', 'briefing', 'notes')
 
 
 async def boot_sequence(
@@ -385,6 +530,16 @@ async def boot_sequence(
     agent_manager.configure_session(llm_config, agent_config, registered_agents, calling_name, assistant_name)
     router_service.configure_session(llm_config, registered_agents)
     metrics_service.record_session()
+
+    # Store and push Google OAuth token to gateway so it can serve calendar/email
+    global _session_google_access_token, _session_google_refresh_token
+    g = agent_config.get('google', {}) if agent_config else {}
+    _session_google_access_token  = (g.get('access_token')  or '').strip()
+    _session_google_refresh_token = (g.get('refresh_token') or '').strip()
+    if _session_google_access_token:
+        asyncio.create_task(
+            gateway_client.update_google_session(_session_google_access_token, _session_google_refresh_token)
+        )
 
     await send_fn('session_config', {
         'tts_provider':      settings_label(tts),
@@ -411,41 +566,94 @@ async def boot_sequence(
     for agent_id in registered_agents:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'starting'})
 
-    # Check gateway health once
+    # Check gateway health once and discover tools
     gw_ok = False
+    gw_tool_count = 0
+    gw_namespace_count = 0
     try:
         gw_health = await gateway_client.health()
         gw_ok = gw_health.get('status') == 'ok'
+        if gw_ok:
+            gw_tools = await gateway_client.list_tools()
+            gw_tool_count = len(gw_tools)
+            gw_namespace_count = len({t.get('namespace', t['name'].split('__')[0]) for t in gw_tools if isinstance(t, dict)})
     except Exception:
         pass
 
     # ── Gateway-served agents ─────────────────────────────────────────────────
     gw_online = 0
     if gateway_ids:
-        gw_phrase = random.choice(_GW_CONNECT_PHRASES if gw_ok else _GW_FAIL_PHRASES)
+        if gw_ok and gw_tool_count:
+            gw_phrase = (
+                f'MCP gateway connected — {gw_tool_count} tool{"s" if gw_tool_count != 1 else ""} '
+                f'across {gw_namespace_count} service{"s" if gw_namespace_count != 1 else ""} discovered.'
+            )
+        elif gw_ok:
+            gw_phrase = random.choice(_GW_CONNECT_PHRASES)
+        else:
+            gw_phrase = random.choice(_GW_FAIL_PHRASES)
         await speak_fn('boot_status', gw_phrase, None, agent_tts(tts, 'general', agent_voices))
 
-    # Fetch live snippets for all online gateway agents in parallel
+    # Fetch live snippets (and per-agent success) in parallel
     if gw_ok and gateway_ids:
-        snippets = await asyncio.gather(*[_fetch_boot_snippet(a) for a in gateway_ids])
-        snippet_map = dict(zip(gateway_ids, snippets))
+        boot_results = await asyncio.gather(*[_fetch_boot_snippet(a) for a in gateway_ids])
+        success_map  = {a: ok   for a, (ok, _)   in zip(gateway_ids, boot_results)}
+        snippet_map  = {a: snip for a, (_, snip) in zip(gateway_ids, boot_results)}
     else:
+        success_map = {}
         snippet_map = {}
 
+    _GOOGLE_GROUP = {'calendar', 'email'}
+    google_announced = False
+
     for agent_id in gateway_ids:
-        status = 'online' if gw_ok else 'degraded'
-        if gw_ok:
-            gw_online += 1
-            label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
-            base  = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
-            snip  = snippet_map.get(agent_id, '')
-            msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
-            await speak_fn(
-                'boot_status', msg,
-                {'agent_id': agent_id, 'agent_status': status},
-                agent_tts(tts, agent_id, agent_voices),
-            )
-        await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
+        # Gateway being up doesn't mean this specific integration is configured —
+        # use the per-agent success flag from the boot call.
+        agent_ok = gw_ok and success_map.get(agent_id, False)
+        status   = 'online' if agent_ok else 'degraded'
+
+        if agent_id in _GOOGLE_GROUP:
+            # Announce both Google sub-services together on the first one encountered
+            if not google_announced:
+                google_announced = True
+                cal_ok   = gw_ok and success_map.get('calendar', False)
+                email_ok = gw_ok and success_map.get('email', False)
+                if cal_ok or email_ok:
+                    cal_snip   = snippet_map.get('calendar', '') if cal_ok else ''
+                    email_snip = snippet_map.get('email', '') if email_ok else ''
+                    if cal_snip and email_snip:
+                        msg = f'Google connected — {cal_snip}, and {email_snip}.'
+                    elif cal_snip:
+                        msg = f'Google connected — {cal_snip}.'
+                    elif email_snip:
+                        msg = f'Google connected — {email_snip}.'
+                    else:
+                        msg = 'Google integration online.'
+                    google_status = 'online'
+                else:
+                    msg = 'Google not configured — credentials needed.'
+                    google_status = 'degraded'
+                await speak_fn(
+                    'boot_status', msg,
+                    {'agent_id': 'google', 'agent_status': google_status},
+                    agent_tts(tts, 'calendar', agent_voices),
+                )
+            if agent_ok:
+                gw_online += 1
+            await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
+        else:
+            if agent_ok:
+                gw_online += 1
+                label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
+                base  = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
+                snip  = snippet_map.get(agent_id, '')
+                msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
+                await speak_fn(
+                    'boot_status', msg,
+                    {'agent_id': agent_id, 'agent_status': status},
+                    agent_tts(tts, agent_id, agent_voices),
+                )
+            await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})
 
     # ── Local built-in agents (websearch, calculator, memory, briefing, general) ─
     results: list[tuple[str, str, str]] = await asyncio.gather(
@@ -472,7 +680,7 @@ async def boot_sequence(
     total_configured = len(gateway_ids) + len(local_ids)
     await speak_fn(
         'boot_status',
-        f'{total_online} of {total_configured} service{"s" if total_configured != 1 else ""} online and ready for your command.',
+        f'{total_online} of {total_configured} agent{"s" if total_configured != 1 else ""} online and ready for your command.',
         None,
         agent_tts(tts, 'general', agent_voices),
     )

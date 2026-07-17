@@ -46,6 +46,25 @@ export function GoogleSettings({ config, onPatch, onConnect, onDisconnect }: Pro
                 />
               </div>
             )}
+            {config.scopes.includes('drive') ? (
+              <div className="flex items-center justify-between rounded-xl border border-white/8 bg-white/3 px-3 py-2">
+                <div>
+                  <div className="text-xs text-slate-300 font-medium">📂 Google Drive</div>
+                  <div className="text-[10px] text-slate-500">Portfolio sheet browser, file access</div>
+                </div>
+                <AgentToggle
+                  enabled={config.driveEnabled}
+                  onToggle={() => onPatch({ driveEnabled: !config.driveEnabled })}
+                />
+              </div>
+            ) : (
+              <div className="rounded-xl border border-amber-400/25 bg-amber-400/6 px-3 py-2">
+                <div className="text-xs text-amber-300 font-medium mb-0.5">📂 Google Drive — not granted</div>
+                <div className="text-[10px] text-slate-500 leading-relaxed">
+                  Required for portfolio sheet browsing. Click <span className="text-[#7EB3FF]">Re-sign in</span> to add Drive access.
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -121,10 +140,13 @@ export function GoogleSettings({ config, onPatch, onConnect, onDisconnect }: Pro
                   : 'border-white/10 bg-white/4 text-slate-500 hover:text-white'
               }`}
             >
-              {s}
+              {s === 'drive' ? '📂 Drive' : s === 'gmail' ? '📧 Gmail' : '📅 Calendar'}
             </button>
           ))}
         </div>
+        <p className="mt-1.5 text-[10px] text-slate-600 leading-relaxed">
+          Drive is needed for portfolio sheet browsing in the Stocks agent.
+        </p>
       </div>
 
       <button

@@ -79,7 +79,9 @@ def start(gateway_port: int) -> dict:
 
     with _lock:
         if _check_running():
-            return {'ok': True, 'mode': _detect_mode(), 'url': _build_webhook_url(), 'already_running': True}
+            from src.config.settings import settings as _s
+            return {'ok': True, 'mode': _detect_mode(), 'url': _build_webhook_url(),
+                    'env_domain': (_s.whatsapp_webhook_domain or '').strip(), 'already_running': True}
 
         mode = _detect_mode()
         try:
@@ -122,7 +124,9 @@ def start(gateway_port: int) -> dict:
 
         # Give cloudflared a moment to start
         time.sleep(0.5)
-        return {'ok': True, 'mode': mode, 'url': _build_webhook_url()}
+        from src.config.settings import settings as _s
+        return {'ok': True, 'mode': mode, 'url': _build_webhook_url(),
+                'env_domain': (_s.whatsapp_webhook_domain or '').strip()}
 
 
 def stop() -> dict:
@@ -150,8 +154,9 @@ def stop() -> dict:
 
 def status(gateway_port: int) -> dict:
     from src.config.settings import settings
-    mode   = _detect_mode()
-    domain = _quick_tunnel_url or (settings.whatsapp_webhook_domain or '').strip()
+    mode       = _detect_mode()
+    env_domain = (settings.whatsapp_webhook_domain or '').strip()
+    domain     = _quick_tunnel_url or env_domain
     return {
         'running':    is_running(),
         'mode':       mode,
@@ -159,6 +164,7 @@ def status(gateway_port: int) -> dict:
         'quickUrl':   _quick_tunnel_url,
         'webhookUrl': _build_webhook_url(),
         'configFile': str(_CFG_FILE) if _CFG_FILE.exists() else None,
+        'env_domain': env_domain,
     }
 
 

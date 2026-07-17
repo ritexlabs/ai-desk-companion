@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, RotateCw, LayoutDashboard, Bell, BellOff, Loader2, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { WeatherPanel } from './WeatherWidget';
 import type { AgentDefinition } from '../types/runtime';
 import type { AgentConfig } from '../hooks/useAgentConfig';
 import { AgentBackground } from './AgentBackground';
@@ -504,6 +505,18 @@ export function AgentDetailModal({
             <div>
               <SectionLabel label="Top Headlines" borderClass={c.border} />
               <NewsPanel apiKey={agentConfig.news.apiKey} country={agentConfig.news.country} c={c} />
+            </div>
+          )}
+
+          {agent.id === 'weather' && (
+            <div>
+              <SectionLabel label="Current Conditions & Forecast" borderClass={c.border} />
+              <WeatherPanel
+                city={agentConfig.weather.defaultCity || 'Bengaluru'}
+                textClass={c.text}
+                borderClass={c.border}
+                bgClass={c.bg}
+              />
             </div>
           )}
         </div>

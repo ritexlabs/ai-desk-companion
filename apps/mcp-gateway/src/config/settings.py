@@ -81,6 +81,13 @@ class GatewaySettings(BaseSettings):
     # Optional: tool name to expose (leave blank = auto-discover all tools)
     indmoney_display_tool:  str = ''
 
+    # ── My Stocks (Google Sheet portfolio) ───────────────────────────────────
+    # Google Sheet ID from the URL: docs.google.com/spreadsheets/d/<ID>/edit
+    mystocks_spreadsheet_id: str = ''
+    # Sheet range to read — default reads all columns. Change to e.g. 'Sheet1!A:H'
+    # if your portfolio is not on the first sheet.
+    mystocks_range:           str = 'A:Z'
+
     # ── System metrics ────────────────────────────────────────────────────────
     # Comma-separated list of metric names to skip when collecting system info.
     # Metrics that may require elevated permissions or optional CLI tools are
@@ -106,6 +113,9 @@ class GatewaySettings(BaseSettings):
 
     def is_portfolio_configured(self) -> bool:
         return bool(self.indmoney_oauth_token)
+
+    def is_mystocks_configured(self) -> bool:
+        return bool(self.mystocks_spreadsheet_id and self.google_access_token)
 
     def auth_enabled(self) -> bool:
         return bool(self.gateway_api_token)

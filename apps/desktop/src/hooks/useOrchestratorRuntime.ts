@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentDefinition, RuntimePhase, TranscriptTurn } from '../types/runtime';
 import { nowIso, partOfDayFromHour } from '../lib/utils';
+
+/** Minimal shape for WebSocket-pushed alert events */
+interface WsAlert { id: string; title: string; body: string; }
 import { useVoice } from './useVoice';
 import { useAudioPlayer } from './useAudioPlayer';
 import type { VoiceConfig } from './useVoiceConfig';
@@ -33,6 +36,7 @@ const AGENT_CATALOGUE: AgentDefinition[] = [
   { id: 'calculator', label: 'Calculator',  description: 'Precise math, percentages, tip and unit calc.', example: 'What is 18% tip on 850?',               status: 'offline', color: 'from-amber-400 to-orange-600' },
   { id: 'memory',     label: 'Memory',      description: 'Save and recall personal notes any time.',       example: 'Remember wife birthday is March 5.',    status: 'offline', color: 'from-purple-400 to-violet-600' },
   { id: 'briefing',   label: 'Briefing',    description: 'Morning summary across all connected agents.',   example: 'Give me my morning briefing.',           status: 'offline', color: 'from-cyan-400 to-teal-600'    },
+  { id: 'notes',      label: 'Notes & Reminders', description: 'Personal notes, tasks, reminders, and alarms.', example: 'Remind me to take medicines at 8pm.',  status: 'offline', color: 'from-violet-400 to-purple-600' },
 ];
 
 function agentsFromIds(ids: string[]): AgentDefinition[] {
@@ -124,6 +128,7 @@ export function useOrchestratorRuntime(
   const [orchestratorMetrics, setOrchestratorMetrics] = useState<OrchestratorMetrics | null>(null);
   const [agentBootMessages, setAgentBootMessages] = useState<Record<string, string>>({});
   const [isAutoListening, setIsAutoListening]     = useState(false);
+  const [pendingAlerts, setPendingAlerts]         = useState<WsAlert[]>([]);
 
   /* ── Always-current refs ────────────────────────────────────────── */
   const wsRef              = useRef<WebSocket | null>(null);
@@ -175,7 +180,14 @@ export function useOrchestratorRuntime(
   }, []);
 
   const updateAgent = useCallback((id: string, status: AgentDefinition['status']) => {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    setAgents((prev) => {
+      if (prev.some((a) => a.id === id)) {
+        return prev.map((a) => (a.id === id ? { ...a, status } : a));
+      }
+      // Agent came from the server (e.g. always-on skill) but wasn't in the initial list — add from catalogue
+      const entry = AGENT_CATALOGUE.find((a) => a.id === id);
+      return entry ? [...prev, { ...entry, status }] : prev;
+    });
   }, []);
 
   /* ── drainTTSQueue ──────────────────────────────────────────────── */
@@ -320,6 +332,18 @@ export function useOrchestratorRuntime(
       case 'metrics_update':
         setOrchestratorMetrics(payload as unknown as OrchestratorMetrics);
         break;
+
+      case 'alert': {
+        const wsAlert: WsAlert = {
+          id:    String(payload.id ?? `alert-${Date.now()}`),
+          title: String(payload.title ?? 'Reminder'),
+          body:  String(payload.body ?? ''),
+        };
+        setPendingAlerts((prev) =>
+          prev.some((a) => a.id === wsAlert.id) ? prev : [...prev, wsAlert],
+        );
+        break;
+      }
 
       case 'error':
         appendTurn('system', `Orchestrator error: ${payload.message}`);
@@ -887,6 +911,27 @@ export function useOrchestratorRuntime(
     if (canSpeak) enqueueTTS({ text, agentId });
   }, [appendTurn, enqueueTTS]);
 
+  /* ── scheduleAlert — frontend-initiated, backend fires after delay ── */
+  const scheduleAlert = useCallback((
+    title: string,
+    body: string,
+    delaySeconds: number,
+    id?: string,
+  ) => {
+    const alertId = id ?? `alert-${Date.now()}`;
+    wsSend('schedule_alert', {
+      id:             alertId,
+      title,
+      body,
+      delay_seconds:  Math.max(1, Math.min(delaySeconds, 86400)),
+    });
+  }, [wsSend]);
+
+  /* ── clearPendingAlert — removes from local queue after handled ── */
+  const clearPendingAlert = useCallback((id: string) => {
+    setPendingAlerts((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
   return {
     phase,
     heard,
@@ -918,5 +963,8 @@ export function useOrchestratorRuntime(
     isAutoListening,
     pushNotification,
     speak,
+    pendingAlerts,
+    clearPendingAlert,
+    scheduleAlert,
   };
 }

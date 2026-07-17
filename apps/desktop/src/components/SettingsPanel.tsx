@@ -16,6 +16,7 @@ import { AgentsSettings } from './settings/AgentsSettings';
 interface Props {
   open: boolean;
   onClose: () => void;
+  onOpenAgents: () => void;
   appConfig: AppConfig;
   onAppUpdate: (p: Partial<AppConfig>) => void;
   voiceConfig: VoiceConfig;
@@ -103,7 +104,13 @@ export function SettingsPanel(props: Props) {
               {TABS.map((t) => (
                 <button
                   key={t.id}
-                  onClick={() => setTab(t.id)}
+                  onClick={() => {
+                    if (t.id === 'agents') {
+                      props.onOpenAgents();
+                    } else {
+                      setTab(t.id);
+                    }
+                  }}
                   className={`flex-1 flex items-center justify-center gap-1.5 h-8 rounded-xl text-xs font-medium transition-all ${
                     tab === t.id
                       ? 'bg-white/10 text-white'
@@ -151,31 +158,6 @@ export function SettingsPanel(props: Props) {
                       onUpdate={props.onVoiceProviderUpdate}
                       onTest={props.onTestTTS}
                       onDisconnect={props.onDisconnectProviders}
-                    />
-                  )}
-                  {tab === 'agents' && (
-                    <AgentsSettings
-                      config={props.agentConfig}
-                      onPatch={props.onAgentPatch}
-                      onVerifyWeather={props.onVerifyWeather}
-                      onConnectGoogle={props.onConnectGoogle}
-                      onDisconnectGoogle={props.onDisconnectGoogle}
-                      onVerifyGitHub={props.onVerifyGitHub}
-                      onDisconnectGitHub={props.onDisconnectGitHub}
-                      onVerifyNews={props.onVerifyNews}
-                      onVerifySmartHome={props.onVerifySmartHome}
-                      onConnectPortfolio={props.onConnectPortfolio}
-                      onDisconnectPortfolio={props.onDisconnectPortfolio}
-                      onRefreshPortfolio={props.onRefreshPortfolio}
-                      onVerifyWhatsApp={props.onVerifyWhatsApp}
-                      onCheckTunnel={props.onCheckTunnel}
-                      onStartTunnel={props.onStartTunnel}
-                      onStopTunnel={props.onStopTunnel}
-                      agentVoices={props.agentVoices}
-                      onAgentVoiceUpdate={props.onAgentVoiceUpdate}
-                      onAgentVoiceReset={props.onAgentVoiceReset}
-                      voices={props.voices}
-                      onTestAgentVoice={(text, agentId) => props.onTestVoice(text, agentId)}
                     />
                   )}
                 </motion.div>

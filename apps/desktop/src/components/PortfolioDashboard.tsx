@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, Briefcase, ExternalLink, Eye, EyeOff,
-  Loader2, RefreshCw, TrendingDown, TrendingUp, X,
+  Loader2, Mic, RefreshCw, TrendingDown, TrendingUp, X,
 } from 'lucide-react';
 
 const GATEWAY = (import.meta.env.VITE_GATEWAY_URL as string | undefined) ?? 'http://localhost:8788';
@@ -354,14 +354,25 @@ export function PortfolioDashboard({ onClose, onVoice }: PortfolioDashboardProps
                   {hidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                 </button>
               )}
-              <button
+              <motion.button
+                whileHover={{ rotate: 180 }}
+                transition={{ duration: 0.4 }}
                 onClick={fetchData}
                 disabled={loading}
                 title="Refresh"
                 className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-400 hover:text-slate-200 transition disabled:opacity-40"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-              </button>
+              </motion.button>
+              {onVoice && (
+                <button
+                  onClick={() => { onVoice('Tell me about my portfolio'); onClose(); }}
+                  title="Ask about portfolio"
+                  className="h-7 px-2.5 rounded-xl border border-teal-400/25 bg-teal-400/8 text-[11px] font-medium flex items-center gap-1.5 text-teal-300 hover:bg-teal-400/15 transition"
+                >
+                  <Mic className="h-3 w-3" /> Voice
+                </button>
+              )}
               <button
                 onClick={onClose}
                 className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-500 hover:text-slate-200 transition"

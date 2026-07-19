@@ -674,12 +674,16 @@ export function useOrchestratorRuntime(
             city:    ac.news.city,
           },
           smarthome: {
+            mode:     ac.smarthome.mode,
             endpoint: ac.smarthome.endpoint,
             token:    ac.smarthome.token,
           },
           portfolio: {
-            endpoint:     ac.portfolio.endpoint,
-            access_token: ac.portfolio.accessToken,
+            client_id:     ac.portfolio.clientId,
+            client_secret: ac.portfolio.clientSecret,
+            access_token:  ac.portfolio.accessToken,
+            refresh_token: ac.portfolio.refreshToken,
+            expires_at:    ac.portfolio.tokenExpiresAt,
           },
           whatsapp: {
             phone_number_id:      ac.whatsapp.phoneNumberId,

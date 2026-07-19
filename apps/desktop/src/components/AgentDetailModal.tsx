@@ -400,28 +400,49 @@ export function AgentDetailModal({
           <div className="absolute inset-x-0 bottom-0 h-20"
             style={{ background: 'linear-gradient(to top, #07091a 30%, transparent)' }} />
 
-          {/* Hero content — agent name + status overlay */}
-          <div className="absolute inset-x-0 bottom-0 px-5 pb-3 flex items-end justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-0.5">
-                <motion.div
-                  animate={{ opacity: [0.4, 1, 0.4] }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  className={`h-2 w-2 rounded-full flex-shrink-0 ${c.dot}`}
-                />
-                <span className={`text-[10px] font-medium uppercase tracking-wider ${st.color}`}>{st.label}</span>
-              </div>
-              <h2 className={`text-lg font-bold tracking-tight leading-none ${c.text}`}>{agent.label}</h2>
-              <p className="text-[10px] text-slate-500 mt-0.5 max-w-[340px] leading-relaxed">{agent.description}</p>
-            </div>
-
-            {/* Close button */}
+          {/* Top-right button cluster */}
+          <div className="absolute top-3.5 right-3.5 z-10 flex items-center gap-1.5">
+            {onReload && (
+              <motion.button
+                whileHover={{ rotate: 180 }}
+                transition={{ duration: 0.4 }}
+                onClick={onReload}
+                title="Reload agent"
+                className="w-7 h-7 rounded-xl border border-white/10 bg-black/50 backdrop-blur-sm flex items-center justify-center text-slate-400 hover:text-slate-200 transition"
+              >
+                <RotateCw className="h-3.5 w-3.5" />
+              </motion.button>
+            )}
+            {onOpenDashboard && (
+              <button
+                onClick={() => { onOpenDashboard(); onClose(); }}
+                title="Open dashboard"
+                className="w-7 h-7 rounded-xl border border-white/10 bg-black/50 backdrop-blur-sm flex items-center justify-center text-slate-400 hover:text-slate-200 transition"
+              >
+                <LayoutDashboard className="h-3.5 w-3.5" />
+              </button>
+            )}
             <button
               onClick={onClose}
-              className="mb-0.5 rounded-xl p-2 text-slate-500 transition-all hover:bg-white/8 hover:text-slate-200"
+              title="Close"
+              className="w-7 h-7 rounded-xl border border-white/10 bg-black/50 backdrop-blur-sm flex items-center justify-center text-slate-400 hover:text-slate-200 transition"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
+          </div>
+
+          {/* Hero content — agent name + status overlay */}
+          <div className="absolute inset-x-0 bottom-0 px-5 pb-3">
+            <div className="flex items-center gap-2 mb-0.5">
+              <motion.div
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ duration: 2, repeat: Infinity }}
+                className={`h-2 w-2 rounded-full flex-shrink-0 ${c.dot}`}
+              />
+              <span className={`text-[10px] font-medium uppercase tracking-wider ${st.color}`}>{st.label}</span>
+            </div>
+            <h2 className={`text-lg font-bold tracking-tight leading-none ${c.text}`}>{agent.label}</h2>
+            <p className="text-[10px] text-slate-500 mt-0.5 max-w-[340px] leading-relaxed">{agent.description}</p>
           </div>
         </div>
 
@@ -521,9 +542,9 @@ export function AgentDetailModal({
           )}
         </div>
 
-        {/* ── Footer ── */}
-        <div className={`flex items-center justify-between gap-2 px-5 py-3 border-t ${c.border} flex-shrink-0 bg-black/20 backdrop-blur-sm`}>
-          {onToggleNotifications != null && (
+        {/* ── Footer — only shown when Alerts toggle is available ── */}
+        {onToggleNotifications != null && (
+          <div className={`flex items-center px-5 py-3 border-t ${c.border} flex-shrink-0 bg-black/20 backdrop-blur-sm`}>
             <button
               onClick={() => onToggleNotifications(!notificationsEnabled)}
               title={notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
@@ -536,35 +557,8 @@ export function AgentDetailModal({
               {notificationsEnabled ? <Bell className="h-3 w-3" /> : <BellOff className="h-3 w-3" />}
               Alerts {notificationsEnabled ? 'On' : 'Off'}
             </button>
-          )}
-
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              onClick={onClose}
-              className="rounded-xl px-3 py-1.5 text-[11px] text-slate-500 transition hover:text-slate-300 hover:bg-white/6 cursor-pointer"
-            >
-              Close
-            </button>
-            {onReload && (
-              <button
-                onClick={() => { onReload(); onClose(); }}
-                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125 cursor-pointer`}
-              >
-                <RotateCw className="h-3 w-3" />
-                Reload
-              </button>
-            )}
-            {onOpenDashboard && (
-              <button
-                onClick={() => { onOpenDashboard(); onClose(); }}
-                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125 cursor-pointer`}
-              >
-                <LayoutDashboard className="h-3 w-3" />
-                Dashboard
-              </button>
-            )}
           </div>
-        </div>
+        )}
         </motion.div>
       </div>
     </>

@@ -100,6 +100,7 @@ def magenta(t: str) -> str: return _c('95', t)
 ORCH_TAG = cyan(  '[ORCH]') + ' '
 GW_TAG   = yellow('[GW  ]') + ' '
 UI_TAG   = magenta('[ UI ]') + ' '
+HA_TAG   = green( '[ HA ]') + ' '
 
 def log(msg: str)  -> None: print(f'  {msg}',               flush=True)
 def ok(msg: str)   -> None: print(f'  {green("✓")} {msg}',  flush=True)
@@ -114,7 +115,13 @@ ROOT         = Path(__file__).parent.resolve()
 ORCHESTRATOR = ROOT / 'apps' / 'orchestrator'
 MCP_GATEWAY  = ROOT / 'apps' / 'mcp-gateway'
 DESKTOP      = ROOT / 'apps' / 'desktop'
+SMARTHOME    = ROOT / 'apps' / 'smarthome'
 PID_FILE     = ROOT / '.pids'
+
+DESKTOP_PORT = 5173
+BACKEND_PORT = 8787
+GATEWAY_PORT = 8788
+HA_PORT      = 8123
 
 VENV         = ORCHESTRATOR / '.venv'
 BIN          = VENV / ('Scripts' if IS_WIN else 'bin')
@@ -124,9 +131,6 @@ GW_VENV      = MCP_GATEWAY / '.venv'
 GW_BIN       = GW_VENV / ('Scripts' if IS_WIN else 'bin')
 GW_PY        = GW_BIN / ('python.exe' if IS_WIN else 'python')
 
-DESKTOP_PORT = 5173
-BACKEND_PORT = 8787
-GATEWAY_PORT = 8788
 DESKTOP_URL  = f'http://localhost:{DESKTOP_PORT}'
 
 # ── PID file ──────────────────────────────────────────────────────────────────
@@ -407,6 +411,54 @@ def _start_desktop(npm_exe: str) -> subprocess.Popen:
     step('Starting desktop UI  ' + dim(f'→  {DESKTOP_URL}'))
     return _launch([npm_exe, 'run', 'dev'], cwd=DESKTOP, tag=UI_TAG)
 
+# ── Smart Home Docker helpers ─────────────────────────────────────────────────
+
+def _smarthome_enabled() -> bool:
+    return (SMARTHOME / 'docker-compose.yml').exists()
+
+def _smarthome_mode() -> str:
+    """Returns 'local' or 'remote'. Defaults to 'local' when mode file is absent."""
+    try:
+        return (SMARTHOME / '.mode').read_text().strip()
+    except OSError:
+        return 'local'
+
+def _docker_compose_available() -> bool:
+    try:
+        r = subprocess.run(['docker', 'compose', 'version'],
+                           capture_output=True, timeout=5)
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+def _smarthome_running() -> bool:
+    try:
+        r = subprocess.run(
+            ['docker', 'compose', 'ps', '--status', 'running', '-q'],
+            cwd=str(SMARTHOME), capture_output=True, text=True, timeout=5,
+        )
+        return bool(r.stdout.strip())
+    except Exception:
+        return False
+
+def _start_smarthome() -> None:
+    step(f'Smart Home  {dim("│")}  Local Docker  {dim("→")}  {cyan(f"http://localhost:{HA_PORT}")}')
+    r = subprocess.run(
+        ['docker', 'compose', 'up', '-d', '--remove-orphans'],
+        cwd=str(SMARTHOME), capture_output=True, text=True,
+    )
+    if r.returncode == 0:
+        ok(f'Home Assistant  {dim("[local docker]")}  {cyan(f"http://localhost:{HA_PORT}")}  {dim("(30–60 s on first boot)")}')
+    else:
+        warn(f'Home Assistant failed to start: {(r.stderr or r.stdout).strip()[:120]}')
+
+def _stop_smarthome() -> None:
+    subprocess.run(
+        ['docker', 'compose', 'down'],
+        cwd=str(SMARTHOME), capture_output=True,
+    )
+
+
 # ── Shutdown helpers ──────────────────────────────────────────────────────────
 def _kill_all_children() -> None:
     global _shutdown_done
@@ -435,6 +487,9 @@ atexit.register(_kill_all_children)
 def _on_signal(signum=None, frame=None) -> None:
     print(f'\n\n  {yellow("⏹")}  {bold("Shutting down…")}', flush=True)
     _kill_all_children()
+    if _smarthome_enabled() and _docker_compose_available():
+        _stop_smarthome()
+        ok('Stopped Home Assistant')
     PID_FILE.unlink(missing_ok=True)
     print(f'  {green("✓")}  All services stopped.\n', flush=True)
     sys.exit(0)
@@ -549,6 +604,16 @@ def cmd_start() -> None:
     signal.signal(signal.SIGINT,  _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
 
+    # Start Home Assistant Docker before the gateway (SmartHome pre-warm needs it up)
+    ha_mode    = _smarthome_mode()
+    ha_active  = _smarthome_enabled() and ha_mode != 'remote' and _docker_compose_available()
+    if ha_active:
+        _start_smarthome()
+    elif _smarthome_enabled() and ha_mode == 'remote':
+        ok(f'Home Assistant  {dim("[self-hosted]")}  configure endpoint in Settings → Smart Home')
+    elif _smarthome_enabled():
+        warn('Home Assistant  [local docker]  Docker not found — start Docker Desktop and retry.')
+
     # Launch gateway first — orchestrator health-checks it on boot
     gw_proc = _start_gateway()
     if _wait_for_port(GATEWAY_PORT, timeout=20):
@@ -582,6 +647,8 @@ def cmd_start() -> None:
     print(f'  {bold("Orchestrator")}   {cyan(f"http://localhost:{BACKEND_PORT}")}')
     print(f'  {bold("MCP Gateway")}    {cyan(f"http://localhost:{GATEWAY_PORT}")}')
     print(f'  {bold("WebSocket")}      {cyan(f"ws://localhost:{BACKEND_PORT}/ws")}')
+    if ha_active:
+        print(f'  {bold("Home Assistant")} {cyan(f"http://localhost:{HA_PORT}")}  {dim("(local-only, no internet)")}')
     print(f'\n  {dim("Press Ctrl+C  or run  python3 launch.py stop  to stop all services.")}\n')
     hr()
     print()
@@ -644,6 +711,14 @@ def cmd_stop() -> None:
         else:
             log(f'{dim("–  " + label + " was not running")}')
 
+    if _smarthome_enabled() and _docker_compose_available():
+        if _smarthome_running():
+            _stop_smarthome()
+            ok('Stopped Home Assistant')
+            stopped_any = True
+        else:
+            log(dim('–  Home Assistant was not running'))
+
     PID_FILE.unlink(missing_ok=True)
 
     if stopped_any:
@@ -681,6 +756,14 @@ def cmd_status() -> None:
             all_up = False
             pid_note = f'  {dim(f"PID {pid} (not responding)")}' if pid and proc_up else ''
             print(f'  {red("○")}  {bold(label):<20} {dim("not running")}{pid_note}')
+
+    if _smarthome_enabled() and _docker_compose_available():
+        ha_url = f'http://localhost:{HA_PORT}'
+        if _smarthome_running():
+            print(f'  {green("●")}  {bold("Home Assistant"):<20} {cyan(ha_url)}  {dim("(local-only)")}')
+        else:
+            all_up = False
+            print(f'  {red("○")}  {bold("Home Assistant"):<20} {dim("not running")}')
 
     print()
     if all_up:

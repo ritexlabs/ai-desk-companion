@@ -250,6 +250,113 @@ async def update_google_session(body: GoogleSessionRequest) -> dict:
     return {'ok': True, 'configured': configured}
 
 
+class SmartHomeSessionRequest(BaseModel):
+    endpoint: str = ''
+    token:    str = ''
+
+
+@app.put('/session/smarthome')
+async def update_smarthome_session(body: SmartHomeSessionRequest) -> dict:
+    """Accept per-session SmartHome credentials from the orchestrator."""
+    settings.myhome_mcp_endpoint = body.endpoint.strip().rstrip('/')
+    settings.myhome_mcp_token    = body.token.strip()
+    configured = bool(settings.myhome_mcp_endpoint and settings.myhome_mcp_token)
+    return {'ok': True, 'configured': configured}
+
+
+class WeatherSessionRequest(BaseModel):
+    api_key:      str = ''
+    default_city: str = ''
+    provider:     str = ''
+
+
+@app.put('/session/weather')
+async def update_weather_session(body: WeatherSessionRequest) -> dict:
+    """Accept per-session Weather credentials from the orchestrator."""
+    if body.api_key:
+        settings.weather_api_key = body.api_key.strip()
+    if body.default_city:
+        settings.weather_default_city = body.default_city.strip()
+    if body.provider:
+        settings.weather_provider = body.provider.strip()
+    return {'ok': True}
+
+
+class GitHubSessionRequest(BaseModel):
+    token: str = ''
+
+
+@app.put('/session/github')
+async def update_github_session(body: GitHubSessionRequest) -> dict:
+    """Accept per-session GitHub token from the orchestrator."""
+    if body.token:
+        settings.github_token = body.token.strip()
+    return {'ok': True, 'configured': bool(settings.github_token)}
+
+
+class NewsSessionRequest(BaseModel):
+    api_key:        str = ''
+    default_country: str = ''
+
+
+@app.put('/session/news')
+async def update_news_session(body: NewsSessionRequest) -> dict:
+    """Accept per-session News credentials from the orchestrator."""
+    if body.api_key:
+        settings.news_api_key = body.api_key.strip()
+    if body.default_country:
+        settings.news_default_country = body.default_country.strip()
+    return {'ok': True}
+
+
+class WhatsAppSessionRequest(BaseModel):
+    phone_number_id:      str = ''
+    access_token:         str = ''
+    webhook_verify_token: str = ''
+    contacts:             str = ''
+
+
+@app.put('/session/whatsapp')
+async def update_whatsapp_session(body: WhatsAppSessionRequest) -> dict:
+    """Accept per-session WhatsApp credentials from the orchestrator."""
+    if body.phone_number_id:
+        settings.whatsapp_phone_number_id = body.phone_number_id.strip()
+    if body.access_token:
+        settings.whatsapp_access_token = body.access_token.strip()
+    if body.webhook_verify_token:
+        settings.whatsapp_webhook_verify_token = body.webhook_verify_token.strip()
+    if body.contacts:
+        settings.whatsapp_contacts = body.contacts.strip()
+    configured = bool(settings.whatsapp_phone_number_id and settings.whatsapp_access_token)
+    return {'ok': True, 'configured': configured}
+
+
+class PortfolioSessionRequest(BaseModel):
+    client_id:     str = ''
+    client_secret: str = ''
+    access_token:  str = ''
+    refresh_token: str = ''
+    expires_at:    int = 0
+
+
+@app.put('/session/portfolio')
+async def update_portfolio_session(body: PortfolioSessionRequest) -> dict:
+    """Accept per-session INDmoney OAuth credentials from the orchestrator."""
+    import json as _json
+    if body.client_id:
+        settings.indmoney_client_id = body.client_id.strip()
+    if body.client_secret:
+        settings.indmoney_client_secret = body.client_secret.strip()
+    if body.access_token or body.refresh_token:
+        settings.indmoney_oauth_token = _json.dumps({
+            'access_token':  body.access_token,
+            'refresh_token': body.refresh_token,
+            'expires_at':    body.expires_at,
+        })
+    configured = bool(settings.indmoney_oauth_token)
+    return {'ok': True, 'configured': configured}
+
+
 # ── WhatsApp webhook ──────────────────────────────────────────────────────────
 
 @app.get('/webhook/whatsapp')

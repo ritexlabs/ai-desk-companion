@@ -197,15 +197,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     rate_limiter = _RateLimiter(_RATE_LIMIT_CALLS, _RATE_LIMIT_WINDOW)
 
-    await _send(ws, 'connected', {
-        'phase':             'standby',
-        'version':           '0.1.0',
-        'tts_provider':      settings_label(_default_tts),
-        'stt_provider':      settings_label(_default_stt),
-        'wake_word_enabled': settings.wake_word_enabled and wake_word_service.available,
-        'wake_word_model':   settings.wake_word_model,
-    })
-
     session_tts: TTSProvider    = _default_tts
     session_stt: STTProvider    = _default_stt
     session_llm_config: dict    = {}
@@ -221,6 +212,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await _speak_event(ws, event, text, extra, tts)
 
     try:
+        # Send 'connected' inside the try so a client that drops immediately
+        # after accept() is handled as a normal WebSocketDisconnect, not an
+        # unhandled exception that fills the log.
+        await _send(ws, 'connected', {
+            'phase':             'standby',
+            'version':           '0.1.0',
+            'tts_provider':      settings_label(_default_tts),
+            'stt_provider':      settings_label(_default_stt),
+            'wake_word_enabled': settings.wake_word_enabled and wake_word_service.available,
+            'wake_word_model':   settings.wake_word_model,
+        })
+
         while True:
             data: dict    = await ws.receive_json()
             command: str  = data.get('command', '')

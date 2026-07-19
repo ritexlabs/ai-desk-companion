@@ -1,0 +1,39 @@
+# Home Assistant — local Docker setup for AI Desk Companion
+#
+# SECURITY NOTES
+#   - All data stays on this machine: ha-config/ is a local bind mount (git-ignored)
+#   - Port 8123 is bound to localhost only (127.0.0.1) — not reachable from the internet
+#     or other devices on your LAN by default.
+#   - To reach HA from your phone/tablet on the same Wi-Fi, change the ports line to:
+#       ports: ["8123:8123"]
+#     Your router's NAT still blocks inbound connections from the internet.
+#   - Do NOT enable Nabu Casa or external access in HA Settings → System → Network.
+#   - The HA long-lived access token lives in apps/mcp-gateway/.env (git-ignored).
+#
+# FIRST RUN
+#   1. Run: python3 launch.py start  (starts HA automatically)
+#   2. Open http://localhost:8123 and complete the onboarding wizard.
+#   3. Go to Profile → Security → Long-lived access tokens → Create token.
+#   4. In the AI Desk Companion: open Settings → Smart Home → Local Docker
+#      and paste the token.  No .env edits needed.
+#   5. Your configuration persists in ha-config/ across all future restarts.
+#
+# MIGRATING FROM RASPBERRY PI
+#   1. Run python3 launch.py start, open http://localhost:8123 and complete onboarding.
+#   2. Go to Settings → System → Backups → Upload Backup — choose your Pi .tar backup.
+#   3. Restore from within the HA UI. HA will restart automatically.
+#   4. Create a new long-lived token (Profile → Security → Tokens) — the Pi token won't carry over.
+#   5. In Settings → Smart Home → Local Docker, paste the new token.  No .env edits needed.
+
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    volumes:
+      - ./ha-config:/config
+    ports:
+      # Bound to localhost only — change to "8123:8123" for LAN access from phone/tablet
+      - "127.0.0.1:8123:8123"
+    environment:
+      - TZ=Asia/Kolkata
+    restart: unless-stopped

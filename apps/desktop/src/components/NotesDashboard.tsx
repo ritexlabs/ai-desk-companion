@@ -786,19 +786,17 @@ export function NotesDashboard({ onClose, onVoiceCmd }: Props) {
           </div>
           <button
             onClick={handleVoice}
-            className="flex items-center gap-1.5 rounded-lg bg-violet-600/15 px-3 py-1.5
-              text-xs font-medium text-violet-400 hover:bg-violet-600/25 transition-colors"
+            className="h-7 px-2.5 rounded-xl border border-violet-400/25 bg-violet-400/8 text-[11px] font-medium flex items-center gap-1.5 text-violet-300 hover:bg-violet-400/15 transition"
             title="Trigger voice command"
           >
-            <Mic className="h-3.5 w-3.5" /> Voice
+            <Mic className="h-3 w-3" /> Voice
           </button>
           <button
             onClick={onClose}
-            className="rounded-full p-1.5 text-white/30 hover:text-white/70
-              hover:bg-white/10 transition-colors"
+            className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-500 hover:text-slate-200 transition"
             aria-label="Close"
           >
-            <X className="h-4 w-4" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
 

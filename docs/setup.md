@@ -23,35 +23,57 @@ npm --version
 
 ## Option A — Single-command launcher (recommended)
 
-The `start.py` launcher does everything on first run: creates the Python virtualenv, installs all Python and Node dependencies, starts both services in parallel, and opens the browser.
+`launch.py` is the cross-platform launcher — works identically on macOS, Linux, and Windows.
 
-**macOS / Linux**
 ```bash
-python3 start.py
+# First-time setup after cloning (creates venvs, installs all deps, prepares .env files)
+python3 launch.py setup
+
+# Start all three services (gateway → orchestrator → desktop) and open the browser
+python3 launch.py start
+
+# Windows: use  python launch.py  instead of  python3 launch.py
 ```
 
-**Windows**
-```cmd
-python start.py
-```
-
-**Launcher flags**
+**All commands**
 ```bash
-python3 start.py --no-browser   # skip auto-opening the browser
-python3 start.py --no-color     # plain terminal output (CI-friendly)
-python3 start.py --clean        # wipe venv / node_modules / build artifacts, then exit
+python3 launch.py setup            # first-time install (run once after cloning)
+python3 launch.py start            # start all services (default when no command given)
+python3 launch.py stop             # stop all running services
+python3 launch.py status           # show live status of each service
+python3 launch.py restart          # stop then start
+python3 launch.py clean            # remove venv / node_modules / build artefacts
+
+python3 launch.py start --no-browser        # skip auto-opening the browser
+python3 launch.py start --browser safari    # open in Safari instead of Chrome
+python3 launch.py start --no-color          # plain terminal output (CI-friendly)
 ```
 
-The launcher prefixes each output line with `[ORCH]` (orchestrator) or `[ UI ]` (desktop).  
-Press **Ctrl+C** to stop both services cleanly.
+The launcher prefixes each output line with `[GW  ]` (gateway), `[ORCH]` (orchestrator), or `[ UI ]` (desktop).  
+Press **Ctrl+C** or run `python3 launch.py stop` to stop all services cleanly.
 
 ---
 
-## Option B — Manual start (two terminals)
+## Option B — Manual start (three terminals)
 
-Use this when you want to restart one service independently, attach a debugger, or see raw logs.
+Use this when you want to restart one service independently, attach a debugger, or see raw logs.  
+Start services in this order: Gateway → Orchestrator → Desktop.
 
-**Terminal 1 — Orchestrator (Python FastAPI, port 8787)**
+**Terminal 1 — MCP Gateway (Python FastAPI, port 8788)**
+```bash
+cd apps/mcp-gateway
+
+# First time only
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Every time
+source .venv/bin/activate
+uvicorn src.main:app --reload --port 8788
+```
+
+**Terminal 2 — Orchestrator (Python FastAPI, port 8787)**
 ```bash
 cd apps/orchestrator
 
@@ -65,7 +87,7 @@ source .venv/bin/activate
 uvicorn app.main:app --reload --port 8787
 ```
 
-**Terminal 2 — Desktop UI (React + Vite, port 5173)**
+**Terminal 3 — Desktop UI (React + Vite, port 5173)**
 ```bash
 cd apps/desktop
 
@@ -119,8 +141,8 @@ Once the app is running with the default browser voice, configure real integrati
 
 | Step | Guide |
 |------|-------|
-| Add OpenAI / ElevenLabs voice | [voice-providers.md](voice-providers.md) |
-| Add an LLM for AI responses | [llm-setup.md](llm-setup.md) |
+| Add OpenAI / ElevenLabs voice | [configuration/providers.md](configuration/providers.md) |
+| Add an LLM for AI responses | [configuration/ai.md](configuration/ai.md) |
 | Connect Weather / GitHub / Google | [agents.md](agents.md) |
 | Enable server-side wake word | [wake-word.md](wake-word.md) |
 | Build native desktop app | [tauri-desktop.md](tauri-desktop.md) |
@@ -135,10 +157,11 @@ Install Python 3.10+ from python.org. On Windows use `python` instead of `python
 **"node: command not found"**  
 Install Node.js 20+ from nodejs.org.
 
-**Port 8787 or 5173 already in use**  
+**Port 8788, 8787, or 5173 already in use**  
 Find and kill the existing process:
 ```bash
 # macOS / Linux
+lsof -ti:8788 | xargs kill
 lsof -ti:8787 | xargs kill
 lsof -ti:5173 | xargs kill
 ```
@@ -165,7 +188,7 @@ cp apps/orchestrator/.env.example apps/orchestrator/.env
 ### Phase 2 — Real local orchestrator
 - Python FastAPI WebSocket orchestrator at `:8787`
 - Boot sequence via WS events, auto-reconnect, WS badge in header
-- `start.py` cross-platform launcher
+- `launch.py` cross-platform launcher
 
 ### Phase 3 — Real voice stack
 - OpenAI TTS and Whisper STT integration

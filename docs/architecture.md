@@ -1,14 +1,23 @@
-# AI Desk Companion — Architecture Document
+# AI Desk Companion — Architecture
 
 ## 1. Overview
 
-**AI Desk Companion** is a desktop-first AI voice assistant. It listens for a configurable wake phrase and opens an active voice session to greet the user, initialise agents, listen to commands, route each request to the correct agent, and speak the response back — all through a futuristic real-time dashboard UI.
+**AI Desk Companion** is a desktop-first AI voice assistant with always-on wake-word detection and continuous voice conversation. It routes commands to specialised tools through an LLM orchestrator and speaks responses back — all inside a real-time dashboard UI.
+
+Three services run locally:
+
+| Service | Port | Language |
+|---|---|---|
+| Desktop UI | 5173 | React 18 + TypeScript + Vite |
+| Orchestrator | 8787 | Python FastAPI + uvicorn |
+| MCP Gateway | 8788 | Python FastAPI + uvicorn |
 
 ---
 
-## 2. Actual Stack (as built)
+## 2. Stack
 
 ### Desktop UI — `apps/desktop/`
+
 | Layer | Choice |
 |---|---|
 | Framework | React 18 |
@@ -16,528 +25,471 @@
 | Language | TypeScript 5 (strict, `moduleResolution: "Bundler"`) |
 | Styling | Tailwind CSS v3 + Framer Motion v11 |
 | Icons | lucide-react |
-| Dev port | 5173 |
 
 ### Orchestrator — `apps/orchestrator/`
+
 | Layer | Choice |
 |---|---|
 | Language | Python 3.13 |
-| Web framework | FastAPI 0.115 |
+| Framework | FastAPI 0.115 |
 | Server | uvicorn with standard extras |
-| Config | pydantic-settings (reads `.env`) |
-| HTTP client | httpx (for TTS/STT/agent API calls) |
-| Dev port | 8787 |
+| Config | pydantic-settings (reads `apps/orchestrator/.env`) |
+| HTTP client | httpx |
+
+### MCP Gateway — `apps/mcp-gateway/`
+
+| Layer | Choice |
+|---|---|
+| Language | Python 3.13 |
+| Framework | FastAPI 0.115 |
+| Server | uvicorn with standard extras |
+| Config | pydantic-settings (reads `apps/mcp-gateway/.env`) |
+| Data | yfinance, psutil, httpx, mcp |
 
 ### Voice Providers
+
 | Direction | Browser (default) | Server (opt-in) |
 |---|---|---|
 | TTS | Web Speech Synthesis API | OpenAI TTS (`tts-1` / `tts-1-hd`) or ElevenLabs |
 | STT | Web Speech Recognition API | OpenAI Whisper (`whisper-1`) |
-
-### Monorepo layout
-```
-ai-desk-companion/
-├── apps/
-│   ├── desktop/          React + Vite frontend
-│   └── orchestrator/     Python FastAPI backend
-├── docs/                 Architecture, API contracts, setup
-├── packages/             Shared packages (reserved)
-├── start.py              Cross-platform dev launcher
-├── start.sh              macOS / Linux convenience wrapper
-└── start.bat             Windows convenience wrapper
-```
 
 ---
 
 ## 3. High-Level Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Browser (React + Vite)                 │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  UI Components  │  Runtime Hooks                     │   │
-│  │  - RobotAvatar  │  - useOrchestratorRuntime          │   │
-│  │  - AgentBootList│  - useVoice (browser STT/TTS)      │   │
-│  │  - SettingsPanel│  - useAudioPlayer (server audio)   │   │
-│  │  - Transcript   │  - useVoiceProviderConfig          │   │
-│  │  - QuickStats   │  - useAgentConfig / useLLMConfig   │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                     │ WebSocket ws://localhost:8787/ws       │
-└─────────────────────┼───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│                 Python Orchestrator (FastAPI)                │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │  WS endpoint /ws │ IntentRouter │ AgentManager       │   │
-│  ├──────────────────────────────────────────────────────┤   │
-│  │  TTSProvider (OpenAI / ElevenLabs / Browser)         │   │
-│  │  STTProvider (OpenAI Whisper / Browser)              │   │
-│  │  LLMService   (OpenAI / Anthropic / Gemini / Ollama) │   │
-│  └──────────────────────────────────────────────────────┘   │
-│    │    │    │     │     │     │     │     │                 │
-│  ┌─▼─┐┌─▼─┐┌─▼─┐┌──▼─┐┌──▼─┐┌──▼─┐┌──▼─┐┌──▼──┐          │
-│  │Wth││Sys││ GH ││Cal ││Stk ││News││ SM ││GenAI│          │
-│  └───┘└───┘└────┘└────┘└────┘└────┘└──┬─┘└─────┘          │
-└──────────────────────────────────────┬─┼─────────────────────┘
-       │         │          │          │ │          │
-  ┌────▼───┐ ┌───▼──┐ ┌────▼───┐ ┌───▼─┘│ ┌────▼───┐
-  │Weather │ │GitHub│ │Yahoo   │ │News   │ │LLM API │
-  │API     │ │API   │ │Finance │ │API    │ │        │
-  └────────┘ └──────┘ └────────┘ └───────┘ └────────┘
-                                         │
-                              ┌──────────▼──────────┐
-                              │  voska/hass-mcp      │
-                              │  (Docker subprocess) │
-                              │  MCP JSON-RPC 2.0    │
-                              └──────────┬───────────┘
-                                         │
-                              ┌──────────▼───────────┐
-                              │   Home Assistant      │
-                              │   REST API            │
-                              └──────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│  Browser (React + Vite :5173)                                        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │  AgentOrbit3D · WeatherWidget · HoloChat                      │  │
+│  │  AgentBootList · AgentDetailModal · SettingsPanel             │  │
+│  │  SmartHomeDashboard · PortfolioDashboard                      │  │
+│  │  useOrchestratorRuntime · useVoiceLoop · useAgentConfig       │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+└────────────────────────┬─────────────────────────┬───────────────────┘
+                         │ WebSocket                │ HTTP (auth-exempt)
+                         │ ws://localhost:8787/ws   │ localhost:8788
+                         │                          │ /api/portfolio/*
+                         │                          │ /auth/indmoney
+                         │                          │ /api/system/config
+┌────────────────────────▼─────────────────────────┼───────────────────┐
+│  Orchestrator (FastAPI :8787)                     │                   │
+│  • Session lifecycle — start/stop                 │                   │
+│  • LLM tool-calling loop (OpenAI / Anthropic /    │                   │
+│    Gemini / Ollama)                               │                   │
+│  • Local agents (in-process):                     │                   │
+│      WebSearch · Calculator · Memory              │                   │
+│      Briefing · GeneralAI                         │                   │
+│  • Voice: TTS (OpenAI · ElevenLabs · Browser)    │                   │
+│           STT (Whisper · Browser)                 │                   │
+└────────────────────────┬──────────────────────────┘                   │
+              HTTP Bearer │ http://localhost:8788                        │
+┌────────────────────────▼─────────────────────────────────────────────┘
+│  MCP Gateway (FastAPI :8788)                                          │
+│  • Bearer auth middleware (GATEWAY_API_TOKEN)                        │
+│  • ToolRegistry — namespaced tools, startup/shutdown lifecycle       │
+│  • MCP StreamableHTTP at /mcp (compatible with Claude Desktop etc.)  │
+│                                                                       │
+│  Tools (one file per integration, credentials from gateway .env):    │
+│  ┌─────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌──────────┐        │
+│  │ weather │ │ stocks │ │  news  │ │ github │ │  google  │        │
+│  └─────────┘ └────────┘ └────────┘ └────────┘ └──────────┘        │
+│  ┌─────────┐ ┌────────┐ ┌───────────┐ ┌──────────┐                │
+│  │ system  │ │indmoney│ │ smarthome │ │ whatsapp │                │
+│  └─────────┘ └────────┘ └───────────┘ └──────────┘                │
+│                                                                       │
+│  Routers (non-tool HTTP endpoints):                                  │
+│  portfolio (OAuth PKCE) · system · tunnel (Cloudflare) · whatsapp   │
+└───────────────────────────────────────────────────────────────────────┘
+         │                  │                │
+   MCP Streamable    Direct HTTP         psutil / yfinance
+   (INDmoney)        (HA, Meta, GNews…)  (local calls)
+         │
+  https://mcp.indmoney.com/mcp
 ```
 
 ---
 
-## 4. WebSocket Protocol
-
-All UI ↔ orchestrator communication goes through a single persistent WebSocket at `ws://localhost:8787/ws`.
-
-### UI → Orchestrator Commands
-
-| Command | Key Payload Fields | Description |
-|---|---|---|
-| `start_session` | `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` | Wake + boot sequence |
-| `send_text_command` | `text` | Route a text command |
-| `audio_chunk` | `data_b64`, `format`, `is_final` | Stream audio for server STT |
-| `stop_session` | — | Enter sleep mode (with or without farewell) |
-| `retry_agent` | `agent` | Retry a failed agent |
-
-### Orchestrator → UI Events
-
-| Event | Key Payload Fields | Description |
-|---|---|---|
-| `connected` | `version`, `tts_provider`, `stt_provider` | WS opened; reports .env defaults |
-| `session_config` | `tts_provider`, `stt_provider` | Sent at boot start; reports actual session providers |
-| `phase_changed` | `phase` | Phase state machine transition |
-| `boot_status` | `message`, `agent_id?`, `audio_b64?`, `audio_format?` | Boot narration line |
-| `agent_status_changed` | `agent`, `status` | Agent lifecycle update |
-| `transcript_final` | `speaker`, `text` | Confirmed transcript (user or system) |
-| `route_selected` | `agent`, `confidence`, `reason` | Intent routing decision |
-| `assistant_speaking` | `text`, `audio_b64?`, `audio_format?` | Agent response |
-| `assistant_done` | — | Response complete |
-| `error` | `message` | Error notification |
-
-### Phase State Machine
+## 4. Monorepo Layout
 
 ```
-standby ──wake phrase──▶ wake_detected ──▶ booting ──▶ ready ◀─────────────┐
-   ▲                                                      │                 │
-   │           ┌── auto-listen loop (wake word required) ─┤                 │
-   │           │                                       listening            │
-   │           │         (discard if no "Robo" prefix)     │               │
-   │           │                                       thinking             │
-   │           │                                           │                │
-   │           └──────────────────────────────── responding ───────────────┘
-   │                                                       │
-   └──── "Robo, Good night" / Sleep button ───────────────┘
-         (farewell spoken, then stop_session → doSleep)
+ai-desk-companion/
+├── apps/
+│   ├── desktop/              React + Vite frontend
+│   │   └── src/
+│   │       ├── components/   UI components:
+│   │       │                 AgentOrbit3D   — 3D orbital canvas + AI Core + agent nodes
+│   │       │                 WeatherWidget  — current conditions + ForecastStrip
+│   │       │                 HoloChat       — conversation message history
+│   │       │                 AgentBootList · AgentDetailModal
+│   │       │                 SmartHomeDashboard · PortfolioDashboard
+│   │       │                 settings/      Per-agent settings accordions
+│   │       ├── hooks/        React hooks (useOrchestratorRuntime, useVoiceLoop,
+│   │       │                 useAgentConfig, useAgentVoiceConfig, …)
+│   │       └── types/        Shared TypeScript types (runtime.ts)
+│   ├── orchestrator/         Python FastAPI orchestrator (port 8787)
+│   │   └── app/
+│   │       ├── agents/       Local agent implementations
+│   │       ├── api/          FastAPI routes + WebSocket (ws.py)
+│   │       ├── core/         Config (pydantic-settings, reads .env)
+│   │       ├── models/       Pydantic contracts
+│   │       └── services/     LLM, TTS, STT, boot sequence, gateway client, session
+│   └── mcp-gateway/          Python FastAPI MCP tool gateway (port 8788)
+│       └── src/
+│           ├── config/       GatewaySettings (pydantic-settings, reads .env)
+│           ├── tools/        BaseTool ABC + tool adapters (one file per integration)
+│           ├── routers/      HTTP routers for non-tool endpoints
+│           └── main.py       FastAPI app — registers tools, auth middleware, webhook routes
+├── docs/                     Full documentation
+│   ├── architecture.md       ← this file
+│   ├── mcp-gateway.md        Gateway API, BaseTool ABC, adding new tools
+│   ├── development.md        Local setup, commands, adding new agents/services
+│   ├── agents.md             Agent overview
+│   └── agents/               Per-agent docs (weather.md, github.md, …)
+├── scripts/
+│   ├── test.sh               Master test runner (backend + frontend)
+│   └── gen_tests.py          Auto-generate test stubs for new modules
+└── launch.py                 Cross-platform dev launcher (all 3 services)
 ```
 
-**Standby wake rules (phase = standby / sleep):**
-- Accepted triggers: "Hey Robo", "Hello Robo", "Robo, Wake-Up", "Wake-Up Robo"
-- Rejected: bare "Robo" alone (prevents accidental wakes in conversation)
-- Inline command: "Hey Robo, check the weather" → boots AND queues "check the weather" as first command
-
-**Ready-state wake-word gate (the Alexa / Google Nest rule):**
-- After boot, `autoListenRef.current = true` keeps the app in a continuous listen loop
-- Each 5-second listen window is evaluated by a wake-word gate **before** the orchestrator is called
-- If speech is heard **without** the wake word → silently discarded, loop continues
-- If speech **contains** the wake word → prefix stripped, command sent to orchestrator
-- Wake word alone ("Robo" with no command) → app acknowledges ("Yes? How can I help you?") and re-listens
-- Loop continues indefinitely until: sleep phrase, Sleep button pressed, or voice toggled off
-
-**Sleep rules (from ready state):**
-- Voice command: must include wake word + sleep phrase (e.g. "Robo, Good night")
-- Typed command: sleep phrase alone is sufficient (no wake word needed — explicit UI action)
-- Sleep button: immediate, no farewell
-
-### Interaction Model — Full Flow
+### Orchestrator layout
 
 ```
- ┌─────────────────────────────────────────────────────────────────────┐
- │  APP STARTS                                                          │
- │  Phase: STANDBY                                                      │
- │  Mic: silently listening for wake phrase in 3-second windows         │
- └─────────────────────────┬───────────────────────────────────────────┘
-                           │
-          ┌────────────────▼─────────────────────┐
-          │  Heard: "Robo, Wake-Up"               │  ← Only these wake:
-          │         "Hey Robo"                    │    "Hey Robo"
-          │         "Hello Robo"                  │    "Hello Robo"
-          │         "Wake-Up Robo"                │    "Robo, Wake-Up"
-          │                                       │    "Wake-Up Robo"
-          │  Anything else → ignored              │
-          └────────────────┬─────────────────────┘
-                           │
-          ┌────────────────▼─────────────────────┐
-          │  Phase: BOOTING                       │
-          │  • LLM generates greeting             │
-          │    "Good morning, Master, your        │
-          │     systems are all online and ready" │
-          │  • All agents boot in parallel        │
-          │  • Each agent speaks its status       │
-          │  • "3 of 3 agents online and ready"   │
-          └────────────────┬─────────────────────┘
-                           │
-          ┌────────────────▼─────────────────────┐
-          │  Phase: READY                         │
-          │  Auto-listen loop begins              │
-          │                                       │
-          │  ┌─── 5-second listen window ───┐    │
-          │  │  No speech → cycle again     │    │
-          │  │  Speech without "Robo"        │    │
-          │  │    → discard, cycle again    │    │
-          │  │  Speech with "Robo":          │    │
-          │  │    → strip "Robo," prefix    │    │
-          │  │    → check for sleep phrase  │    │
-          │  │    → else send to agent      │    │
-          │  └──────────────────────────────┘    │
-          └────────────────┬─────────────────────┘
-                           │
-    ┌──────────────────────┼──────────────────────────┐
-    │                      │                          │
-    ▼                      ▼                          ▼
- "Robo, Get me        "Robo, Good             "Get me weather"
-  weather in Delhi"    night"                 (no wake word)
-    │                      │                          │
-    ▼                      ▼                          ▼
- Phase: THINKING       Sleep phrase            Silently discarded
- Route → Weather       detected                Loop continues
- Agent responds        ↓
- Phase: RESPONDING     Farewell spoken
-    │                  Agents → offline
-    ▼                  stop_session sent
- Phase: READY          ↓
- Loop continues        Phase: STANDBY
+apps/orchestrator/app/
+├── agents/
+│   ├── base.py           AssistantAgent ABC
+│   ├── registry.py       AGENTS list (local agents only)
+│   ├── websearch.py      DuckDuckGo Instant Answers
+│   ├── calculator.py     Safe AST evaluator
+│   ├── memory.py         Persistent key-value store
+│   ├── briefing.py       Parallel gateway tool calls → spoken summary
+│   └── general_ai.py     LLM fallback
+├── api/
+│   ├── routes/           REST endpoints (smarthome proxy, whatsapp relay, health)
+│   └── ws.py             WebSocket handler
+├── core/config.py        Settings (pydantic-settings)
+├── models/contracts.py   AgentRequest / AgentResponse / AgentHealth
+└── services/
+    ├── agent_manager.py  Session state, LLM config merge, local agent dispatch
+    ├── orchestrator.py   LLMOrchestrator — tool-call loop
+    ├── session.py        Boot sequence, phrase pools, gateway/snippet maps, AGENT_LABELS
+    ├── gateway_client.py GatewayClient — GET /tools, POST /tools/{name} (Bearer auth)
+    ├── router.py         Keyword fallback router (no-LLM mode)
+    ├── llm.py            LLM provider abstraction
+    └── tts_helpers.py    Per-agent voice config
 ```
 
-**Voice command examples (in READY state):**
+### MCP Gateway layout
 
-| What you say | Wake word? | Result |
-|---|---|---|
-| "Robo, get me weather in Delhi" | ✅ | Routes to Weather agent |
-| "Robo, what's my next meeting?" | ✅ | Routes to Calendar agent |
-| "Robo, show GitHub pull requests" | ✅ | Routes to GitHub agent |
-| "Robo, Good night" | ✅ | Farewell → sleep → standby |
-| "Get me weather in Delhi" | ❌ | Silently ignored |
-| "What's my next meeting?" | ❌ | Silently ignored |
-| "Good night" | ❌ | Silently ignored |
-| "Robo" (alone) | ✅ | "Yes? How can I help you?" → re-listen |
-
-### Session Greeting and Farewell
-
-**Wake-up greeting** — sent during the boot sequence as the first `boot_status` line. Varies by time of day (Good morning / afternoon / evening) with a randomised suffix.
-
-**Sleep farewell** — triggered when the user says a sleep phrase ("Bye Robo", "Good night", "Go to sleep", "See you", etc.):
-1. Frontend matches a sleep pattern against the STT text
-2. Selects a random template farewell string (no LLM call)
-3. Marks all agents `offline`, clears `activeAgentId`
-4. Speaks the farewell via browser TTS (`await speak(farewell)`)
-5. Sends `stop_session` to the orchestrator
-6. Calls `doSleep()` — UI enters standby; auto-listen loop disabled
-
-**Sleep button** — calls `doSleep()` directly and sends `stop_session` (immediate, no farewell).
-
-### Audio Delivery
-When a server TTS provider is active, `boot_status` and `assistant_speaking` events include:
-- `audio_b64` — base64-encoded MP3 audio bytes
-- `audio_format` — `"mp3"`
-
-The UI plays these via `HTMLAudioElement`; falls back to browser `SpeechSynthesis` when absent.
+```
+apps/mcp-gateway/src/
+├── main.py               FastAPI app — lifespan, CORS, auth middleware, routers, /tools, /mcp
+├── config/
+│   └── settings.py       GatewaySettings — all integration credentials, read from .env
+├── tools/
+│   ├── base.py           BaseTool ABC (namespace, list_tools, call_tool, startup, shutdown)
+│   ├── registry.py       ToolRegistry — register, startup, shutdown, list, route
+│   ├── weather.py        Open-Meteo / OWM / WeatherAPI
+│   ├── stocks.py         yfinance (no key needed)
+│   ├── news.py           GNews API
+│   ├── github.py         GitHub REST API
+│   ├── google.py         Google Calendar + Gmail
+│   ├── system.py         psutil (CPU, RAM, disk, battery, processes)
+│   ├── portfolio.py      INDmoney MCP via StreamableHTTP
+│   ├── smarthome.py      Home Assistant via hass-mcp Docker
+│   └── whatsapp.py       Meta WhatsApp Cloud API
+└── routers/
+    ├── portfolio.py      OAuth PKCE flow + /api/portfolio/status + /api/portfolio/data
+    ├── system.py         /api/system/config (metric toggle)
+    ├── tunnel.py         Cloudflare tunnel start/stop/status
+    └── whatsapp.py       Webhook receive + /api/whatsapp/status
+```
 
 ---
 
-## 5. Voice Provider Architecture
+## 5. Data Flow — Voice Command
 
-### Priority Order (per session)
-1. **Settings → Providers tab** in UI — stored in `robo-voice-providers` (localStorage), sent in `start_session`
-2. **`.env` file** — server-side fallback when UI sends `"browser"` or empty values
+```
+1. User speaks          → Browser STT (or OpenAI Whisper)
+2. Text sent            → WebSocket to Orchestrator
+3. Orchestrator         → GET http://localhost:8788/tools
+                          (fetches namespaced tool list; cached per-turn)
+4. LLM call             → POST {provider}/chat/completions
+                          messages=[system+user], tools=[all gateway tools + local agent tools]
+5. LLM returns          → tool_call: { name: "weather__get_current_weather", arguments: {...} }
+6. Orchestrator         → POST http://localhost:8788/tools/weather__get_current_weather
+                          headers: { Authorization: Bearer <GATEWAY_API_TOKEN> }
+                          body: { arguments: {...} }
+7. Gateway routes       → WeatherTool.call_tool() → Open-Meteo HTTP call
+                          (credentials read from GatewaySettings / .env)
+8. Result returned      → Orchestrator → LLM synthesis prompt
+9. LLM synthesises      → Plain spoken English (1–3 sentences)
+10. TTS                 → Browser or OpenAI/ElevenLabs audio → user hears response
+```
 
-### Available Providers
-**TTS:**
-- `browser` — Web Speech Synthesis (no key, quality varies by OS)
-- `openai` — `tts-1` or `tts-1-hd`; voices: alloy · echo · fable · onyx · nova · shimmer
-- `elevenlabs` — ultra-realistic; configurable voice ID
-
-**STT:**
-- `browser` — Web Speech Recognition (Chrome / Safari)
-- `openai` — Whisper `whisper-1`; accepts webm, mp4, ogg, wav, mp3
+For local agent calls (websearch, calculator, memory, briefing, general):
+steps 6–7 are replaced by `agent_manager.handle(agent_id, request)` — no gateway hop, no Bearer token.
 
 ---
 
-## 6. Agent Architecture
+## 6. Tool Namespacing
 
-Each agent implements `handle(AgentRequest) → AgentResponse`.
+Every gateway tool is exposed with a `<namespace>__<tool>` name to prevent collisions:
 
-### Agent Table
-| Agent ID | Label | Status | Data Source |
-|---|---|---|---|
-| `system` | System | ✅ Real | `platform` module + system time |
-| `weather` | Weather | ✅ Real | OpenWeatherMap / WeatherAPI via `agent_config.weather` |
-| `calendar` | Google Calendar | ✅ Real | Google Calendar API v3 via OAuth `access_token` |
-| `email` | Google Email | ✅ Real | Gmail API via OAuth `access_token` |
-| `github` | GitHub | ✅ Real | GitHub REST API via Personal Access Token |
-| `stock` | Stock Market | ✅ Real | Yahoo Finance via `yfinance` — no API key required |
-| `news` | News | ✅ Real | NewsAPI.org via `agent_config.news.api_key` |
-| `smarthome` | Smart Home | ✅ Real | Home Assistant REST API via `voska/hass-mcp` Docker (MCP JSON-RPC 2.0) |
-| `general` | General AI | ✅ Real | LLM service — OpenAI / Anthropic / Gemini / Ollama |
-
-### Intent Router
-
-Two-tier strategy implemented in `app/services/router.py`:
-
-**Tier 1 — LLM classifier** (when `llm_config` has a key or provider=ollama):
-
-A lightweight call (`temperature=0.0`, `max_tokens=80`) sends the user's query plus a dynamically built list of enabled agents to the configured LLM. The LLM returns a single JSON line:
-```json
-{"agent": "calendar", "reason": "user asking about upcoming events"}
-```
-If the call fails or returns an unknown agent name, falls back to tier 2 silently.
-
-**Tier 2 — Keyword fallback** (always active):
-```
-weather / temperature / rain / forecast / humidity / wind  →  WeatherAgent
-calendar / meeting / schedule / appointment / event        →  CalendarAgent  (before datetime)
-email / inbox / unread / mail / sender / message           →  EmailAgent
-"what time" / "current time" / "what day" / date / clock  →  SystemAgent
-system / cpu / battery / memory / ram / health / os        →  SystemAgent
-stock / nifty / sensex / s&p / rsi / moving average…      →  StockAgent
-github / repo / pr / issue / workflow / commit             →  GitHubAgent
-news / headline / breaking news / current events           →  NewsAgent
-light / switch / fan / lock / cover / blind / thermostat   →  SmartHomeAgent
-smart home / home assistant / device / turn on / turn off  →  SmartHomeAgent
-(everything else)                                          →  GeneralAgent
-```
-
-Contraction normalisation (`whats` / `what's` → `what is`) is applied before phrase matching to handle voice-to-text variations.
-
----
-
-## 7. Credential & Security Design
-
-| Rule | Detail |
+| Namespace | Tools |
 |---|---|
-| No secrets in source | API keys never appear in `.ts`, `.py`, or any tracked file |
-| Frontend storage | `localStorage` only (`robo-*` keys) — sandboxed to origin, cannot be git-committed |
-| Credential flow | localStorage → WebSocket `start_session` payload → orchestrator → external API |
-| Orchestrator persistence | Session credentials are used and discarded; not stored server-side |
-| `.env` file | Server-level defaults only (TTS/STT provider + key); UI settings override per session |
-| External calls | Only the orchestrator calls external APIs; browser calls TTS providers only for "Test TTS" in settings |
+| `weather` | `weather__get_current_weather` |
+| `stocks` | `stocks__get_quote` |
+| `news` | `news__get_news` |
+| `system` | `system__get_system_info` |
+| `github` | `github__get_summary`, `github__get_pull_requests`, `github__get_notifications`, `github__get_workflow_status`, `github__get_issues` |
+| `google` | `google__get_calendar_events`, `google__get_emails` |
+| `indmoney` | `indmoney__query_portfolio` |
+| `smarthome` | `smarthome__get_states`, `smarthome__call_service` |
+| `whatsapp` | `whatsapp__send_message`, `whatsapp__get_chat` |
+
+Local agent tools keep their plain IDs: `websearch`, `calculator`, `memory`, `briefing`, `general`.
 
 ---
 
-## 8. Development Phases
+## 7. Session Lifecycle
 
-### Phase 1 — Simulated UX ✅ COMPLETE
-- Futuristic 3-column React dashboard
-- Mock boot sequence, wake detection, intent routing
-- All 5 agent stubs, system health panel
-- Settings panel: Profile | Voice | AI | Agents
-- LLM hook (Anthropic / OpenAI / Gemini / Ollama)
-- Security-safe credential storage via localStorage hooks
+### Boot sequence
 
-### Phase 2 — Real Local Orchestrator ✅ COMPLETE
-- Python FastAPI WebSocket orchestrator at `:8787`
-- `useOrchestratorRuntime` hook: WS mode + local offline fallback
-- Boot sequence via WS events, TTS serial queue, auto-reconnect
-- `SystemAgent` with real OS/CPU/Python data
-- WS connection badge + system health panel in UI
-- `start.py` cross-platform dev launcher (auto-setup, streams output, opens browser)
-
-### Phase 3 — Real Voice Stack ✅ COMPLETE
-- `TTSProvider` / `STTProvider` abstractions with OpenAI and ElevenLabs implementations
-- Per-session provider selection from UI (overrides `.env`)
-- Server audio: `audio_b64` in WS events → played via `HTMLAudioElement`
-- Server STT: `MediaRecorder` → `audio_chunk` WS → Whisper → `transcript_final`
-- Settings → Providers tab: full TTS/STT provider configuration from UI
-- `useAudioPlayer` hook, `isPlayingServerAudio` state, `orchestratorCaps` tracking
-
-### Phase 4 — Real Integrations ✅ COMPLETE
-All agent stubs replaced with real external API calls. Credentials flow from UI localStorage → `start_session` → `AgentManager.configure_session()` → individual agent `handle()`.
-
-**New files:**
-- `app/services/llm.py` — `LLMService` supporting OpenAI, Anthropic, Gemini, Ollama (OpenAI-compat)
-- All 5 agent files rewritten with real httpx API calls
-
-**WS protocol (implemented):**
-`start_session` carries:
-```json
-{
-  "llm_config":   { "provider": "openai", "api_key": "sk-...", "model": "gpt-4o", "base_url": "" },
-  "agent_config": {
-    "weather": { "provider": "openweathermap", "api_key": "...", "default_city": "Mumbai" },
-    "github":  { "personal_access_token": "ghp_..." },
-    "google":  { "access_token": "ya29...", "refresh_token": "..." }
-  }
-}
+```
+start_session (WebSocket message from UI)
+  │
+  ├─ agent_manager.configure_session(llm_config, agent_config, registered_agents)
+  ├─ speak greeting
+  ├─ emit agent_status_changed: starting (for all registered agents)
+  │
+  ├─ GET http://localhost:8788/health   ← one gateway health check
+  │
+  │  ── Gateway online ────────────────────────────────────────────────────────
+  │  speak (randomised) "MCP gateway link established — tool matrix online."
+  │  asyncio.gather(_fetch_boot_snippet × N agents, timeout=5 s each)
+  │    ├─ weather__get_current_weather  → "Bengaluru 28°C, partly cloudy"
+  │    ├─ stocks__get_quote (Nifty 50)  → "Nifty ₹24,150 (+0.43%)"
+  │    ├─ news__get_news                → top headline title
+  │    ├─ github__get_summary           → "3 PRs awaiting review"
+  │    ├─ google__get_calendar_events   → "Next event: 'Standup' at 10:30 AM"
+  │    ├─ google__get_emails            → "7 unread emails"
+  │    ├─ system__get_system_info       → "CPU 18% · RAM 54%"
+  │    └─ indmoney__query_portfolio     → first line of portfolio summary
+  │  for each gateway agent (individual speak + agent_status_changed: online):
+  │    "Weather module synchronised — Bengaluru 28°C, partly cloudy."
+  │    … (snippet suppressed silently if token not configured or call failed)
+  │
+  │  ── Gateway offline ─────────────────────────────────────────────────────
+  │  speak (randomised) "MCP gateway unreachable — tool network dark."
+  │  for each gateway agent: emit agent_status_changed: degraded (silent)
+  │
+  ├─ emit online (websearch, calculator, memory, briefing) — silent, always online
+  └─ emit phase_changed: ready
 ```
 
-**Credential injection flow:**
-1. `ws.py` extracts `llm_config` + `agent_config` from `start_session` payload
-2. Calls `agent_manager.configure_session(llm_config, agent_config)`
-3. `AgentManager.handle()` enriches each `AgentRequest.context` with the correct per-agent credentials
-4. Agents read credentials from `request.context['agent_config']` and `request.context['llm_config']`
+### Per-turn orchestration
 
-**Graceful degradation:** Each agent returns a helpful message if its credential is not configured rather than raising an error.
-
-### Phase 5 — Hardening ✅ COMPLETE
-
-**openWakeWord (always-on wake detection)**
-- `app/services/wake_word.py` — `WakeWordService` thread using `sounddevice` + `openwakeword`
-- Controlled by `WAKE_WORD_ENABLED`, `WAKE_WORD_MODEL`, `WAKE_WORD_SENSITIVITY` in `.env`
-- Broadcasts `wake_word_detected {model}` WS event to all clients; frontend triggers `triggerWakeWord()`
-- Browser continuous-listening disabled automatically when server reports `wake_word_enabled: true`
-- Optional: install `sounddevice openwakeword numpy` + `portaudio` (macOS)
-
-**Diagnostics — real-time metrics**
-- `app/services/metrics.py` — `MetricsService` in-memory store (sessions, commands, agent timing, TTS/STT counts)
-- `ws.py` instruments every command, agent call, and TTS/STT call
-- `metrics_update` WS event broadcast every 5 s to all connected clients
-- UI: "Performance" card in right sidebar shows uptime, commands, sessions, per-agent avg ms
-
-**Tauri native desktop wrapper**
-- `apps/desktop/src-tauri/` — complete Tauri v2 scaffold
-  - `Cargo.toml` — tauri 2, plugin-store 2, plugin-shell 2, plugin-notification 2
-  - `src/lib.rs` — system tray with show/hide + quit, click-to-toggle window
-  - `src/main.rs`, `build.rs`, `capabilities/default.json`
-- `apps/desktop/src/lib/secureStore.ts` — dual-mode storage abstraction
-  - In Tauri: uses `@tauri-apps/plugin-store` (encrypted `.robo-config.dat` in app-data)
-  - In browser: transparent localStorage pass-through
-  - `hydrateFromTauriStore()` called in `main.tsx` before React mounts
-- `apps/desktop/package.json` — added `@tauri-apps/api`, `@tauri-apps/plugin-store`, `@tauri-apps/cli`
-- `apps/desktop/vite.config.ts` — Tauri-compatible HMR, platform-aware build targets
-
-**Building the native app:**
-```bash
-# Requires Rust toolchain: https://rustup.rs
-cd apps/desktop
-npm install
-npm run tauri:dev    # dev mode with native window
-npm run tauri:build  # creates .app / .exe / .deb in src-tauri/target/release/bundle/
+```
+user_message (WebSocket)
+  │
+  ├─ _fetch_gateway_tools()   GET /tools  (every turn)
+  ├─ llm_orchestrator.handle(message, tools=[local + gateway])
+  │    LLM picks tool → call_agent(fn_name, query)
+  │    if '__' in fn_name → gateway_client.call_tool(fn_name, args)  ← Bearer auth
+  │    else               → agent_manager.handle(fn_name, request)
+  └─ LLM synthesises → TTS → audio
 ```
 
-### Phase 6 — New Agents + LLM Routing ✅ COMPLETE
+---
 
-**Stock Market agent** (`app/agents/stock.py`)
-- Yahoo Finance via `yfinance` — no API key required
-- Current price, day change %, RSI(14), SMA(20/50), support/resistance, 52-week range
-- Indian market support: Nifty, Sensex, BankNifty, any NSE ticker (`.NS` suffix auto-added)
-- Boot confirmation: live Nifty 50 + Sensex (or S&P 500 + Dow Jones for US)
-- Config: `STOCK_DEFAULT_MARKET` (`.env`) or Settings → Agents → Stock Market Agent
+## 8. Credential Architecture
 
-**News agent** (`app/agents/news.py`)
-- NewsAPI.org free developer plan (100 req/day, works from localhost)
-- Generic queries → `/top-headlines` by country; topic queries → `/everything`
-- Boot confirmation: top 2 headlines for the configured country
-- Config: country dropdown + optional State/City in Settings → Agents → News Agent
+Credentials are split across two `.env` files — one per service:
 
-**Agent roster fix**
-- Added `stock` and `news` to `AGENT_CATALOGUE` (`useOrchestratorRuntime.ts`) and `AGENT_META` (`AgentBootList.tsx`)
-- Agents missing from either registry were silently dropped from the boot list
+```
+apps/orchestrator/.env          apps/mcp-gateway/.env
+─────────────────────           ───────────────────────
+LLM_PROVIDER / LLM_API_KEY      GATEWAY_API_TOKEN          ← shared Bearer token
+GATEWAY_URL                     GITHUB_TOKEN
+GATEWAY_API_TOKEN               WEATHER_API_KEY
+WAKE_PHRASE                     NEWS_API_KEY
+…                               GOOGLE_ACCESS_TOKEN
+                                MYHOME_MCP_TOKEN
+                                WHATSAPP_ACCESS_TOKEN
+                                INDMONEY_OAUTH_TOKEN        ← written by OAuth flow
+                                …
+```
 
-**LLM-based intent routing** (`app/services/router.py`)
-- `IntentRouter.configure_session(llm_config, enabled_agents)` — called at session start
-- `IntentRouter.route(text)` is now `async`
-- Primary path: LLM classifier (`temperature=0.0`, `max_tokens=80`) — handles paraphrase and voice variations
-- Fallback path: keyword matching — covers all cases when LLM is unavailable or fails
-- `LLMService.complete()` gains a `temperature` parameter (default `0.7`; routing passes `0.0`)
-- `start_session` payload now includes `news: { api_key, country, state, city }`
+The orchestrator holds **no** integration credentials. It sends only `GATEWAY_API_TOKEN` as a Bearer header. All integration credentials live in the gateway's own `.env` and are read at startup by `GatewaySettings`.
 
-**Session farewell** (`app/api/ws.py` + `useOrchestratorRuntime.ts`)
-- Sleep phrases ("Bye Robo", "Good night", "Go to sleep") trigger `farewell_session { phrase }` instead of `stop_session`
-- Orchestrator picks a contextual goodbye from `FAREWELL_LINES` via `_pick_farewell(phrase)`:
-  - "good night" → night-themed line ("Goodnight! Rest well.", "Goodnight! Sweet dreams.")
-  - "bye/goodbye" → farewell-themed line ("Goodbye! Have a wonderful day.", "Farewell!…")
-  - generic → random from the full list
-- Farewell is spoken via the session TTS provider before sleep
-- Frontend defers `phase_changed: sleep` via `pendingPhaseRef` until `drainTTSQueue` finishes, then calls `doSleep()` — guarantees the audio plays fully before the UI transitions
-- Sleep button still sends `stop_session` (immediate, no farewell)
+The INDmoney `access_token` is written to `apps/mcp-gateway/.env` by the OAuth callback handler — the desktop UI never receives or stores it.
 
-### Phase 7 — Alexa-style Conversation + Performance ✅ COMPLETE
+---
 
-**Alexa-style auto-listen with wake-word gate** (`useOrchestratorRuntime.ts`)
-- `autoListenRef` flag enables the continuous listen loop after boot
-- Set to `true` on `triggerWakeWord`; cleared to `false` only on sleep, or voice toggle off (no longer cleared on no-speech — loop keeps cycling)
-- Each listen cycle: 5-second window → wake-word gate → strip prefix → route to agent
-- Background speech without the wake word is silently discarded — the loop continues automatically
-- 300ms delay after `ready` phase before the next `ask()` — allows TTS queue to settle
-- `phaseRef` tracks the current phase in a ref so async callbacks read the live value without stale closures
+## 9. WebSocket Protocol
 
-**Wake / sleep command model**
-- Standby wake: explicit trigger phrase only ("Hey Robo", "Robo, Wake-Up") — bare "Robo" alone is ignored
-- Ready-state command gate: wake word required in all voice commands (Alexa rule)
-- Inline command capture: "Hey Robo, what's the time?" → boots agents and sends "what's the time?" as the first command via `pendingCmdRef`
-- Sleep: voice sleep requires wake word + sleep phrase ("Robo, Good night"); typed commands accept sleep phrase alone
-- Farewell sequence: agents → offline → speak farewell → send `stop_session` → `doSleep()`
+All messages follow `{ "type": "<event>", "payload": { ... } }`.
 
-**Wake-prefix stripping**
-- Strips leading "Robo, " / "Hey Robo, " / "Hello Robo, " before sending to the LLM
-- "Robo" heard alone → acknowledges ("Yes? How can I help you?") and re-listens without an LLM call
+**UI → Orchestrator (client sends)**
 
-**Language consistency**
-- `_make_system_prompt()` in `orchestrator.py` and `_make_general_system_prompt()` in `general_ai.py` now include an explicit instruction: "Always respond in the exact same language the user wrote in. Never switch languages."
-- Prevents the LLM from drifting to English when the user speaks Hindi, Spanish, or another language
-
-**Per-agent browser TTS modulations** (`useVoice.ts`)
-- `AGENT_VOICE_OFFSETS` table applies distinct pitch / rate deltas per agent on top of the base voice config
-- Each agent has a perceptually distinct sound: System (lower, deliberate), Weather (brighter), Calendar (efficient), GitHub/Stock (lower, authoritative), News (clear newsreader cadence)
-
-**Performance optimisations**
-
-| Area | Before | After |
+| type | payload | description |
 |---|---|---|
-| TTS cold-start delay | 250 ms | 150 ms |
-| TTS warm-interrupt delay | 50 ms | 30 ms |
-| TTS queue pause between utterances | 200 ms | 50 ms |
-| Auto-listen gap after response | 700 ms | 300 ms |
-| STT timeout | 8000 ms | 5000 ms |
-| Standby wake-word listen window | 4000 ms | 3000 ms |
-| Standby loop gap | 80 ms | 30 ms |
-| `asyncio.sleep` between WS sends | 5 × 50 ms per command | 0 |
-| Agent boot | Sequential (one at a time) | Parallel (`asyncio.gather`) |
-| Greeting TTS + agent init | Sequential | Parallel (`asyncio.create_task`) |
-| Boot delay / per-agent pauses | 350 + 300/200 ms × N | 0 |
+| `start_session` | `assistant_name`, `calling_name`, `registered_agents`, `llm_config`, `agent_config`, `tts`, `stt`, `agent_voices` | Begin session |
+| `stop_session` | — | End session |
+| `voice_input` | `text` | Transcribed speech |
+| `audio_chunk` | `data` (base64) | Raw audio for Whisper STT |
+| `audio_end` | — | Signal end of audio stream |
 
-- Chrome TTS engine pre-warmed on mount via `window.speechSynthesis.cancel()` — primes the lazy pipeline before the first real utterance
+**Orchestrator → UI (server sends)**
 
-### Phase 8 — Smart Home Agent ✅ COMPLETE
+| type | payload | description |
+|---|---|---|
+| `phase_changed` | `phase` | `booting` / `ready` / `listening` / `processing` / `speaking` |
+| `agent_status_changed` | `agent`, `status` | `starting` / `online` / `degraded` / `failed` |
+| `boot_status` | `text`, `agent_id?`, `agent_status?` | Spoken boot line |
+| `session_config` | `tts_provider`, `stt_provider`, `wake_word_enabled` | Effective session config |
+| `response` | `text`, `agent` | Final answer + which agent/tool handled it |
+| `error` | `message` | Non-fatal error description |
+| `transcription` | `text` | STT result echo |
+| `performance` | `latency_ms`, `agent`, `timestamp` | Per-turn timing |
+| `metrics` | `session_count`, `uptime_s`, … | Periodic health broadcast |
 
-**Smart Home agent** (`app/agents/smarthome.py`)
-- Controls Home Assistant devices via the `voska/hass-mcp` Docker container using MCP JSON-RPC 2.0
-- A single long-lived Docker subprocess per (HA URL, token) pair is managed by `HassMCPClient` (`app/services/hass_mcp.py`)
-- MCP handshake on startup: `initialize` → `notifications/initialized` → tools ready
-- `asyncio.Lock` on stdin writes prevents concurrent JSON frames from colliding
+---
 
-**Device control strategy**
-- Bulk (domain-wide) commands — e.g. "turn on lights" — call `call_service_tool(domain, service, {})` with no `entity_id`; Home Assistant broadcasts to all devices in the domain
-- Named device commands — e.g. "turn off light 1" — call `list_entities(search_query=name)` first, extract the `entity_id`, then call `call_service_tool`
+## 10. LLM Orchestrator
 
-**LLM orchestration integration**
-- `smarthome` added to `_AGENT_TOOL_META` in `orchestrator.py` — the dict that the LLM sees as available tools; agents absent from this dict are silently excluded from LLM routing
-- System prompt updated to force tool use for any smart home request
+`apps/orchestrator/app/services/orchestrator.py` — `LLMOrchestrator`
 
-**Smart Home Dashboard** (`apps/desktop/src/components/SmartHomeDashboard.tsx`)
-- Animated Framer Motion card grid, grouped by device domain
-- Toggle and slider controls call `POST /api/smarthome/call` directly (bypasses voice pipeline for immediate response)
-- Auto-refreshes device states every 8 seconds via `GET /api/smarthome/states`
+Supports OpenAI, Anthropic, Gemini, and Ollama. All implement the same loop:
 
-**REST API endpoints** (see [api.md](api.md) for full schema)
-- `GET /api/smarthome/ping` — test HA connectivity; used by Settings UI "Test Connection" button
-- `GET /api/smarthome/states` — all entity states grouped by domain; used by dashboard
-- `POST /api/smarthome/call` — call any HA service (used by dashboard controls)
+1. Build tools list from enabled local agents + gateway tools.
+2. Send `[system, user]` + tools to the LLM.
+3. If `finish_reason == tool_calls`: call each tool, append results, re-prompt the LLM.
+4. Return synthesised text + agent ID used.
 
-**UI auto-listen fix** (`useOrchestratorRuntime.ts`, `App.tsx`)
-- `isAutoListening` React state mirrors `autoListenRef.current` for UI awareness
-- `displayPhase` derived value masks the brief `ready` flash between auto-listen cycles — all phase-sensitive UI uses `displayPhase` without altering the real state machine
-- Prevents the Listening↔Ready badge flicker introduced when the Smart Home agent was added
+No keyword routing happens in this path. The LLM selects the tool from descriptions alone.
+
+**Keyword fallback** (`services/router.py`) applies only when no LLM is configured.
+
+---
+
+## 11. Security
+
+- WebSocket origin enforced against an allowlist (`ALLOWED_ORIGINS`).
+- Per-connection rate limiting: 30 messages / 60 s sliding window.
+- Input length capped at 2000 characters per message.
+- Orchestrator authenticates to the gateway with a shared Bearer token (`GATEWAY_API_TOKEN`).
+- All integration credentials live in `apps/mcp-gateway/.env` — never in the orchestrator or the UI.
+- INDmoney MCP endpoint is hardcoded (`https://mcp.indmoney.com/mcp`) — no user-controlled URL parameters for MCP connections (SSRF prevention).
+- Portfolio OAuth uses PKCE + Dynamic Client Registration (RFC 7591); the access token is stored only in the gateway's `.env`.
+- No credentials are logged at any level.
+- `.cloudflared/` (Cloudflare tunnel config containing tunnel UUIDs and hostnames) is gitignored.
+
+---
+
+## 12. Start Order
+
+`launch.py` manages all three services:
+
+```
+1. MCP Gateway starts (port 8788) — waits until /health responds
+2. Orchestrator starts (port 8787) — connects to gateway on first session
+3. Desktop UI starts  (port 5173) — opens browser
+```
+
+Each service runs in its own virtualenv:
+- `apps/mcp-gateway/.venv`
+- `apps/orchestrator/.venv`
+- `apps/desktop/node_modules`
+
+```bash
+python3 launch.py setup    # first-time: create venvs, install deps
+python3 launch.py          # start all services (default)
+python3 launch.py stop     # stop all services
+python3 launch.py status   # check service status
+python3 launch.py restart  # stop then start
+```
+
+---
+
+## 13. Dashboard UI Layout
+
+The desktop UI (`apps/desktop/src/App.tsx`) is a full-viewport 3-column layout rendered at `http://localhost:5173`.
+
+### Header bar
+
+Spans all three columns. Left to right:
+
+- Title + subtitle ("AI Desk Companion")
+- Spacer
+- Voice on/off toggle
+- **Restart** button (icon + label) — triggers a new wake-word cycle
+- **Sleep / Wake Up / Booting** button — animated state machine:
+  - `booting` / `wake_detected` → spinner + "Booting…" / "Activating…" (disabled)
+  - `standby` / `sleep` → cyan "Wake Up" button
+  - any active phase → "Sleep" button
+- Settings gear
+
+### Left panel
+
+- `AgentBootList` — scrollable list of all registered agents with live status dots and boot-sequence log lines
+
+### Center panel
+
+Primary interaction area, laid out top to bottom:
+
+1. **Orbit canvas** — `AgentOrbit3D` (fixed 420 px height, `position: relative`)
+
+   | Canvas layer | Description |
+   |---|---|
+   | Orbit guide rings | Two dashed ellipses defining the 3D orbit path |
+   | Communication link | Dotted animated line + sliding pulse dot between AI Core and active agent |
+   | Active-agent radiation | Ambient glow + 4 expanding rings centered on the responding agent |
+   | AI Core | Gyroscope rings (2 tilted), octahedron wireframe, voice-reactive glow + 5 expanding rings |
+   | Agent nodes | DOM elements positioned by RAF physics — float on fibonacci ellipsoid |
+
+   **Canvas overlays (absolute-positioned DOM):**
+
+   | Position | Component | Content |
+   |---|---|---|
+   | Top-left | `ForecastStrip` | Vertical 5-day forecast (Today / Sat / Sun / Mon / Tue) |
+   | Top-right | Performance HUD | Latency, active agent, CPU %, RAM % |
+
+2. **Conversation header** — current phase label + active agent name
+
+3. **HoloChat** — scrollable conversation history (user + assistant turns)
+
+4. **Input bar** — text field + send button
+
+### Right panel
+
+Three cards stacked vertically:
+
+| Card | Content |
+|---|---|
+| System Status (teal) | CPU %, RAM %, disk %, uptime — spread label/value layout |
+| App Status (violet) | Orchestrator, MCP Gateway, Desktop — live health dots |
+| Config | LLM provider, TTS/STT mode, wake-word status |
+
+### AI Core — voice reactivity
+
+`AgentOrbit3D` receives `voiceActive: boolean` and `voiceIntensity: number` (0–1) from `App.tsx`:
+
+```
+voiceActive  = isSpeaking || isListening || phase === 'responding' || phase === 'thinking'
+voiceIntensity = 1.0 (speaking) | 0.9 (responding) | 0.6 (listening) | 0.32 (thinking) | 0.0
+```
+
+- **Radiation fires only when `voiceActive && voiceIntensity > 0.05`** — idle AI Core stays dark
+- 5 concentric rings expand outward from the core center, staggered by `i/5` phase offset
+- Ring speed: 1.4× (responding) · 1.1× (listening) · 0.75× (thinking)
+- Ambient glow radius and opacity both scale with `voiceIntensity`
+
+### Active-agent focus
+
+When `activeAgentId` is set and `phase` is `thinking / responding / listening`:
+
+- Active agent node: ambient glow + 4 outward-expanding rings (canvas), 3 DOM pulse rings, scaled to `1.35×`, `z-index: 200`
+- All other agent nodes: dimmed to 30% opacity
+- Communication link: animated dotted line + pulse dot between AI Core and active agent

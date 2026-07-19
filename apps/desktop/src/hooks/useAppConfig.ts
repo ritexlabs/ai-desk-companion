@@ -1,11 +1,13 @@
 import { useCallback, useState } from 'react';
 
 export interface AppConfig {
+  assistantName: string;
   wakeWord: string;
   callingName: string;
 }
 
 const DEFAULT: AppConfig = {
+  assistantName: 'Robo',
   wakeWord: 'Robo',
   callingName: 'Master',
 };

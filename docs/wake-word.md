@@ -80,7 +80,7 @@ WAKE_WORD_SENSITIVITY=0.5
 
 ```bash
 # If using the launcher, Ctrl+C and re-run:
-python3 start.py
+python3 launch.py
 
 # If running manually:
 cd apps/orchestrator

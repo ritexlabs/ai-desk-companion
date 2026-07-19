@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Personal AI Agent</title>
+    <script>
+      // Snap to full available screen on load (works for popup windows and some browsers).
+      // Falls back silently if the browser restricts it.
+      (function () {
+        try {
+          window.moveTo(0, 0);
+          window.resizeTo(screen.availWidth, screen.availHeight);
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body class="bg-bg">
     <div id="root"></div>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VoiceConfig } from './useVoiceConfig';
+import type { AgentVoiceMap } from './useAgentVoiceConfig';
 
 export type SpeechState = 'idle' | 'speaking' | 'listening';
 
@@ -71,20 +72,7 @@ function pitchFor(gender: VoiceConfig['gender']): number {
   return gender === 'female' ? 1.05 : 0.92;
 }
 
-/** Per-agent pitch and rate offsets applied on top of the base voice config.
- *  Gives each agent a subtly distinct sound when using browser TTS. */
-const AGENT_VOICE_OFFSETS: Record<string, { pitch: number; rate: number }> = {
-  system:   { pitch: -0.15, rate: -0.04 }, // lower, deliberate — technical readouts
-  weather:  { pitch: +0.10, rate:  0.00 }, // brighter, conversational
-  calendar: { pitch: +0.05, rate: +0.04 }, // organised, efficient
-  email:    { pitch:  0.00, rate:  0.00 }, // neutral professional
-  github:   { pitch: -0.10, rate: +0.04 }, // lower, tech-focused
-  stock:    { pitch: -0.12, rate: -0.02 }, // authoritative, measured
-  news:     { pitch: +0.05, rate: +0.07 }, // clear newsreader cadence
-  general:  { pitch:  0.00, rate:  0.00 }, // default
-};
-
-export function useVoice(config?: VoiceConfig) {
+export function useVoice(config?: VoiceConfig, agentVoices?: AgentVoiceMap) {
   const [speechState, setSpeechState] = useState<SpeechState>('idle');
   const [voiceListenerActive, setVoiceListenerActive] = useState(false);
   const [micEverStarted, setMicEverStarted] = useState(false);
@@ -126,16 +114,18 @@ export function useVoice(config?: VoiceConfig) {
       // Cold-start is 150 ms after pre-warming on mount (was 250 ms without it).
       const delay = wasActive ? 30 : 150;
 
-      const offsets = (agentId ? AGENT_VOICE_OFFSETS[agentId] : undefined) ?? { pitch: 0, rate: 0 };
+      // Per-agent voice settings override global config when available.
+      const agentSetting = agentId ? agentVoices?.[agentId] : undefined;
+      const effectiveConfig: VoiceConfig = agentSetting
+        ? { gender: agentSetting.gender, speed: agentSetting.speed, voiceName: agentSetting.voiceName }
+        : (config ?? { gender: 'female', speed: 'normal', voiceName: '' });
+
       const utter = new SpeechSynthesisUtterance(text);
-      utter.rate   = Math.max(0.5, Math.min(2, rateFor(config?.speed ?? 'normal')  + offsets.rate));
-      utter.pitch  = Math.max(0.5, Math.min(2, pitchFor(config?.gender ?? 'female') + offsets.pitch));
+      utter.rate   = Math.max(0.5, Math.min(2, rateFor(effectiveConfig.speed)));
+      utter.pitch  = Math.max(0.5, Math.min(2, pitchFor(effectiveConfig.gender)));
       utter.volume = 1;
 
-      // Apply the best available voice at call time.
-      // Do NOT set onvoiceschanged here — changing utter.voice after speak()
-      // has been queued can interrupt the utterance in Chrome.
-      const v = pickVoice(config ?? { gender: 'female', speed: 'normal', voiceName: '' });
+      const v = pickVoice(effectiveConfig);
       if (v) utter.voice = v;
 
       utter.onstart = () => set('speaking');
@@ -145,7 +135,7 @@ export function useVoice(config?: VoiceConfig) {
       set('speaking');
       setTimeout(() => window.speechSynthesis.speak(utter), delay);
     });
-  }, [config, set]);
+  }, [config, agentVoices, set]);
 
   const stopSpeaking = useCallback(() => {
     if ('speechSynthesis' in window) {

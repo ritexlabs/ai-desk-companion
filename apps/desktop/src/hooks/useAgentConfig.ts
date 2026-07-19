@@ -13,9 +13,21 @@
  * a real token, or log it to the console.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  verifyWeather,
+  connectGoogle,
+  refreshGoogleToken,
+  verifyGitHub,
+  verifySmartHome,
+  verifyNews,
+  connectPortfolio,
+  refreshPortfolioToken,
+} from './agentVerify';
 
 export type ConnectionStatus = 'idle' | 'verifying' | 'connected' | 'error';
+export type TunnelProvider   = 'none' | 'cloudflare';
+export type TunnelStatus     = 'idle' | 'starting' | 'active' | 'error';
 
 /* ── Per-agent credential shapes ─────────────────────────────────── */
 
@@ -36,6 +48,7 @@ export interface WeatherCreds {
 export interface GoogleCreds {
   calendarEnabled: boolean;
   emailEnabled: boolean;
+  driveEnabled: boolean;
   clientId: string;
   clientSecret: string;
   accessToken: string;
@@ -59,6 +72,8 @@ export interface GitHubCreds {
 export interface StockCreds {
   enabled: boolean;
   defaultMarket: 'IN' | 'US';
+  spreadsheetId: string;
+  spreadsheetName: string;
   status: ConnectionStatus;
   info: string;
 }
@@ -83,6 +98,40 @@ export interface SmartHomeCreds {
   notificationsEnabled: boolean;
 }
 
+export interface PortfolioCreds {
+  enabled:          boolean;
+  endpoint:         string;
+  clientId:         string;
+  clientSecret:     string;
+  /** Manual override — skip auto-discovery when set */
+  authEndpoint:     string;
+  tokenEndpoint:    string;
+  accessToken:      string;
+  refreshToken:     string;
+  tokenExpiresAt:   number;
+  connectedAccount: string;
+  status:           ConnectionStatus;
+  info:             string;
+}
+
+export interface WhatsAppCreds {
+  enabled:            boolean;
+  phoneNumberId:      string;
+  accessToken:        string;
+  webhookVerifyToken: string;
+  contacts:           string;
+  status:             ConnectionStatus;
+  info:               string;
+  tunnelProvider: TunnelProvider;
+  customDomain:   string;
+  /** Runtime-only — not persisted */
+  tunnelStatus:   TunnelStatus;
+  tunnelInfo:     string;
+  callbackUrl:    string;
+  /** Domain pre-configured in server .env (CLOUDFLARE_DOMAIN) — read-only */
+  envDomain:      string;
+}
+
 export interface AgentConfig {
   system:     SystemConfig;
   weather:    WeatherCreds;
@@ -91,6 +140,8 @@ export interface AgentConfig {
   stock:      StockCreds;
   news:       NewsCreds;
   smarthome:  SmartHomeCreds;
+  portfolio:  PortfolioCreds;
+  whatsapp:   WhatsAppCreds;
 }
 
 /* ── Defaults — NO real tokens here ─────────────────────────────── */
@@ -119,6 +170,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   google: {
     calendarEnabled: false,
     emailEnabled: false,
+    driveEnabled: false,
     clientId: '',
     clientSecret: '',
     accessToken: '',
@@ -140,6 +192,8 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   stock: {
     enabled: false,
     defaultMarket: 'IN',
+    spreadsheetId: '',
+    spreadsheetName: '',
     status: 'connected',
     info: 'Yahoo Finance (free, no key required)',
   },
@@ -153,11 +207,39 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     info: '',
     notificationsEnabled: false,
   },
+  portfolio: {
+    enabled:          false,
+    endpoint:         'https://mcp.indmoney.com/mcp',
+    clientId:         '',
+    clientSecret:     '',
+    authEndpoint:     '',
+    tokenEndpoint:    '',
+    accessToken:      '',
+    refreshToken:     '',
+    tokenExpiresAt:   0,
+    connectedAccount: '',
+    status:           'idle',
+    info:             '',
+  },
+  whatsapp: {
+    enabled:            false,
+    phoneNumberId:      '',
+    accessToken:        '',
+    webhookVerifyToken: 'robo-whatsapp-verify',
+    contacts:           '',
+    status:             'idle',
+    info:               '',
+    tunnelProvider: 'none',
+    customDomain:   '',
+    tunnelStatus:   'idle',
+    tunnelInfo:     '',
+    callbackUrl:    '',
+    envDomain:      '',
+  },
 };
 
 const STORAGE_KEY = 'robo-agent-config';
 
-/** Strip runtime-only fields before persisting (enabled flags are persisted). */
 function toPersist(cfg: AgentConfig): AgentConfig {
   return {
     system:    { ...cfg.system },
@@ -167,6 +249,16 @@ function toPersist(cfg: AgentConfig): AgentConfig {
     stock:     { ...cfg.stock,     status: 'idle', info: '' },
     news:      { ...cfg.news,      status: 'idle', info: '' },
     smarthome: { ...cfg.smarthome, status: 'idle', info: '' },
+    portfolio: { ...cfg.portfolio, status: 'idle', info: '', tokenExpiresAt: cfg.portfolio.tokenExpiresAt },
+    whatsapp:  {
+      ...cfg.whatsapp,
+      status:       'idle',
+      info:         '',
+      tunnelStatus: 'idle',
+      tunnelInfo:   '',
+      callbackUrl:  '',
+      envDomain:    '',
+    },
   };
 }
 
@@ -183,14 +275,29 @@ function load(): AgentConfig {
       stock:     { ...DEFAULT_AGENT_CONFIG.stock,     ...parsed.stock     },
       news:      { ...DEFAULT_AGENT_CONFIG.news,      ...parsed.news      },
       smarthome: { ...DEFAULT_AGENT_CONFIG.smarthome, ...parsed.smarthome },
+      portfolio: { ...DEFAULT_AGENT_CONFIG.portfolio, ...parsed.portfolio },
+      whatsapp: {
+        ...DEFAULT_AGENT_CONFIG.whatsapp,
+        ...(parsed as any).whatsapp,
+        tunnelStatus: 'idle' as TunnelStatus,
+        tunnelInfo:   '',
+        callbackUrl:  '',
+        envDomain:    '',
+      },
     };
-    // Restore connected status from persisted credentials.
-    if (cfg.weather.apiKey)        cfg.weather.status   = 'connected';
-    if (cfg.google.connectedEmail) cfg.google.status    = 'connected';
-    if (cfg.github.username)       cfg.github.status    = 'connected';
-    if (cfg.news.apiKey)           cfg.news.status      = 'connected';
-    if (cfg.smarthome.token)       cfg.smarthome.status = 'connected';
-    // Stock agent is always ready (no key needed)
+    if (cfg.weather.apiKey)          cfg.weather.status   = 'connected';
+    if (cfg.google.connectedEmail) {
+      cfg.google.status = 'connected';
+      // Ensure drive scope is always included so sheet browsing works after re-sign
+      if (!cfg.google.scopes.includes('drive')) {
+        cfg.google.scopes = [...cfg.google.scopes, 'drive'];
+      }
+    }
+    if (cfg.github.username)         cfg.github.status    = 'connected';
+    if (cfg.news.apiKey)             cfg.news.status      = 'connected';
+    if (cfg.smarthome.token)              cfg.smarthome.status = 'connected';
+    if (cfg.portfolio.connectedAccount)   cfg.portfolio.status = 'connected';
+    if (cfg.whatsapp.phoneNumberId)  cfg.whatsapp.status  = 'connected';
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
     return cfg;
@@ -208,290 +315,188 @@ function save(cfg: AgentConfig) {
 export function useAgentConfig() {
   const [config, setConfig] = useState<AgentConfig>(load);
 
+  // Keep a ref so the interval always reads the latest config without re-registering.
+  const configRef = useRef(config);
+  configRef.current = config;
+
   const patch = useCallback(<K extends keyof AgentConfig>(
     agent: K,
     partial: Partial<AgentConfig[K]>,
   ) => {
     setConfig((prev) => {
-      const next = {
-        ...prev,
-        [agent]: { ...prev[agent], ...partial },
-      } as AgentConfig;
+      const next = { ...prev, [agent]: { ...prev[agent], ...partial } } as AgentConfig;
       save(next);
       return next;
     });
   }, []);
 
-  /* ── Weather verify ──────────────────────────────────────────── */
-  const verifyWeather = useCallback(async () => {
-    const { provider, apiKey, defaultCity } = config.weather;
-    if (!apiKey) return;
-    patch('weather', { status: 'verifying', info: '' });
-    try {
-      const city = defaultCity || 'London';
-      let url = '';
-      if (provider === 'openweathermap') {
-        url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${apiKey}&units=metric`;
-      } else {
-        url = `https://api.weatherapi.com/v1/current.json?key=${apiKey}&q=${encodeURIComponent(city)}`;
+  // Auto-refresh Google token on mount (catches every restart) and every 50 min.
+  useEffect(() => {
+    const tryRefreshGoogle = () => {
+      const g = configRef.current.google;
+      if (!g.clientId || !g.refreshToken) return;
+      const expiredOrExpiringSoon =
+        !g.accessToken ||
+        (g.tokenExpiresAt > 0 && Date.now() >= g.tokenExpiresAt - 5 * 60 * 1000);
+      if (expiredOrExpiringSoon) {
+        refreshGoogleToken(g, patch);
       }
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const info =
-        provider === 'openweathermap'
-          ? `${data.name}, ${data.sys.country} · ${Math.round(data.main.temp)}°C`
-          : `${data.location.name}, ${data.location.country} · ${data.current.temp_c}°C`;
-      patch('weather', { status: 'connected', info });
-    } catch (e: any) {
-      patch('weather', { status: 'error', info: e.message ?? 'Connection failed' });
-    }
-  }, [config.weather, patch]);
-
-  /* ── PKCE helpers ────────────────────────────────────────────── */
-  /** Generate a cryptographically-random base64url string of `len` bytes. */
-  const _randomBase64url = (len: number): string => {
-    const bytes = new Uint8Array(len);
-    crypto.getRandomValues(bytes);
-    return btoa(String.fromCharCode(...bytes))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  };
-
-  /** SHA-256 of a plain string, returned as base64url. */
-  const _sha256Base64url = async (plain: string): Promise<string> => {
-    const data = new TextEncoder().encode(plain);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return btoa(String.fromCharCode(...new Uint8Array(hash)))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  };
-
-  /* ── Google Sign-In (Authorization Code + PKCE) ── */
-  const connectGoogle = useCallback(async () => {
-    const { clientId, clientSecret, scopes } = config.google;
-    if (!clientId) return;
-
-    const scopeMap: Record<string, string> = {
-      calendar: 'https://www.googleapis.com/auth/calendar.readonly',
-      gmail:    'https://www.googleapis.com/auth/gmail.readonly',
-      drive:    'https://www.googleapis.com/auth/drive.readonly',
     };
-    const selectedScopes = scopes.length > 0 ? scopes : Object.keys(scopeMap);
-    const scopeStr = [
-      'openid', 'email', 'profile',
-      ...selectedScopes.map((s) => scopeMap[s] ?? s),
-    ].join(' ');
+    tryRefreshGoogle();
+    const id = setInterval(tryRefreshGoogle, 50 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [patch]); // patch is stable
 
-    // PKCE: generate verifier + challenge
-    const codeVerifier  = _randomBase64url(32);
-    const codeChallenge = await _sha256Base64url(codeVerifier);
-    const redirectUri   = window.location.origin + '/';
-
-    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    url.searchParams.set('client_id',             clientId);
-    url.searchParams.set('redirect_uri',          redirectUri);
-    url.searchParams.set('response_type',         'code');           // auth-code, not token
-    url.searchParams.set('scope',                 scopeStr);
-    url.searchParams.set('code_challenge',        codeChallenge);
-    url.searchParams.set('code_challenge_method', 'S256');
-    url.searchParams.set('access_type',           'offline');        // get refresh token
-    url.searchParams.set('prompt',                'consent');
-
-    const popup = window.open(url.toString(), 'google-oauth', 'width=520,height=640,left=200,top=100');
-    patch('google', { status: 'verifying', info: '' });
-
-    const poll = setInterval(async () => {
-      try {
-        if (!popup || popup.closed) { clearInterval(poll); patch('google', { status: 'idle' }); return; }
-        const code = new URLSearchParams(popup.location.search).get('code');
-        if (!code) return;
-        clearInterval(poll);
-        popup.close();
-
-        // Exchange auth code + verifier for tokens
-        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            client_id:     clientId,
-            ...(clientSecret ? { client_secret: clientSecret } : {}),
-            code,
-            code_verifier: codeVerifier,
-            grant_type:    'authorization_code',
-            redirect_uri:  redirectUri,
-          }),
-        });
-        const tokens = await tokenRes.json();
-        if (!tokenRes.ok) {
-          patch('google', { status: 'error', info: tokens.error_description ?? 'Token exchange failed' });
-          return;
-        }
-
-        const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
-        patch('google', {
-          accessToken:    tokens.access_token  ?? '',
-          refreshToken:   tokens.refresh_token ?? '',
-          tokenExpiresAt,
-          status: 'verifying',
-          info: '',
-        });
-
-        // Fetch connected account info
-        fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
-          headers: { Authorization: `Bearer ${tokens.access_token}` },
-        })
-          .then((r) => r.json())
-          .then((u) => patch('google', { connectedEmail: u.email ?? '', status: 'connected', info: u.email ?? '' }))
-          .catch(() => patch('google', { status: 'connected', info: 'Connected (email unavailable)' }));
-      } catch {
-        // cross-origin while popup is still on google.com — keep polling
-      }
-    }, 400);
-  }, [config.google, patch]);
-
-  /** Silently refresh the Google access token using the stored refresh token. */
-  const refreshGoogleToken = useCallback(async () => {
-    const { clientId, clientSecret, refreshToken } = config.google;
-    if (!clientId || !refreshToken) return;
-    try {
-      const res = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id:     clientId,
-          ...(clientSecret ? { client_secret: clientSecret } : {}),
-          refresh_token: refreshToken,
-          grant_type:    'refresh_token',
-        }),
-      });
-      const tokens = await res.json();
-      if (!res.ok) return;
-      const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
-      patch('google', { accessToken: tokens.access_token, tokenExpiresAt });
-    } catch {
-      // silent — caller can check tokenExpiresAt to decide if action needed
-    }
-  }, [config.google, patch]);
-
-  const disconnectGoogle = useCallback(() => {
-    patch('google', {
-      accessToken: '', refreshToken: '', tokenExpiresAt: 0,
-      connectedEmail: '', status: 'idle', info: '',
-      // keep clientId and clientSecret so user doesn't have to re-enter them
-    });
-  }, [patch]);
-
-  /* ── GitHub PAT verify ───────────────────────────────────────── */
-  const verifyGitHub = useCallback(async () => {
-    const { personalAccessToken } = config.github;
-    if (!personalAccessToken) return;
-    patch('github', { status: 'verifying', info: '' });
-    try {
-      const res = await fetch('https://api.github.com/user', {
-        headers: {
-          Authorization: `Bearer ${personalAccessToken}`,
-          Accept: 'application/vnd.github.v3+json',
-        },
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status} — check token scopes`);
-      const data = await res.json();
-      const remaining = res.headers.get('x-ratelimit-remaining') ?? '?';
-      patch('github', {
-        username: data.login,
-        status: 'connected',
-        info: `${data.login} · ${remaining} req/hr remaining`,
-      });
-    } catch (e: any) {
-      patch('github', { status: 'error', info: e.message ?? 'Connection failed' });
-    }
-  }, [config.github, patch]);
-
-  const disconnectGitHub = useCallback(() => {
-    patch('github', { personalAccessToken: '', username: '', status: 'idle', info: '' });
-  }, [patch]);
-
-  /**
-   * Derived list of agent IDs that have credentials configured.
-   * Weather is always present. Calendar/Email/GitHub appear once the user
-   * connects the respective service. Persists across restarts via localStorage.
-   */
   const registeredAgentIds = useMemo<string[]>(() => {
-    const ids: string[] = [];
+    const ids: string[] = ['notes']; // always-on built-in skill, no credentials required
     if (config.system.enabled)  ids.push('system');
     if (config.weather.enabled) ids.push('weather');
-    if (config.google.connectedEmail) {
+    if (config.google.connectedEmail && config.google.accessToken) {
       if (config.google.calendarEnabled && config.google.scopes.includes('calendar')) ids.push('calendar');
       if (config.google.emailEnabled    && config.google.scopes.includes('gmail'))    ids.push('email');
     }
     if (config.github.enabled && config.github.username) ids.push('github');
     if (config.stock.enabled) ids.push('stock');
-    if (config.news.enabled) ids.push('news');
-    if (config.smarthome.enabled && config.smarthome.token) ids.push('smarthome');
+    if (config.news.enabled)  ids.push('news');
+    if (config.smarthome.enabled && config.smarthome.token)            ids.push('smarthome');
+    if (config.portfolio.enabled && config.portfolio.connectedAccount) ids.push('portfolio');
+    if (config.whatsapp.enabled && config.whatsapp.phoneNumberId) ids.push('whatsapp');
     return ids;
   }, [
     config.system.enabled,
     config.weather.enabled,
-    config.google.connectedEmail, config.google.calendarEnabled,
-    config.google.emailEnabled,   config.google.scopes,
+    config.google.connectedEmail, config.google.accessToken,
+    config.google.calendarEnabled, config.google.emailEnabled, config.google.scopes,
     config.github.enabled,        config.github.username,
     config.stock.enabled,
     config.news.enabled,
     config.smarthome.enabled, config.smarthome.token,
+    config.portfolio.enabled, config.portfolio.connectedAccount,
+    config.whatsapp.enabled,  config.whatsapp.phoneNumberId,
   ]);
 
-  /* ── Smart Home verify ───────────────────────────────────────── */
-  const verifySmartHome = useCallback(async () => {
-    const { endpoint, token } = config.smarthome;
-    if (!token) return;
-    patch('smarthome', { status: 'verifying', info: '' });
+  const disconnectGoogle = useCallback(() => {
+    patch('google', {
+      accessToken: '', refreshToken: '', tokenExpiresAt: 0,
+      connectedEmail: '', status: 'idle', info: '',
+    });
+  }, [patch]);
+
+  const disconnectGitHub = useCallback(() => {
+    patch('github', { personalAccessToken: '', username: '', status: 'idle', info: '' });
+  }, [patch]);
+
+  const verifyWhatsApp = useCallback(async () => {
+    const { phoneNumberId, accessToken } = config.whatsapp;
+    if (!phoneNumberId || !accessToken) return;
+    patch('whatsapp', { status: 'verifying', info: '' });
     try {
       const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
-      const params = new URLSearchParams({
-        endpoint: endpoint || 'http://homeassistant.local:8123',
-        token,
-      });
-      const res = await fetch(`${backendBase}/api/smarthome/ping?${params}`);
+      const params = new URLSearchParams({ phone_number_id: phoneNumberId, access_token: accessToken });
+      const res = await fetch(`${backendBase}/api/whatsapp/verify?${params}`);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `HTTP ${res.status}`);
       }
       const data = await res.json();
-      const location = data.location_name || 'Home';
-      patch('smarthome', { status: 'connected', info: `Connected to ${location}` });
+      const label = data.verified_name
+        ? `${data.verified_name} (${data.display_phone_number})`
+        : data.display_phone_number || 'Connected';
+      patch('whatsapp', { status: 'connected', info: label });
     } catch (e: any) {
-      patch('smarthome', { status: 'error', info: e.message ?? 'Connection failed' });
+      patch('whatsapp', { status: 'error', info: e.message ?? 'Connection failed' });
     }
-  }, [config.smarthome, patch]);
+  }, [config.whatsapp, patch]);
 
-  /* ── News API verify (GNews) ─────────────────────────────────── */
-  const verifyNews = useCallback(async () => {
-    const { apiKey, country } = config.news;
-    if (!apiKey) return;
-    patch('news', { status: 'verifying', info: '' });
+  const checkTunnelStatus = useCallback(async (): Promise<boolean> => {
     try {
-      const params = new URLSearchParams({ token: apiKey, country: country || 'in', lang: 'en', max: '1' });
-      const res = await fetch(`https://gnews.io/api/v4/top-headlines?${params}`);
+      const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
+      const res = await fetch(`${backendBase}/api/tunnel/status`);
+      if (!res.ok) return false;
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.errors?.[0] ?? `HTTP ${res.status}`);
+      if (data.active) {
+        patch('whatsapp', {
+          tunnelStatus:  'active',
+          tunnelInfo:    data.url ?? '',
+          callbackUrl:   data.callback_url ?? '',
+          ...(data.provider && data.provider !== 'none'
+            ? { tunnelProvider: data.provider as TunnelProvider }
+            : {}),
+          envDomain: data.env_domain ?? '',
+        });
+        return true;
       }
-      const total = data.totalArticles ?? 0;
-      patch('news', { status: 'connected', info: `~${total} articles available` });
-    } catch (e: any) {
-      patch('news', { status: 'error', info: e.message ?? 'Connection failed' });
+      if (data.starting) {
+        patch('whatsapp', { tunnelStatus: 'starting', envDomain: data.env_domain ?? '' });
+        return true;
+      }
+      patch('whatsapp', { envDomain: data.env_domain ?? '' });
+      return false;
+    } catch {
+      return false;
     }
-  }, [config.news, patch]);
+  }, [patch]);
+
+  const startTunnel = useCallback(async () => {
+    const { customDomain } = config.whatsapp;
+    patch('whatsapp', { tunnelStatus: 'starting', tunnelInfo: '', callbackUrl: '' });
+    try {
+      const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
+      const res = await fetch(`${backendBase}/api/tunnel/start`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'cloudflare', custom_domain: customDomain }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      patch('whatsapp', {
+        tunnelStatus: 'active',
+        tunnelInfo:   data.url ?? '',
+        callbackUrl:  data.callback_url ?? '',
+        envDomain:    data.env_domain ?? '',
+      });
+    } catch (e: any) {
+      patch('whatsapp', { tunnelStatus: 'error', tunnelInfo: e.message ?? 'Failed to start tunnel', callbackUrl: '' });
+    }
+  }, [config.whatsapp, patch]);
+
+  const stopTunnel = useCallback(async () => {
+    try {
+      const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
+      await fetch(`${backendBase}/api/tunnel/stop`, { method: 'POST' });
+    } catch {}
+    patch('whatsapp', { tunnelStatus: 'idle', tunnelInfo: '', callbackUrl: '' });
+  }, [patch]);
+
+  const disconnectPortfolio = useCallback(() => {
+    patch('portfolio', {
+      enabled: false, accessToken: '', refreshToken: '', tokenExpiresAt: 0,
+      connectedAccount: '', status: 'idle', info: '',
+      clientId: '', clientSecret: '',
+    });
+  }, [patch]);
 
   return {
     config,
     patch,
     registeredAgentIds,
-    verifyWeather,
-    connectGoogle,
+    verifyWeather:          () => verifyWeather(config.weather, patch),
+    connectGoogle:          () => connectGoogle(config.google, patch),
     disconnectGoogle,
-    refreshGoogleToken,
-    verifyGitHub,
+    refreshGoogleToken:     () => refreshGoogleToken(config.google, patch),
+    verifyGitHub:           () => verifyGitHub(config.github, patch),
     disconnectGitHub,
-    verifyNews,
-    verifySmartHome,
+    verifyNews:             () => verifyNews(config.news, patch),
+    verifySmartHome:        () => verifySmartHome(config.smarthome, patch),
+    connectPortfolio:       () => connectPortfolio(config.portfolio, patch),
+    disconnectPortfolio,
+    refreshPortfolioToken:  () => refreshPortfolioToken(config.portfolio, patch),
+    verifyWhatsApp,
+    checkTunnelStatus,
+    startTunnel,
+    stopTunnel,
   };
 }

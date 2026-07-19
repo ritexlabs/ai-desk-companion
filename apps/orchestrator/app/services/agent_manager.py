@@ -1,76 +1,33 @@
 from __future__ import annotations
 
 import asyncio
-from app.agents.weather import WeatherAgent
-from app.agents.system import SystemAgent
-from app.agents.google_calendar import GoogleCalendarAgent
-from app.agents.google_email import GoogleEmailAgent
-from app.agents.github import GitHubAgent
-from app.agents.general_ai import GeneralAIAgent
-from app.agents.stock import StockAgent
-from app.agents.news import NewsAgent
-from app.agents.smarthome import SmartHomeAgent
+import json
+import logging
+
+from app.agents.registry import AGENTS
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse
 from app.core.config import settings
 
-# Maps agent ID → key under agent_config dict sent from the UI
-_CONFIG_KEY: dict[str, str | None] = {
-    'weather':   'weather',
-    'github':    'github',
-    'calendar':  'google',
-    'email':     'google',
-    'stock':     'stock',
-    'news':      'news',
-    'smarthome': 'smarthome',
-    'system':    None,
-    'general':   None,
-}
+logger = logging.getLogger(__name__)
 
 
 def _env_agent_defaults() -> dict:
-    """Build agent config dicts from .env values. These are used as fallbacks
-    when the UI has not configured a particular agent."""
-    return {
-        'weather': {
-            'api_key':      settings.weather_api_key,
-            'provider':     settings.weather_provider,
-            'default_city': settings.weather_default_city,
-        },
-        'github': {
-            'personal_access_token': settings.github_token,
-        },
-        'google': {
-            'access_token':  settings.google_access_token,
-            'refresh_token': settings.google_refresh_token,
-            'client_id':     settings.google_client_id,
-            'client_secret': settings.google_client_secret,
-        },
-        'stock': {
-            'default_market': settings.stock_default_market,
-        },
-        'news': {
-            'api_key': settings.news_api_key,
-            'country': settings.news_default_country,
-        },
-        'smarthome': {
-            'endpoint': settings.myhome_mcp_endpoint,
-            'token':    settings.myhome_mcp_token,
-        },
-    }
+    """Env-level defaults for local built-in agents.
+    All integrations (smarthome, whatsapp, etc.) are now served by the MCP Gateway."""
+    return {}
 
 
 def _env_llm_defaults() -> dict:
-    """Build LLM config from .env values."""
     return {
         'provider': settings.llm_provider,
-        'api_key':  settings.openai_api_key,   # OPENAI_API_KEY serves as default LLM key
+        'api_key':  settings.openai_api_key,
         'model':    settings.llm_model,
         'base_url': settings.llm_base_url,
     }
 
 
 def _merge(env: dict, session: dict) -> dict:
-    """Shallow merge: session value wins over env value for each key."""
+    """Shallow merge: session value wins over env value when non-empty."""
     merged = {**env}
     for k, v in session.items():
         if v not in (None, '', [], {}):
@@ -81,42 +38,32 @@ def _merge(env: dict, session: dict) -> dict:
 def _merge_llm(env: dict, session: dict) -> dict:
     """Merge LLM configs, guarding against cross-provider key contamination.
 
-    If the session specifies a different provider than the env but supplies no
-    API key, the env key would be wrong for that provider (e.g. OpenAI key sent
-    to Anthropic). In that case fall back entirely to the env config so the key
-    and provider always belong together.
+    If the session selects a different provider but supplies no key, the env key
+    belongs to a different provider — use the env pair intact.
     """
     s_key      = (session.get('api_key')  or '').strip()
     s_provider = (session.get('provider') or '').lower().strip()
     e_provider = (env.get('provider')     or '').lower().strip()
 
     if s_key:
-        return _merge(env, session)  # session has its own credentials — trust it
+        return _merge(env, session)
 
     if s_provider and s_provider != e_provider:
-        return dict(env)  # different provider, no key → env has the matching pair
+        return dict(env)
 
-    return _merge(env, session)  # same provider → merge normally
+    return _merge(env, session)
 
 
 class AgentManager:
     def __init__(self) -> None:
-        self._agents = {
-            'weather':   WeatherAgent(),
-            'system':    SystemAgent(),
-            'calendar':  GoogleCalendarAgent(),
-            'email':     GoogleEmailAgent(),
-            'github':    GitHubAgent(),
-            'stock':     StockAgent(),
-            'news':      NewsAgent(),
-            'smarthome': SmartHomeAgent(),
-            'general':   GeneralAIAgent(),
-        }
-        # Populated at start_session; reset between sessions
+        # Build agent map from registry — no direct imports needed here.
+        self._agents = {cls.id: cls() for cls in AGENTS}
+
         self._session_llm_config:     dict      = {}
         self._session_agent_config:   dict      = {}
         self._session_enabled_agents: list[str] = []
-        self._session_calling_name:   str       = 'Robo'
+        self._session_calling_name:   str       = 'Master'
+        self._session_assistant_name: str       = 'Robo'
 
     @property
     def agents(self):
@@ -133,20 +80,32 @@ class AgentManager:
         llm_config: dict,
         agent_config: dict,
         enabled_agents: list[str] | None = None,
-        calling_name: str = 'Robo',
+        calling_name: str = 'Master',
+        assistant_name: str = 'Robo',
     ) -> None:
-        """Called once per wake/start_session with credentials from the UI payload."""
-        self._session_llm_config    = llm_config    or {}
-        self._session_agent_config  = agent_config  or {}
-        self._session_calling_name  = calling_name  or 'Robo'
+        self._session_llm_config    = llm_config      or {}
+        self._session_agent_config  = agent_config    or {}
+        self._session_calling_name  = calling_name    or 'Master'
+        self._session_assistant_name = assistant_name or 'Robo'
         agents = list(enabled_agents or [])
-        if 'general' not in agents:
-            agents.append('general')
+        # Auto-add built-in skills and general AI if not already present
+        for always_on in ('websearch', 'calculator', 'memory', 'briefing', 'general'):
+            if always_on not in agents:
+                agents.append(always_on)
         self._session_enabled_agents = agents
 
+    def clear_session(self) -> None:
+        """Zero out session credentials. Called on stop_session."""
+        self._session_llm_config     = {}
+        self._session_agent_config   = {}
+        self._session_enabled_agents = []
+        self._session_calling_name   = 'Master'
+        self._session_assistant_name = 'Robo'
+
     async def initialize_enabled_agents(self) -> None:
-        await asyncio.gather(*(agent.initialize() for key, agent in self._agents.items() if key != 'general'))
-        await self._agents['general'].initialize()
+        await asyncio.gather(*(
+            agent.initialize() for agent in self._agents.values()
+        ))
 
     async def health_snapshot(self) -> list[AgentHealth]:
         return [await agent.health() for agent in self._agents.values()]
@@ -155,7 +114,8 @@ class AgentManager:
         if agent_id not in self._agents:
             agent_id = 'general'
 
-        config_key = _CONFIG_KEY.get(agent_id)
+        agent      = self._agents[agent_id]
+        config_key = agent.config_key
 
         if config_key:
             env_cfg     = _env_agent_defaults().get(config_key, {})
@@ -164,45 +124,78 @@ class AgentManager:
         else:
             agent_cfg = {}
 
-        env_llm     = _env_llm_defaults()
-        session_llm = self._session_llm_config
-        llm_cfg     = _merge_llm(env_llm, session_llm)
+        llm_cfg = _merge_llm(_env_llm_defaults(), self._session_llm_config)
 
         enriched = request.model_copy(update={
             'context': {
                 **request.context,
-                'llm_config':    llm_cfg,
-                'agent_config':  agent_cfg,
-                'calling_name':  self._session_calling_name,
+                'llm_config':     llm_cfg,
+                'agent_config':   agent_cfg,
+                'calling_name':   self._session_calling_name,
+                'assistant_name': self._session_assistant_name,
             },
         })
-        return await self._agents[agent_id].handle(enriched)
+        return await agent.handle(enriched)
 
-    async def handle_as_tool(self, agent_id: str, query: str) -> str:
-        """Call an agent and return its raw text result. Used by the LLM orchestrator as a tool."""
-        if agent_id not in self._agents:
-            return f'Unknown agent: {agent_id}'
-        response = await self.handle(agent_id, AgentRequest(text=query))
+    async def handle_as_tool(self, fn_name: str, query: str) -> str:
+        if '__' in fn_name:
+            # Gateway-namespaced tool call (e.g. indmoney__query_portfolio).
+            # No credentials forwarded — gateway reads them from its own .env.
+            from app.dependencies import gateway_client
+            try:
+                result = await gateway_client.call_tool(fn_name, {'query': query})
+                if isinstance(result, str):
+                    return result
+                return json.dumps(result) if result is not None else 'No data available.'
+            except PermissionError as exc:
+                return str(exc)
+            except Exception as exc:
+                logger.warning('Gateway tool call %s failed: %s', fn_name, exc)
+                return f'Tool call failed: {str(exc)[:100]}'
+
+        # Local agent call
+        if fn_name not in self._agents:
+            return f'Unknown agent: {fn_name}'
+        response = await self.handle(fn_name, AgentRequest(text=query))
         return response.text
 
+    async def _fetch_gateway_tools(self) -> dict:
+        """Fetch tools from the gateway and convert to tool_meta format for the LLM."""
+        from app.dependencies import gateway_client
+        try:
+            raw = await gateway_client.list_tools()
+        except Exception as exc:
+            logger.debug('Gateway list_tools unavailable: %s', exc)
+            return {}
+
+        tools: dict = {}
+        for t in raw:
+            name = t.get('name', '')
+            if not name:
+                continue
+            # Extract query parameter description as query_hint
+            props     = t.get('inputSchema', {}).get('properties', {})
+            query_doc = props.get('query', {}).get('description', name)
+            tools[name] = {
+                'description': t.get('description', name),
+                'query_hint':  query_doc,
+            }
+        return tools
+
     async def orchestrate(self, user_message: str) -> tuple[str, str]:
-        """
-        LLM-first handling: the LLM decides which agent tools to call,
-        executes them, then synthesizes a natural response.
-        Falls back to keyword router → direct agent when no LLM is configured.
-        Returns (response_text, agent_used).
-        """
         if self.llm_configured:
             from app.services.orchestrator import llm_orchestrator
+            gateway_tools = await self._fetch_gateway_tools()
             return await llm_orchestrator.handle(
                 user_message,
                 self._session_llm_config,
                 self._session_enabled_agents,
+                self._agents,
                 self.handle_as_tool,
-                calling_name=self._session_calling_name,
+                assistant_name=self._session_assistant_name,
+                gateway_tools=gateway_tools if gateway_tools else None,
             )
 
-        # No LLM configured — keyword route to a single agent
         from app.services.router import _keyword_route
         route    = _keyword_route(user_message)
         response = await self.handle(route.agent, AgentRequest(text=user_message))

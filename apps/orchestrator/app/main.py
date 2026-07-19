@@ -10,8 +10,11 @@ from app.api.routes.session import router as session_router
 from app.api.routes.command import router as command_router
 from app.api.routes.system import router as system_router
 from app.api.routes.smarthome import router as smarthome_router
+from app.api.routes.portfolio import router as portfolio_router
+from app.api.routes.stocks import router as stocks_router
 from app.api.routes.agent_data import router as agent_data_router
-from app.services.hass_mcp import close_all as close_hass_clients
+from app.api.routes.whatsapp import router as whatsapp_router
+from app.api.routes.notes import router as notes_router
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -52,17 +55,25 @@ async def lifespan(app: FastAPI):
 
     metrics_task = asyncio.create_task(_metrics_loop())
 
+    # ── Notes/reminders/alarms scheduler (every 30 s) ────────────────
+    from app.services.notes_service import scheduler_loop as _notes_scheduler
+    notes_task = asyncio.create_task(_notes_scheduler())
+
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
     wake_word_service.stop()
     metrics_task.cancel()
+    notes_task.cancel()
     try:
         await metrics_task
     except asyncio.CancelledError:
         pass
+    try:
+        await notes_task
+    except asyncio.CancelledError:
+        pass
     await agent_manager.shutdown()
-    await close_hass_clients()
 
 
 app = FastAPI(title=settings.app_name, version='0.1.0', lifespan=lifespan)
@@ -80,7 +91,11 @@ app.include_router(session_router)
 app.include_router(command_router)
 app.include_router(system_router)
 app.include_router(smarthome_router)
+app.include_router(portfolio_router)
+app.include_router(stocks_router)
 app.include_router(agent_data_router)
+app.include_router(whatsapp_router)
+app.include_router(notes_router)
 app.include_router(ws_router)
 
 

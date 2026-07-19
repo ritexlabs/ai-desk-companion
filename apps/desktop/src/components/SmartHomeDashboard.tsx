@@ -591,7 +591,11 @@ export function SmartHomeDashboard({ endpoint, token, onClose, onVoice }: SmartH
     try {
       const params = new URLSearchParams({ endpoint, token });
       const res = await fetch(`${BACKEND_URL}/api/smarthome/states?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let detail = `HTTP ${res.status}`;
+        try { const body = await res.json(); if (body?.detail) detail = body.detail; } catch { /* ignore */ }
+        throw new Error(detail);
+      }
       const data: StatesResponse = await res.json();
       setStates(data);
       setError(null);
@@ -851,7 +855,7 @@ export function SmartHomeDashboard({ endpoint, token, onClose, onVoice }: SmartH
             )}
 
             {!loading && error && (
-              <div className="flex flex-col items-center justify-center h-48 gap-4">
+              <div className="flex flex-col items-center justify-center h-full gap-4 py-8 px-4">
                 <motion.div
                   animate={{ scale: [1, 1.1, 1] }}
                   transition={{ duration: 2, repeat: Infinity }}
@@ -859,9 +863,17 @@ export function SmartHomeDashboard({ endpoint, token, onClose, onVoice }: SmartH
                 >
                   <AlertTriangle className="h-6 w-6 text-red-400" />
                 </motion.div>
-                <div className="text-center">
+                <div className="text-center max-w-sm">
                   <div className="text-sm text-red-300 font-semibold">Cannot reach Home Assistant</div>
-                  <div className="text-[11px] text-slate-500 mt-1 max-w-xs">{error}</div>
+                  <div className="text-[11px] text-slate-400 mt-1.5 leading-relaxed font-mono break-words">{error}</div>
+                </div>
+                {/* Diagnostic hints */}
+                <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-[10px] text-slate-500 space-y-1 max-w-xs">
+                  <p className="font-semibold text-slate-400 mb-1">Check:</p>
+                  <p>• Docker Desktop is running</p>
+                  <p>• <code className="text-slate-400">voska/hass-mcp</code> image is pulled</p>
+                  <p>• <code className="text-slate-400">MYHOME_MCP_ENDPOINT</code> uses an IP (not <code className="text-slate-400">.local</code>)</p>
+                  <p>• Home Assistant long-lived token is valid</p>
                 </div>
                 <motion.button
                   whileHover={{ scale: 1.04 }}

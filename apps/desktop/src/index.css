@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -12,14 +14,61 @@ body,
 #root {
   margin: 0;
   padding: 0;
+  width: 100%;
   height: 100%;
-  min-height: 100%;
+  min-width: 960px;
+  min-height: 680px;
   background: #050816;
 }
 
 body {
   color: white;
   overflow: hidden;
+}
+
+/* ─── Custom font utilities ────────────────────────────── */
+.font-orbitron {
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.font-jetbrains {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ─── Holographic terminal overlay ─────────────────────── */
+.holo-terminal {
+  position: relative;
+}
+.holo-terminal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    transparent,
+    transparent 3px,
+    rgba(0, 0, 0, 0.04) 3px,
+    rgba(0, 0, 0, 0.04) 4px
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+.holo-terminal > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Neural pulse ring ─────────────────────────────────── */
+@keyframes neural-ring {
+  0%   { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(3.8); opacity: 0; }
+}
+
+/* ─── Data packet flow ──────────────────────────────────── */
+@keyframes data-flow {
+  0%   { opacity: 0; transform: translateX(-8px); }
+  30%  { opacity: 1; }
+  100% { opacity: 0; transform: translateX(8px); }
 }
 
 /* ─── Thin scrollbar ───────────────────────────────────── */
@@ -100,3 +149,16 @@ body {
 .glow-cyan {
   animation: glow-pulse 2.5s ease-in-out infinite;
 }
+
+/* ─── Agent card scene animations ─────────────────────── */
+@keyframes agent-rays   { to { transform: rotate(360deg); } }
+@keyframes agent-glow-p { 0%,100% { opacity:.6; transform:scale(1)   } 50% { opacity:1; transform:scale(1.18) } }
+@keyframes agent-ring   { 0% { transform:scale(.5);  opacity:.8 } 100% { transform:scale(2.8); opacity:0 } }
+@keyframes agent-rain   { 0% { transform:translateY(-10px);  opacity:.9 } 100% { transform:translateY(240px); opacity:0 } }
+@keyframes agent-rise   { 0% { transform:translateY(8px);    opacity:.8 } 100% { transform:translateY(-200px);opacity:0 } }
+@keyframes agent-fall-p { 0% { transform:translateY(-10px);  opacity:.8 } 100% { transform:translateY(200px); opacity:0 } }
+@keyframes agent-code   { 0% { transform:translateY(-100%);  opacity:.7 } 100% { transform:translateY(300%);  opacity:0 } }
+@keyframes agent-star   { 0%,100% { opacity:.12 } 50% { opacity:.9 } }
+@keyframes agent-float  { 0%,100% { transform:translateY(0)  } 50% { transform:translateY(-7px) } }
+@keyframes agent-ticker { 0% { transform:translateX(0) } 100% { transform:translateX(-50%) } }
+@keyframes agent-chart  { 0%,100% { stroke-dashoffset: 800 } }

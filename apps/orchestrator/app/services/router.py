@@ -11,15 +11,22 @@ from app.services.llm import llm_service
 # here is enough — no keyword lists needed for LLM mode.
 
 AGENT_DESCRIPTIONS: dict[str, str] = {
-    'weather':  'Weather conditions, forecasts, temperature, rain, humidity, wind speed',
-    'system':   'Current time, date, day, timezone, OS info, CPU usage, memory, battery, system health',
-    'calendar': 'Meetings, events, appointments, schedule, free time slots, upcoming events',
-    'email':    'Email inbox, unread messages, email summaries, sender information',
-    'github':   'GitHub repos, pull requests, issues, commits, CI/CD workflows, code review status',
-    'stock':    'Stock prices, market indices (Nifty 50, Sensex, S&P 500, Dow Jones), RSI, technical analysis',
-    'news':      'Latest news headlines, breaking news, current events, top stories by country or city',
-    'smarthome': 'Control smart home devices: lights (on/off, brightness, color), switches, climate/thermostat, covers, scenes, automations, device status',
-    'general':   'General knowledge, creative writing, explanations, calculations, anything not covered above',
+    'weather':    'Weather conditions, forecasts, temperature, rain, humidity, wind speed',
+    'system':     'Current time, date, day, timezone, OS info, CPU usage, memory, battery, system health',
+    'calendar':   'Meetings, events, appointments, schedule, free time slots, upcoming events',
+    'email':      'Email inbox, unread messages, email summaries, sender information',
+    'github':     'GitHub repos, pull requests, issues, commits, CI/CD workflows, code review status',
+    'stock':      'Stock prices, market indices (Nifty 50, Sensex, S&P 500, Dow Jones), RSI, technical analysis',
+    'news':       'Latest news headlines, breaking news, current events, top stories by country or city',
+    'smarthome':  'Control smart home devices: lights (on/off, brightness, color), switches, climate/thermostat, covers, scenes, automations, device status',
+    'whatsapp':   'Send WhatsApp messages to contacts, read incoming WhatsApp messages, check messages from a specific person',
+    'portfolio':  'Investment portfolio: equity holdings, mutual funds, P&L, returns, watchlist, transactions via INDmoney',
+    # Built-in skills
+    'websearch':  'Search the web for current facts, recent events, live prices, or any up-to-date information',
+    'calculator': 'Precise arithmetic, percentages, tip calculations, unit conversion formulas, math expressions',
+    'memory':     'Remember personal notes, recall stored info, save preferences — "remember X is Y", "what is X", "forget X"',
+    'briefing':   'Full morning briefing or dashboard summary combining weather, calendar, news and smart home status',
+    'general':    'General knowledge, creative writing, explanations, history, coding help — anything not covered above',
 }
 
 # ── Helpers shared by LLM and keyword paths ───────────────────────────────────
@@ -98,6 +105,15 @@ def _keyword_route(text: str) -> RouteResult:
             'latest news', 'current events', 'what is happening', "what's happening",
             'top news'):
         return RouteResult(agent='news', confidence=0.9, reason='keyword:news')
+
+    if _has(t, 'whatsapp', 'whats app', 'wa message',
+            'send whatsapp', 'whatsapp message', 'text to'):
+        return RouteResult(agent='whatsapp', confidence=0.9, reason='keyword:whatsapp')
+
+    if _has(t, 'portfolio', 'holdings', 'holding', 'mutual fund', 'sip',
+            'indmoney', 'folio', 'watchlist', 'invested', 'investment',
+            'p&l', 'profit loss', 'gain loss', 'my returns'):
+        return RouteResult(agent='portfolio', confidence=0.9, reason='keyword:portfolio')
 
     if _has(t, 'light', 'lights', 'lamp', 'bulb', 'switch', 'plug',
             'fan', 'thermostat', 'air conditioner', 'ac', 'heater',

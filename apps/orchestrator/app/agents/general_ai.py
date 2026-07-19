@@ -33,8 +33,8 @@ class GeneralAIAgent(AssistantAgent):
         return None
 
     async def handle(self, request: AgentRequest) -> AgentResponse:
-        llm_config:   dict = request.context.get('llm_config', {})
-        calling_name: str  = request.context.get('calling_name', 'Robo')
+        llm_config:     dict = request.context.get('llm_config', {})
+        assistant_name: str  = request.context.get('assistant_name', 'Robo')
         provider = (llm_config.get('provider') or '').lower()
         api_key  = (llm_config.get('api_key')  or '').strip()
 
@@ -44,7 +44,7 @@ class GeneralAIAgent(AssistantAgent):
         from app.services.llm import llm_service
         text = await llm_service.complete(
             request.text, llm_config,
-            system_prompt=_make_general_system_prompt(calling_name),
+            system_prompt=_make_general_system_prompt(assistant_name),
             max_tokens=200,
         )
         if not text:

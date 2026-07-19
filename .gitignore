@@ -1,5 +1,6 @@
 # ── Claude Code ────────────────────────────────────────────────────────────────
 CLAUDE.md
+.claude/
 
 # ── Secrets — never commit these ──────────────────────────────────────────────
 .env
@@ -22,6 +23,15 @@ dist/
 node_modules/
 apps/desktop/dist/
 apps/desktop/.vite/
+
+# ── Runtime data (user-generated, never commit) ───────────────────────────────
+apps/orchestrator/data/
+apps/mcp-gateway/logs/
+.pids
+
+# ── Cloudflare tunnel config (contains real tunnel UUIDs and hostnames) ────────
+apps/mcp-gateway/.cloudflared/
+.cloudflared/
 
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store

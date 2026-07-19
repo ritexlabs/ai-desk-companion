@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { X, RotateCw, LayoutDashboard, Bell, BellOff, Loader2, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { X, RotateCw, LayoutDashboard, Bell, BellOff, Loader2, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { WeatherPanel } from './WeatherWidget';
 import type { AgentDefinition } from '../types/runtime';
 import type { AgentConfig } from '../hooks/useAgentConfig';
+import { AgentBackground } from './AgentBackground';
 
 interface AgentMetrics {
   calls: number;
@@ -22,39 +24,36 @@ interface AgentDetailModalProps {
   onToggleNotifications?: (enabled: boolean) => void;
 }
 
-const COLORS: Record<string, { text: string; border: string; bg: string; dot: string; glow: string }> = {
-  system:   { text: 'text-teal-300',    border: 'border-teal-400/30',    bg: 'bg-teal-400/8',    dot: 'bg-teal-400',    glow: 'rgba(45,212,191,0.12)' },
-  weather:  { text: 'text-cyan-300',    border: 'border-cyan-400/30',    bg: 'bg-cyan-400/8',    dot: 'bg-cyan-400',    glow: 'rgba(34,211,238,0.12)' },
-  calendar: { text: 'text-violet-300',  border: 'border-violet-400/30',  bg: 'bg-violet-400/8',  dot: 'bg-violet-400',  glow: 'rgba(167,139,250,0.12)' },
-  email:    { text: 'text-emerald-300', border: 'border-emerald-400/30', bg: 'bg-emerald-400/8', dot: 'bg-emerald-400', glow: 'rgba(52,211,153,0.12)' },
-  github:   { text: 'text-amber-300',   border: 'border-amber-400/30',   bg: 'bg-amber-400/8',   dot: 'bg-amber-400',   glow: 'rgba(251,191,36,0.12)' },
-  stock:    { text: 'text-green-300',   border: 'border-green-400/30',   bg: 'bg-green-400/8',   dot: 'bg-green-400',   glow: 'rgba(74,222,128,0.12)' },
-  news:     { text: 'text-sky-300',     border: 'border-sky-400/30',     bg: 'bg-sky-400/8',     dot: 'bg-sky-400',     glow: 'rgba(56,189,248,0.12)' },
-  smarthome:{ text: 'text-orange-300',  border: 'border-orange-400/30',  bg: 'bg-orange-400/8',  dot: 'bg-orange-400',  glow: 'rgba(251,146,60,0.12)' },
-  general:  { text: 'text-violet-300',  border: 'border-violet-400/30',  bg: 'bg-violet-400/8',  dot: 'bg-violet-400',  glow: 'rgba(167,139,250,0.12)' },
+/* ─── Per-agent theme tokens ─────────────────────────────── */
+const COLORS: Record<string, {
+  text: string; border: string; bg: string; dot: string;
+  glow: string; hex: string; rgb: string;
+}> = {
+  system:    { text:'text-teal-300',    border:'border-teal-400/30',    bg:'bg-teal-400/8',    dot:'bg-teal-400',    glow:'rgba(45,212,191,.20)',  hex:'#2dd4bf', rgb:'45,212,191'   },
+  weather:   { text:'text-cyan-300',    border:'border-cyan-400/30',    bg:'bg-cyan-400/8',    dot:'bg-cyan-400',    glow:'rgba(34,211,238,.20)',  hex:'#22d3ee', rgb:'34,211,238'   },
+  calendar:  { text:'text-violet-300',  border:'border-violet-400/30',  bg:'bg-violet-400/8',  dot:'bg-violet-400',  glow:'rgba(167,139,250,.20)', hex:'#a78bfa', rgb:'167,139,250'  },
+  email:     { text:'text-emerald-300', border:'border-emerald-400/30', bg:'bg-emerald-400/8', dot:'bg-emerald-400', glow:'rgba(52,211,153,.20)',  hex:'#34d399', rgb:'52,211,153'   },
+  github:    { text:'text-amber-300',   border:'border-amber-400/30',   bg:'bg-amber-400/8',   dot:'bg-amber-400',   glow:'rgba(251,191,36,.20)',  hex:'#fbbf24', rgb:'251,191,36'   },
+  stock:     { text:'text-green-300',   border:'border-green-400/30',   bg:'bg-green-400/8',   dot:'bg-green-400',   glow:'rgba(74,222,128,.20)',  hex:'#4ade80', rgb:'74,222,128'   },
+  news:      { text:'text-sky-300',     border:'border-sky-400/30',     bg:'bg-sky-400/8',     dot:'bg-sky-400',     glow:'rgba(56,189,248,.20)',  hex:'#38bdf8', rgb:'56,189,248'   },
+  smarthome: { text:'text-orange-300',  border:'border-orange-400/30',  bg:'bg-orange-400/8',  dot:'bg-orange-400',  glow:'rgba(251,146,60,.20)',  hex:'#fb923c', rgb:'251,146,60'   },
+  portfolio: { text:'text-teal-300',    border:'border-teal-400/30',    bg:'bg-teal-400/8',    dot:'bg-teal-400',    glow:'rgba(20,184,166,.20)',  hex:'#14b8a6', rgb:'20,184,166'   },
+  whatsapp:  { text:'text-emerald-300', border:'border-emerald-400/30', bg:'bg-emerald-400/8', dot:'bg-emerald-400', glow:'rgba(37,211,102,.20)',  hex:'#25d366', rgb:'37,211,102'   },
+  general:   { text:'text-violet-300',  border:'border-violet-400/30',  bg:'bg-violet-400/8',  dot:'bg-violet-400',  glow:'rgba(167,139,250,.20)', hex:'#a78bfa', rgb:'167,139,250'  },
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
-  online:   { label: 'Online',   color: 'text-emerald-400' },
-  starting: { label: 'Starting', color: 'text-cyan-400' },
-  degraded: { label: 'Degraded', color: 'text-amber-400' },
-  failed:   { label: 'Failed',   color: 'text-red-400' },
-  offline:  { label: 'Offline',  color: 'text-slate-500' },
+  online:   { label:'Online',   color:'text-emerald-400' },
+  starting: { label:'Starting', color:'text-cyan-400'    },
+  degraded: { label:'Degraded', color:'text-amber-400'   },
+  failed:   { label:'Failed',   color:'text-red-400'     },
+  offline:  { label:'Offline',  color:'text-slate-500'   },
 };
 
-function Row({ label, value, valueClass = 'text-slate-300' }: { label: string; value: string; valueClass?: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-[10px] uppercase tracking-wider text-slate-500 flex-shrink-0 mt-0.5">{label}</span>
-      <span className={`text-[11px] text-right leading-relaxed ${valueClass}`}>{value}</span>
-    </div>
-  );
-}
-
-/* ─── Panel skeleton / error shared components ─── */
+/* ─── Shared panel components ────────────────────────────── */
 function PanelLoading() {
   return (
-    <div className="flex items-center justify-center gap-2 py-4 text-slate-600">
+    <div className="flex items-center justify-center gap-2 py-5 text-slate-600">
       <Loader2 className="h-3.5 w-3.5 animate-spin" />
       <span className="text-[10px]">Loading…</span>
     </div>
@@ -62,29 +61,26 @@ function PanelLoading() {
 }
 function PanelError({ msg }: { msg: string }) {
   return (
-    <div className="flex items-start gap-2 py-3 text-slate-600">
+    <div className="flex items-start gap-2 py-3">
       <AlertCircle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5 text-red-500/60" />
-      <span className="text-[10px] leading-relaxed">{msg}</span>
+      <span className="text-[10px] text-slate-600 leading-relaxed">{msg}</span>
     </div>
   );
 }
 
-/* ─── Calendar events panel ─── */
+/* ─── Calendar panel ─────────────────────────────────────── */
 function CalendarPanel({ accessToken, c }: { accessToken: string; c: typeof COLORS.calendar }) {
-  const [events, setEvents] = useState<{ id: string; summary: string; start: string; end: string }[]>([]);
+  const [events, setEvents] = useState<{ id: string; summary: string; start: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!accessToken) { setError('No Google access token configured.'); setLoading(false); return; }
     const now = new Date();
-    const weekAhead = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
     const params = new URLSearchParams({
       timeMin: now.toISOString(),
-      timeMax: weekAhead.toISOString(),
-      maxResults: '10',
-      singleEvents: 'true',
-      orderBy: 'startTime',
+      timeMax: new Date(now.getTime() + 7 * 86400000).toISOString(),
+      maxResults: '8', singleEvents: 'true', orderBy: 'startTime',
     });
     fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -96,39 +92,39 @@ function CalendarPanel({ accessToken, c }: { accessToken: string; c: typeof COLO
           id: e.id,
           summary: e.summary ?? '(No title)',
           start: e.start?.dateTime ?? e.start?.date ?? '',
-          end: e.end?.dateTime ?? e.end?.date ?? '',
         })));
         setLoading(false);
       })
-      .catch((e) => { setError(e.message ?? 'Failed to load events'); setLoading(false); });
+      .catch((e) => { setError(e.message ?? 'Failed'); setLoading(false); });
   }, [accessToken]);
 
-  const fmtTime = (iso: string) => {
+  const fmt = (iso: string) => {
     if (!iso) return '';
     try {
       const d = new Date(iso);
-      if (iso.length === 10) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+      return iso.length === 10
+        ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
     } catch { return iso; }
   };
 
   if (loading) return <PanelLoading />;
   if (error) return <PanelError msg={error} />;
-  if (events.length === 0) return <p className="text-[10px] text-slate-600 py-3 text-center">No upcoming events this week.</p>;
+  if (!events.length) return <p className="text-[10px] text-slate-600 py-4 text-center">No upcoming events this week.</p>;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {events.map((ev) => (
-        <div key={ev.id} className={`rounded-lg border ${c.border} ${c.bg} px-2.5 py-1.5`}>
+        <div key={ev.id} className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
           <p className={`text-[11px] font-medium leading-snug ${c.text}`}>{ev.summary}</p>
-          <p className="text-[9px] text-slate-500 mt-0.5">{fmtTime(ev.start)}</p>
+          <p className="text-[9px] text-slate-500 mt-0.5">{fmt(ev.start)}</p>
         </div>
       ))}
     </div>
   );
 }
 
-/* ─── Email panel ─── */
+/* ─── Email panel ────────────────────────────────────────── */
 function EmailPanel({ accessToken, c }: { accessToken: string; c: typeof COLORS.email }) {
   const [messages, setMessages] = useState<{ id: string; subject: string; from: string; date: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,49 +132,39 @@ function EmailPanel({ accessToken, c }: { accessToken: string; c: typeof COLORS.
 
   useEffect(() => {
     if (!accessToken) { setError('No Google access token configured.'); setLoading(false); return; }
-    fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=10&q=in:inbox`, {
+    fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=in:inbox`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then((r) => r.json())
       .then(async (data) => {
         if (data.error) throw new Error(data.error.message ?? 'API error');
         const ids: string[] = (data.messages ?? []).map((m: any) => m.id);
-        const details = await Promise.all(
-          ids.map((id) =>
-            fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {
-              headers: { Authorization: `Bearer ${accessToken}` },
-            }).then((r) => r.json()),
-          ),
-        );
-        setMessages(
-          details.map((d: any) => {
-            const headers: { name: string; value: string }[] = d.payload?.headers ?? [];
-            const get = (n: string) => headers.find((h) => h.name === n)?.value ?? '';
-            return { id: d.id, subject: get('Subject') || '(No subject)', from: get('From'), date: get('Date') };
-          }),
-        );
+        const details = await Promise.all(ids.map((id) =>
+          fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          }).then((r) => r.json()),
+        ));
+        setMessages(details.map((d: any) => {
+          const h: { name: string; value: string }[] = d.payload?.headers ?? [];
+          const g = (n: string) => h.find((x) => x.name === n)?.value ?? '';
+          return { id: d.id, subject: g('Subject') || '(No subject)', from: g('From'), date: g('Date') };
+        }));
         setLoading(false);
       })
-      .catch((e) => { setError(e.message ?? 'Failed to load emails'); setLoading(false); });
+      .catch((e) => { setError(e.message ?? 'Failed'); setLoading(false); });
   }, [accessToken]);
 
-  const fmtFrom = (from: string) => {
-    const m = from.match(/^([^<]+)</);
-    return m ? m[1].trim() : from.split('@')[0] ?? from;
-  };
-  const fmtDate = (d: string) => {
-    try { return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }); }
-    catch { return d; }
-  };
+  const fmtFrom = (f: string) => { const m = f.match(/^([^<]+)</); return m ? m[1].trim() : f.split('@')[0] ?? f; };
+  const fmtDate = (d: string) => { try { return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }); } catch { return d; } };
 
   if (loading) return <PanelLoading />;
   if (error) return <PanelError msg={error} />;
-  if (messages.length === 0) return <p className="text-[10px] text-slate-600 py-3 text-center">No messages found.</p>;
+  if (!messages.length) return <p className="text-[10px] text-slate-600 py-4 text-center">No messages found.</p>;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {messages.map((m) => (
-        <div key={m.id} className={`rounded-lg border ${c.border} ${c.bg} px-2.5 py-1.5`}>
+        <div key={m.id} className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
           <p className={`text-[11px] font-medium leading-snug truncate ${c.text}`}>{m.subject}</p>
           <div className="flex items-center justify-between mt-0.5">
             <p className="text-[9px] text-slate-500 truncate max-w-[60%]">{fmtFrom(m.from)}</p>
@@ -190,15 +176,15 @@ function EmailPanel({ accessToken, c }: { accessToken: string; c: typeof COLORS.
   );
 }
 
-/* ─── GitHub notifications panel ─── */
+/* ─── GitHub panel ───────────────────────────────────────── */
 function GitHubPanel({ token, c }: { token: string; c: typeof COLORS.github }) {
-  const [notifs, setNotifs] = useState<{ id: string; title: string; repo: string; type: string; reason: string }[]>([]);
+  const [notifs, setNotifs] = useState<{ id: string; title: string; repo: string; reason: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!token) { setError('No GitHub token configured.'); setLoading(false); return; }
-    fetch('https://api.github.com/notifications?per_page=10', {
+    fetch('https://api.github.com/notifications?per_page=8', {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
     })
       .then((r) => r.json())
@@ -208,28 +194,26 @@ function GitHubPanel({ token, c }: { token: string; c: typeof COLORS.github }) {
           id: n.id,
           title: n.subject?.title ?? 'Untitled',
           repo: n.repository?.full_name ?? '',
-          type: n.subject?.type ?? '',
           reason: n.reason ?? '',
         })));
         setLoading(false);
       })
-      .catch((e) => { setError(e.message ?? 'Failed to load notifications'); setLoading(false); });
+      .catch((e) => { setError(e.message ?? 'Failed'); setLoading(false); });
   }, [token]);
 
   const reasonLabel: Record<string, string> = {
-    review_requested: 'Review', assign: 'Assigned', mention: 'Mention',
-    subscribed: 'Subscribed', author: 'Author', comment: 'Comment',
-    ci_activity: 'CI', push: 'Push',
+    review_requested:'Review', assign:'Assigned', mention:'Mention',
+    subscribed:'Subscribed', author:'Author', comment:'Comment', ci_activity:'CI',
   };
 
   if (loading) return <PanelLoading />;
   if (error) return <PanelError msg={error} />;
-  if (notifs.length === 0) return <p className="text-[10px] text-slate-600 py-3 text-center">All caught up — no notifications.</p>;
+  if (!notifs.length) return <p className="text-[10px] text-slate-600 py-4 text-center">All caught up — no notifications.</p>;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {notifs.map((n) => (
-        <div key={n.id} className={`rounded-lg border ${c.border} ${c.bg} px-2.5 py-1.5`}>
+        <div key={n.id} className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
           <p className={`text-[11px] font-medium leading-snug truncate ${c.text}`}>{n.title}</p>
           <div className="flex items-center justify-between mt-0.5">
             <p className="text-[9px] text-slate-500 truncate max-w-[70%]">{n.repo}</p>
@@ -243,46 +227,60 @@ function GitHubPanel({ token, c }: { token: string; c: typeof COLORS.github }) {
   );
 }
 
-/* ─── Stock market summary panel ─── */
-interface IndexRow { symbol: string; name: string; price: number | null; change: number | null; change_pct: number | null; error: string | null }
+/* ─── Stock panel ────────────────────────────────────────── */
+interface IndexRow { symbol: string; name: string; price: number | null; change_pct: number | null; error: string | null }
 
-function StockPanel({ market, c }: { market: string; c: typeof COLORS.stock }) {
+function StockPanel({ market, c, onRisingChange }: {
+  market: string; c: typeof COLORS.stock; onRisingChange?: (r: boolean) => void;
+}) {
   const [indexes, setIndexes] = useState<IndexRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const backendBase = (import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787');
+  const base = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:8787';
 
   useEffect(() => {
-    fetch(`${backendBase}/api/agent/stock/summary?market=${encodeURIComponent(market)}`)
+    fetch(`${base}/api/agent/stock/summary?market=${encodeURIComponent(market)}`)
       .then((r) => r.json())
-      .then((data) => { setIndexes(data.indexes ?? []); setLoading(false); })
-      .catch((e) => { setError(e.message ?? 'Failed to load indexes'); setLoading(false); });
-  }, [market, backendBase]);
+      .then((data) => {
+        const rows: IndexRow[] = data.indexes ?? [];
+        setIndexes(rows);
+        const avg = rows.reduce((s, r) => s + (r.change_pct ?? 0), 0) / (rows.length || 1);
+        onRisingChange?.(avg >= 0);
+        setLoading(false);
+      })
+      .catch((e) => { setError(e.message ?? 'Failed'); setLoading(false); });
+  }, [market, base, onRisingChange]);
+
+  const fmt = (n: number | null, dp = 2) =>
+    n == null ? '—' : n.toLocaleString('en-IN', { maximumFractionDigits: dp });
 
   if (loading) return <PanelLoading />;
   if (error) return <PanelError msg={error} />;
 
-  const fmt = (n: number | null, dp = 2) => n == null ? '—' : n.toLocaleString('en-IN', { maximumFractionDigits: dp });
-
   return (
-    <div className={`rounded-lg border ${c.border} overflow-hidden`}>
+    <div className={`rounded-xl border ${c.border} overflow-hidden`}>
       <table className="w-full text-[10px]">
         <thead>
           <tr className={`${c.bg} border-b ${c.border}`}>
-            <th className="text-left px-2.5 py-1.5 text-slate-500 font-medium uppercase tracking-wider">Index</th>
-            <th className="text-right px-2.5 py-1.5 text-slate-500 font-medium uppercase tracking-wider">Price</th>
-            <th className="text-right px-2.5 py-1.5 text-slate-500 font-medium uppercase tracking-wider">Chg %</th>
+            <th className="text-left px-3 py-2 text-slate-500 font-medium uppercase tracking-wider">Index</th>
+            <th className="text-right px-3 py-2 text-slate-500 font-medium uppercase tracking-wider">Price</th>
+            <th className="text-right px-3 py-2 text-slate-500 font-medium uppercase tracking-wider">Chg %</th>
           </tr>
         </thead>
         <tbody>
           {indexes.map((idx, i) => (
-            <tr key={idx.symbol} className={`border-b ${c.border} last:border-0 ${i % 2 === 0 ? 'bg-transparent' : 'bg-white/[0.015]'}`}>
-              <td className={`px-2.5 py-1.5 font-medium ${c.text}`}>{idx.name}</td>
-              <td className="px-2.5 py-1.5 text-right text-slate-300 tabular-nums">{fmt(idx.price, 0)}</td>
-              <td className={`px-2.5 py-1.5 text-right tabular-nums font-medium ${
+            <tr key={idx.symbol} className={`border-b ${c.border} last:border-0 ${i % 2 === 0 ? '' : 'bg-white/[.012]'}`}>
+              <td className={`px-3 py-2 font-medium ${c.text}`}>{idx.name}</td>
+              <td className="px-3 py-2 text-right text-slate-300 tabular-nums">{fmt(idx.price, 0)}</td>
+              <td className={`px-3 py-2 text-right tabular-nums font-medium flex items-center justify-end gap-1 ${
                 idx.change_pct == null ? 'text-slate-600'
                 : idx.change_pct >= 0 ? 'text-emerald-400' : 'text-red-400'
               }`}>
+                {idx.change_pct != null && (
+                  idx.change_pct >= 0
+                    ? <TrendingUp className="h-2.5 w-2.5" />
+                    : <TrendingDown className="h-2.5 w-2.5" />
+                )}
                 {idx.change_pct == null ? '—' : `${idx.change_pct >= 0 ? '+' : ''}${fmt(idx.change_pct)}%`}
               </td>
             </tr>
@@ -293,37 +291,32 @@ function StockPanel({ market, c }: { market: string; c: typeof COLORS.stock }) {
   );
 }
 
-/* ─── News headlines panel ─── */
+/* ─── News panel ─────────────────────────────────────────── */
 function NewsPanel({ apiKey, country, c }: { apiKey: string; country: string; c: typeof COLORS.news }) {
-  const [articles, setArticles] = useState<{ title: string; source: string; url: string }[]>([]);
+  const [articles, setArticles] = useState<{ title: string; source: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!apiKey) { setError('No GNews API key configured.'); setLoading(false); return; }
-    const params = new URLSearchParams({ token: apiKey, country: country || 'in', lang: 'en', max: '5' });
-    fetch(`https://gnews.io/api/v4/top-headlines?${params}`)
+    fetch(`https://gnews.io/api/v4/top-headlines?${new URLSearchParams({ token: apiKey, country: country || 'in', lang: 'en', max: '5' })}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.errors) throw new Error(data.errors[0] ?? 'API error');
-        setArticles((data.articles ?? []).map((a: any) => ({
-          title: a.title ?? '',
-          source: a.source?.name ?? '',
-          url: a.url ?? '',
-        })));
+        setArticles((data.articles ?? []).map((a: any) => ({ title: a.title ?? '', source: a.source?.name ?? '' })));
         setLoading(false);
       })
-      .catch((e) => { setError(e.message ?? 'Failed to load headlines'); setLoading(false); });
+      .catch((e) => { setError(e.message ?? 'Failed'); setLoading(false); });
   }, [apiKey, country]);
 
   if (loading) return <PanelLoading />;
   if (error) return <PanelError msg={error} />;
-  if (articles.length === 0) return <p className="text-[10px] text-slate-600 py-3 text-center">No headlines found.</p>;
+  if (!articles.length) return <p className="text-[10px] text-slate-600 py-4 text-center">No headlines found.</p>;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       {articles.map((a, i) => (
-        <div key={i} className={`rounded-lg border ${c.border} ${c.bg} px-2.5 py-1.5`}>
+        <div key={i} className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
           <p className={`text-[11px] font-medium leading-snug ${c.text}`}>{a.title}</p>
           {a.source && <p className="text-[9px] text-slate-500 mt-0.5">{a.source}</p>}
         </div>
@@ -332,17 +325,23 @@ function NewsPanel({ apiKey, country, c }: { apiKey: string; country: string; c:
   );
 }
 
-/* ─── Main modal ─── */
+/* ─── Section label ──────────────────────────────────────── */
+function SectionLabel({ label, borderClass }: { label: string; borderClass: string }) {
+  return (
+    <div className={`text-[9px] uppercase tracking-wider text-slate-500 pb-1.5 mb-2 border-b ${borderClass}`}>
+      {label}
+    </div>
+  );
+}
+
+/* ─── Main modal ─────────────────────────────────────────── */
 export function AgentDetailModal({
   agent, bootMessage, metrics, onClose, onReload, onOpenDashboard,
   agentConfig, notificationsEnabled, onToggleNotifications,
 }: AgentDetailModalProps) {
-  const c = COLORS[agent.id] ?? COLORS.general;
+  const c  = COLORS[agent.id] ?? COLORS.general;
   const st = STATUS_LABEL[agent.status] ?? STATUS_LABEL.offline;
-
-  const sectionLabel = (label: string) => (
-    <div className={`text-[9px] uppercase tracking-wider text-slate-500 mb-1.5 pt-1 border-t ${c.border} mt-1`}>{label}</div>
-  );
+  const [stockRising, setStockRising] = useState(true);
 
   return (
     <>
@@ -351,49 +350,112 @@ export function AgentDetailModal({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm"
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
         onClick={onClose}
       />
 
-      {/* Panel */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.92, y: 16 }}
-        transition={{ type: 'spring', damping: 22, stiffness: 320 }}
-        style={{ boxShadow: `0 24px 64px ${c.glow}, 0 0 0 1px rgba(255,255,255,0.04)` }}
-        className={`fixed top-1/2 left-1/2 z-50 w-[480px] max-h-[85vh] -translate-x-1/2 -translate-y-1/2 flex flex-col overflow-hidden rounded-2xl border ${c.border} bg-[#07091a] backdrop-blur-2xl`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Gradient top band */}
-        <div className={`h-px w-full flex-shrink-0 ${c.dot.replace('bg-', 'bg-gradient-to-r from-transparent via-')} opacity-60`} />
-
-        {/* Header */}
-        <div className={`flex items-center justify-between px-4 py-3 border-b ${c.border} flex-shrink-0`}>
-          <div className="flex items-center gap-2.5">
+      {/* Centering shell — flexbox owns the centering so framer-motion y-animation never fights translate */}
+      <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+        {/* Card */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.90, y: 24 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.90, y: 24 }}
+          transition={{ type: 'spring', damping: 24, stiffness: 300 }}
+          style={{
+            boxShadow: `0 32px 80px ${c.glow}, 0 0 0 1px rgba(255,255,255,.05), 0 0 120px ${c.glow}`,
+          }}
+          className={`pointer-events-auto w-[520px] max-h-[88vh] flex flex-col overflow-hidden rounded-2xl border ${c.border} bg-[#07091a]`}
+          onClick={(e) => e.stopPropagation()}
+        >
+        {/* ── Hero section ── */}
+        <div className="relative h-[178px] flex-shrink-0 overflow-hidden">
+          {/* Animated scene */}
+          <AnimatePresence>
             <motion.div
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 2, repeat: Infinity }}
-              className={`h-2 w-2 rounded-full flex-shrink-0 ${c.dot}`}
-            />
-            <span className={`text-sm font-semibold tracking-wide ${c.text}`}>{agent.label}</span>
+              key={agent.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.6 }}
+              className="absolute inset-0"
+            >
+              <AgentBackground agentId={agent.id} isRising={stockRising} />
+            </motion.div>
+          </AnimatePresence>
+
+          {/* Top accent line */}
+          <div className="absolute top-0 inset-x-0 h-[2px]" style={{
+            background: `linear-gradient(90deg, transparent, ${c.hex}90, transparent)`,
+          }} />
+
+          {/* Shimmer sweep */}
+          <div className="absolute top-0 inset-x-0 h-[2px] overflow-hidden">
+            <div className="absolute inset-y-0 w-1/3" style={{
+              background: `linear-gradient(90deg, transparent, ${c.hex}, transparent)`,
+              animation: 'agent-shimmer 3s ease-in-out 1s infinite',
+            }} />
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-600 transition hover:bg-white/8 hover:text-slate-300"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+
+          {/* Bottom overlay gradient */}
+          <div className="absolute inset-x-0 bottom-0 h-20"
+            style={{ background: 'linear-gradient(to top, #07091a 30%, transparent)' }} />
+
+          {/* Hero content — agent name + status overlay */}
+          <div className="absolute inset-x-0 bottom-0 px-5 pb-3 flex items-end justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <motion.div
+                  animate={{ opacity: [0.4, 1, 0.4] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className={`h-2 w-2 rounded-full flex-shrink-0 ${c.dot}`}
+                />
+                <span className={`text-[10px] font-medium uppercase tracking-wider ${st.color}`}>{st.label}</span>
+              </div>
+              <h2 className={`text-lg font-bold tracking-tight leading-none ${c.text}`}>{agent.label}</h2>
+              <p className="text-[10px] text-slate-500 mt-0.5 max-w-[340px] leading-relaxed">{agent.description}</p>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="mb-0.5 rounded-xl p-2 text-slate-500 transition-all hover:bg-white/8 hover:text-slate-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Scrollable body */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3 scrollbar-thin">
-          {/* Status + description */}
-          <div className="space-y-2">
-            <Row label="Status" value={st.label} valueClass={st.color} />
-            <Row label="Capability" value={agent.description} />
-            <Row label="Example" value={`"${agent.example}"`} valueClass="text-slate-400 italic" />
+        {/* ── Scrollable body ── */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3 space-y-3 scrollbar-thin">
+
+          {/* Example query */}
+          <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2.5`}>
+            <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-1">Try asking</div>
+            <p className={`text-[11px] italic leading-relaxed ${c.text}`}>"{agent.example}"</p>
           </div>
+
+          {/* Session performance */}
+          {metrics && metrics.calls > 0 && (
+            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2.5`}>
+              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-2">Session Performance</div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div>
+                  <div className={`text-2xl font-bold tabular-nums leading-none ${c.text}`}>{metrics.calls}</div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-wide mt-1">Calls</div>
+                </div>
+                <div>
+                  <div className={`text-2xl font-bold tabular-nums leading-none ${c.text}`}>{metrics.avg_ms}</div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-wide mt-1">Avg ms</div>
+                </div>
+                <div>
+                  <div className={`text-2xl font-bold tabular-nums leading-none ${metrics.error_count > 0 ? 'text-red-400' : c.text}`}>
+                    {metrics.error_count}
+                  </div>
+                  <div className="text-[9px] text-slate-500 uppercase tracking-wide mt-1">Errors</div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Last boot status */}
           {bootMessage && (
@@ -403,99 +465,90 @@ export function AgentDetailModal({
             </div>
           )}
 
-          {/* Session performance */}
-          {metrics && metrics.calls > 0 && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2.5`}>
-              <div className="text-[9px] uppercase tracking-wider text-slate-500 mb-2">Session Performance</div>
-              <div className="grid grid-cols-3 gap-2 text-center">
-                <div>
-                  <div className={`text-lg font-bold tabular-nums leading-none ${c.text}`}>{metrics.calls}</div>
-                  <div className="text-[9px] text-slate-500 uppercase mt-0.5">Calls</div>
-                </div>
-                <div>
-                  <div className={`text-lg font-bold tabular-nums leading-none ${c.text}`}>{metrics.avg_ms}</div>
-                  <div className="text-[9px] text-slate-500 uppercase mt-0.5">Avg ms</div>
-                </div>
-                <div>
-                  <div className={`text-lg font-bold tabular-nums leading-none ${metrics.error_count > 0 ? 'text-red-400' : c.text}`}>
-                    {metrics.error_count}
-                  </div>
-                  <div className="text-[9px] text-slate-500 uppercase mt-0.5">Errors</div>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* ── Live data panels ── */}
           {agent.id === 'calendar' && agentConfig.google.accessToken && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
-              {sectionLabel('Upcoming Events')}
+            <div>
+              <SectionLabel label="Upcoming Events" borderClass={c.border} />
               <CalendarPanel accessToken={agentConfig.google.accessToken} c={c} />
             </div>
           )}
 
           {agent.id === 'email' && agentConfig.google.accessToken && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
-              {sectionLabel('Recent Inbox')}
+            <div>
+              <SectionLabel label="Recent Inbox" borderClass={c.border} />
               <EmailPanel accessToken={agentConfig.google.accessToken} c={c} />
             </div>
           )}
 
           {agent.id === 'github' && agentConfig.github.personalAccessToken && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
-              {sectionLabel('Notifications')}
+            <div>
+              <SectionLabel label="Notifications" borderClass={c.border} />
               <GitHubPanel token={agentConfig.github.personalAccessToken} c={c} />
             </div>
           )}
 
           {agent.id === 'stock' && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
-              {sectionLabel(`${agentConfig.stock.defaultMarket === 'US' ? 'US' : 'NSE/BSE'} Indexes`)}
-              <StockPanel market={agentConfig.stock.defaultMarket} c={c} />
+            <div>
+              <SectionLabel
+                label={`${agentConfig.stock.defaultMarket === 'US' ? 'US' : 'NSE/BSE'} Market Indexes`}
+                borderClass={c.border}
+              />
+              <StockPanel
+                market={agentConfig.stock.defaultMarket}
+                c={c}
+                onRisingChange={setStockRising}
+              />
             </div>
           )}
 
           {agent.id === 'news' && agentConfig.news.apiKey && (
-            <div className={`rounded-xl border ${c.border} ${c.bg} px-3 py-2`}>
-              {sectionLabel('Top Headlines')}
+            <div>
+              <SectionLabel label="Top Headlines" borderClass={c.border} />
               <NewsPanel apiKey={agentConfig.news.apiKey} country={agentConfig.news.country} c={c} />
+            </div>
+          )}
+
+          {agent.id === 'weather' && (
+            <div>
+              <SectionLabel label="Current Conditions & Forecast" borderClass={c.border} />
+              <WeatherPanel
+                city={agentConfig.weather.defaultCity || 'Bengaluru'}
+                textClass={c.text}
+                borderClass={c.border}
+                bgClass={c.bg}
+              />
             </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className={`flex items-center justify-between gap-2 px-4 py-3 border-t ${c.border} flex-shrink-0`}>
-          {/* Notification toggle (left side) */}
+        {/* ── Footer ── */}
+        <div className={`flex items-center justify-between gap-2 px-5 py-3 border-t ${c.border} flex-shrink-0 bg-black/20 backdrop-blur-sm`}>
           {onToggleNotifications != null && (
             <button
               onClick={() => onToggleNotifications(!notificationsEnabled)}
               title={notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
-              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] transition-colors ${
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] font-medium transition-all cursor-pointer ${
                 notificationsEnabled
                   ? `${c.border} ${c.bg} ${c.text}`
-                  : 'border-slate-700/40 bg-white/3 text-slate-500 hover:text-slate-300'
+                  : 'border-slate-700/40 bg-white/3 text-slate-500 hover:text-slate-300 hover:border-slate-600/50'
               }`}
             >
-              {notificationsEnabled
-                ? <Bell className="h-3 w-3" />
-                : <BellOff className="h-3 w-3" />
-              }
+              {notificationsEnabled ? <Bell className="h-3 w-3" /> : <BellOff className="h-3 w-3" />}
               Alerts {notificationsEnabled ? 'On' : 'Off'}
             </button>
           )}
 
-          {/* Right actions */}
           <div className="flex items-center gap-2 ml-auto">
             <button
               onClick={onClose}
-              className="rounded-xl px-3 py-1.5 text-[11px] text-slate-500 transition hover:text-slate-300 hover:bg-white/6"
+              className="rounded-xl px-3 py-1.5 text-[11px] text-slate-500 transition hover:text-slate-300 hover:bg-white/6 cursor-pointer"
             >
               Close
             </button>
             {onReload && (
               <button
                 onClick={() => { onReload(); onClose(); }}
-                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125`}
+                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125 cursor-pointer`}
               >
                 <RotateCw className="h-3 w-3" />
                 Reload
@@ -504,7 +557,7 @@ export function AgentDetailModal({
             {onOpenDashboard && (
               <button
                 onClick={() => { onOpenDashboard(); onClose(); }}
-                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125`}
+                className={`flex items-center gap-1.5 rounded-xl border ${c.border} ${c.bg} px-3 py-1.5 text-[11px] font-medium ${c.text} transition hover:brightness-125 cursor-pointer`}
               >
                 <LayoutDashboard className="h-3 w-3" />
                 Dashboard
@@ -512,7 +565,8 @@ export function AgentDetailModal({
             )}
           </div>
         </div>
-      </motion.div>
+        </motion.div>
+      </div>
     </>
   );
 }

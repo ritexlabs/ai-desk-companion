@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AgentDefinition, RuntimePhase, TranscriptTurn } from '../types/runtime';
 import { nowIso, partOfDayFromHour } from '../lib/utils';
+
+/** Minimal shape for WebSocket-pushed alert events */
+interface WsAlert { id: string; title: string; body: string; }
 import { useVoice } from './useVoice';
 import { useAudioPlayer } from './useAudioPlayer';
 import type { VoiceConfig } from './useVoiceConfig';
@@ -10,6 +13,8 @@ import type { VoiceProviderConfig } from './useVoiceProviderConfig';
 import type { AgentConfig } from './useAgentConfig';
 import { useSystemStats, systemHealthSummary } from './useSystemStats';
 import type { SystemStats } from './useSystemStats';
+import { useVoiceLoop } from './useVoiceLoop';
+import type { AgentVoiceMap } from './useAgentVoiceConfig';
 
 const WS_URL = (import.meta.env.VITE_BACKEND_URL ?? 'ws://localhost:8787').replace(/^http/, 'ws') + '/ws';
 
@@ -24,6 +29,14 @@ const AGENT_CATALOGUE: AgentDefinition[] = [
   { id: 'stock',    label: 'Stock Market',    description: 'Prices, RSI, support/resistance.', example: 'What is the Nifty 50 price?',      status: 'offline', color: 'from-green-400 to-emerald-500'  },
   { id: 'news',     label: 'News',            description: 'Latest headlines by location.',    example: 'What are the top headlines?',      status: 'offline', color: 'from-sky-400 to-blue-500'       },
   { id: 'smarthome', label: 'Smart Home',     description: 'Control lights, switches, climate, scenes.', example: 'Turn on the living room lights.', status: 'offline', color: 'from-orange-400 to-amber-500' },
+  { id: 'whatsapp',    label: 'WhatsApp',    description: 'Send and receive WhatsApp messages by voice.', example: 'Send WhatsApp to Mom saying hello.', status: 'offline', color: 'from-green-400 to-emerald-600' },
+  { id: 'portfolio',   label: 'Portfolio',   description: 'View holdings, P&L, mutual funds via INDmoney.', example: 'Show my portfolio holdings.', status: 'offline', color: 'from-rose-400 to-pink-600' },
+  // ── Built-in skills (always enabled) ──────────────────────────────────────
+  { id: 'websearch',  label: 'Web Search',  description: 'Live web search via DuckDuckGo — no API key.',  example: 'Search the web for latest iPhone specs.', status: 'offline', color: 'from-blue-400 to-indigo-600'  },
+  { id: 'calculator', label: 'Calculator',  description: 'Precise math, percentages, tip and unit calc.', example: 'What is 18% tip on 850?',               status: 'offline', color: 'from-amber-400 to-orange-600' },
+  { id: 'memory',     label: 'Memory',      description: 'Save and recall personal notes any time.',       example: 'Remember wife birthday is March 5.',    status: 'offline', color: 'from-purple-400 to-violet-600' },
+  { id: 'briefing',   label: 'Briefing',    description: 'Morning summary across all connected agents.',   example: 'Give me my morning briefing.',           status: 'offline', color: 'from-cyan-400 to-teal-600'    },
+  { id: 'notes',      label: 'Notes & Reminders', description: 'Personal notes, tasks, reminders, and alarms.', example: 'Remind me to take medicines at 8pm.',  status: 'offline', color: 'from-violet-400 to-purple-600' },
 ];
 
 function agentsFromIds(ids: string[]): AgentDefinition[] {
@@ -83,14 +96,17 @@ export function useOrchestratorRuntime(
   voiceProviderConfig?: VoiceProviderConfig,
   agentConfig?: AgentConfig,
   refreshGoogleToken?: () => Promise<void>,
+  agentVoiceConfig?: AgentVoiceMap,
+  refreshPortfolioToken?: () => Promise<void>,
 ) {
-  const wakeWord    = appConfig?.wakeWord    ?? 'Robo';
-  const callingName = appConfig?.callingName ?? 'Master';
+  const wakeWord      = appConfig?.wakeWord      ?? 'Robo';
+  const callingName   = appConfig?.callingName   ?? 'Master';
+  const assistantName = appConfig?.assistantName ?? 'Robo';
 
   /* ── Voice + audio ──────────────────────────────────────────────── */
   const { speechState, speak, stopSpeaking, listenOnce, stopListening, sttSupported, ttsSupported,
           voiceListenerActive, micEverStarted, lastHeardText } =
-    useVoice(voiceConfig);
+    useVoice(voiceConfig, agentVoiceConfig);
   const { play: playAudio, stop: stopAudio } = useAudioPlayer();
   const systemStats = useSystemStats();
 
@@ -112,6 +128,7 @@ export function useOrchestratorRuntime(
   const [orchestratorMetrics, setOrchestratorMetrics] = useState<OrchestratorMetrics | null>(null);
   const [agentBootMessages, setAgentBootMessages] = useState<Record<string, string>>({});
   const [isAutoListening, setIsAutoListening]     = useState(false);
+  const [pendingAlerts, setPendingAlerts]         = useState<WsAlert[]>([]);
 
   /* ── Always-current refs ────────────────────────────────────────── */
   const wsRef              = useRef<WebSocket | null>(null);
@@ -123,14 +140,22 @@ export function useOrchestratorRuntime(
   systemStatsRef.current   = systemStats;
   const callingNameRef     = useRef(callingName);
   callingNameRef.current   = callingName;
+  const assistantNameRef   = useRef(assistantName);
+  assistantNameRef.current = assistantName;
   const wakeWordRef        = useRef(wakeWord);
   wakeWordRef.current      = wakeWord;
+  const agentVoiceConfigRef   = useRef(agentVoiceConfig);
+  agentVoiceConfigRef.current = agentVoiceConfig;
   const voiceProviderRef   = useRef(voiceProviderConfig);
   voiceProviderRef.current = voiceProviderConfig;
   const llmConfigRef       = useRef(llmConfig);
   llmConfigRef.current     = llmConfig;
   const agentConfigRef     = useRef(agentConfig);
   agentConfigRef.current   = agentConfig;
+  const refreshGoogleTokenRef = useRef(refreshGoogleToken);
+  refreshGoogleTokenRef.current = refreshGoogleToken;
+  const refreshPortfolioTokenRef = useRef(refreshPortfolioToken);
+  refreshPortfolioTokenRef.current = refreshPortfolioToken;
   const orchestratorCapsRef = useRef<OrchestratorCaps>({ tts: false, stt: false, wakeWord: false });
 
   /* ── TTS serial queue ───────────────────────────────────────────── */
@@ -155,7 +180,14 @@ export function useOrchestratorRuntime(
   }, []);
 
   const updateAgent = useCallback((id: string, status: AgentDefinition['status']) => {
-    setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+    setAgents((prev) => {
+      if (prev.some((a) => a.id === id)) {
+        return prev.map((a) => (a.id === id ? { ...a, status } : a));
+      }
+      // Agent came from the server (e.g. always-on skill) but wasn't in the initial list — add from catalogue
+      const entry = AGENT_CATALOGUE.find((a) => a.id === id);
+      return entry ? [...prev, { ...entry, status }] : prev;
+    });
   }, []);
 
   /* ── drainTTSQueue ──────────────────────────────────────────────── */
@@ -301,6 +333,18 @@ export function useOrchestratorRuntime(
         setOrchestratorMetrics(payload as unknown as OrchestratorMetrics);
         break;
 
+      case 'alert': {
+        const wsAlert: WsAlert = {
+          id:    String(payload.id ?? `alert-${Date.now()}`),
+          title: String(payload.title ?? 'Reminder'),
+          body:  String(payload.body ?? ''),
+        };
+        setPendingAlerts((prev) =>
+          prev.some((a) => a.id === wsAlert.id) ? prev : [...prev, wsAlert],
+        );
+        break;
+      }
+
       case 'error':
         appendTurn('system', `Orchestrator error: ${payload.message}`);
         // Unblock any pending server-STT wait so ask() doesn't hang when STT fails
@@ -378,113 +422,38 @@ export function useOrchestratorRuntime(
   /* ── Wake-word listener (browser STT, on in standby/sleep) ─────── */
   const wakeRef = useRef<() => void>(() => {});
 
-  // Wake-word pattern for STANDBY listener:
-  // Requires explicit "Robo, Wake-Up" or "Hey/Hello Robo" — bare "Robo" alone is ignored in standby.
-  // This prevents accidental wake when the name is mentioned in casual speech.
-  const wakeWordPattern = useMemo(() => {
-    const name = wakeWord.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const n = `${name}t?`;  // t? catches STT misrecognition: "robo" → "robot"
-    // Allow comma or space as separator so "Robo, Wake-Up" and "Robo Wake-Up" both match.
-    return new RegExp(
-      // "Robo Wake-Up" / "Robo, Wake-Up" / "Wake-Up Robo" — explicit start command
-      `wake[\\s\\-]?up[,\\s]*${n}|${n}[,\\s]+wake[\\s\\-]?up` +
-      // "Hey Robo" / "Hello Robo" — natural greeting triggers
-      `|hey[,\\s]+${n}|hello[,\\s]+${n}`,
-      'i',
-    );
-  }, [wakeWord]);
+  const {
+    voiceEnabled,
+    voiceEnabledRef,
+    toggleVoice,
+    enableVoice,
+    wakeWordPattern,
+    sleepPattern,
+  } = useVoiceLoop({
+    phase,
+    sttSupported,
+    wakeWord,
+    listenOnce,
+    stopListening,
+    stopSpeaking,
+    stopAudio,
+    serverWakeWordEnabled: orchestratorCaps.wakeWord,
+    onWakeDetected: (inlineCmd) => {
+      if (inlineCmd) pendingCmdRef.current = inlineCmd;
+      wakeRef.current();
+    },
+    pendingTranscriptRef,
+    ttsQueueRef,
+    autoListenRef,
+    setIsAutoListening,
+  });
 
-  // Sleep-phrase pattern for ask() — used during an active session.
-  // Matches "Robo Good Bye", "Robo Good Night", "Robo See You", "Robo Go to Sleep",
-  // and standalone equivalents (no wake word needed when already in a session).
-  const sleepPattern = useMemo(() => {
-    const name = wakeWord.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const n = `${name}t?`;
-    const sleepKw = `bye+|good[\\s\\-]?bye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?|shut\\s?down`;
-    return new RegExp(
-      // wake-word + sleep phrase, either order: "Robo Good Night" / "Good Night Robo"
-      `(?:${sleepKw}).*\\b${n}\\b|\\b${n}\\b.*(?:${sleepKw})` +
-      // standalone sleep phrases (safe in ask() which only runs during an active session)
-      `|^(?:(?:bye+\\s*)+|good[\\s\\-]?bye|good\\s?night|go\\s+(?:to\\s+)?sleep|go\\s+for\\s+sleep|see\\s+you(?:\\s+(?:again|later|soon|tomorrow))?)\\s*[.!]*$`,
-      'i',
-    );
-  }, [wakeWord]);
-
-  // Incremented by enableVoice() / toggleVoice() to force-restart the wake-word listener
-  const [micRestartKey, setMicRestartKey] = useState(0);
-
-  // Manual toggle: lets the user pause/resume voice listening at any time.
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const voiceEnabledRef = useRef(voiceEnabled);
-  voiceEnabledRef.current = voiceEnabled;
-
-  const toggleVoice = useCallback(() => {
-    setVoiceEnabled((prev) => !prev);
-  }, []);
-
-  // When voice is toggled off: stop all active audio/STT immediately so the
-  // mute is instant for both input (listening) and output (speaking/audio).
+  // Stop server audio when voice is muted (browser TTS/listening handled by useVoiceLoop)
   useEffect(() => {
     if (!voiceEnabled) {
-      autoListenRef.current = false;     // cancel auto-listen when voice is muted
-      stopListening();
-      stopSpeaking();
-      stopAudio();
       setIsPlayingServerAudio(false);
-      ttsQueueRef.current = [];          // discard pending speech items
-      if (pendingTranscriptRef.current) {
-        pendingTranscriptRef.current('');
-        pendingTranscriptRef.current = null;
-      }
     }
-  }, [voiceEnabled, stopListening, stopSpeaking, stopAudio]);
-
-  useEffect(() => {
-    if (!sttSupported || !voiceEnabled) return;
-    if (phase !== 'standby' && phase !== 'sleep') return;
-    if (orchestratorCapsRef.current.wakeWord) return; // server handles wake-word
-
-    let alive = true;
-
-    // Loop discrete 4-second listen sessions.
-    // More reliable than continuous=true which silently ends and creates blind spots.
-    (async () => {
-      while (alive) {
-        const text = await listenOnce(6000);
-        if (!alive) break;
-        if (text && wakeWordPattern.test(text)) {
-          // Extract any inline command after the wake-phrase, e.g. "Hey Robo, what's the time?" → "what's the time?"
-          const inline = text.replace(wakeWordPattern, '').replace(/^[,\s]+/, '').trim();
-          // Discard the inline part if it's just the boot phrase itself (e.g. "Robo, Wake-Up" → inline="", not "Wake-Up")
-          const isBootPhrase = /^wake[\s\-]?up$/i.test(inline);
-          if (inline && !isBootPhrase) pendingCmdRef.current = inline;
-          wakeRef.current();
-          break;
-        }
-        // tiny pause so Chrome isn't restarted instantly on the same tick
-        await new Promise<void>((r) => setTimeout(r, 30));
-      }
-    })();
-
-    return () => {
-      alive = false;
-      stopListening(); // abort any in-progress listenOnce session
-    };
-  // micRestartKey is intentionally included so a manual tap can force-restart the listener
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, sttSupported, voiceEnabled, listenOnce, stopListening, wakeWordPattern, orchestratorCaps.wakeWord, micRestartKey]);
-
-  // Called from UI: explicitly request mic permission then restart listener (user gesture)
-  const enableVoice = useCallback(() => {
-    if (navigator.mediaDevices?.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(s => s.getTracks().forEach(t => t.stop()))
-        .catch(() => {})
-        .finally(() => setMicRestartKey(k => k + 1));
-    } else {
-      setMicRestartKey(k => k + 1);
-    }
-  }, []);
+  }, [voiceEnabled]);
 
   useEffect(() => {
     const newlyAdded = registeredAgentIds.filter((id) => !prevAgentIdsRef.current.has(id));
@@ -629,21 +598,44 @@ export function useOrchestratorRuntime(
       const llm = llmConfigRef.current;
       let ac  = agentConfigRef.current;
 
-      // Refresh Google token silently before boot if it has expired or expires within 90 s.
-      // This prevents the Calendar/Email agents from getting a stale token on every cold start.
+      // Refresh Google and Portfolio tokens silently before boot if expired or expiring within 90 s.
+      // Uses refs so the callback always calls the latest version, not a stale closure.
+      const refreshes: Promise<void>[] = [];
       if (
-        refreshGoogleToken &&
+        refreshGoogleTokenRef.current &&
         ac?.google.accessToken &&
         ac.google.tokenExpiresAt > 0 &&
         ac.google.tokenExpiresAt < Date.now() + 90_000
       ) {
-        await refreshGoogleToken();
-        ac = agentConfigRef.current; // re-read after refresh so start_session gets the new token
+        refreshes.push(refreshGoogleTokenRef.current());
+      }
+      if (
+        refreshPortfolioTokenRef.current &&
+        ac?.portfolio.refreshToken &&
+        ac.portfolio.tokenExpiresAt > 0 &&
+        ac.portfolio.tokenExpiresAt < Date.now() + 90_000
+      ) {
+        refreshes.push(refreshPortfolioTokenRef.current());
+      }
+      if (refreshes.length > 0) {
+        await Promise.allSettled(refreshes);
+        // Yield to event loop so React can flush the patch() state updates before we read the ref
+        await pause(50);
+        ac = agentConfigRef.current;
       }
 
       wsSend('start_session', {
+        assistant_name:    assistantNameRef.current,
         calling_name:      callingNameRef.current,
         registered_agents: registeredIdsRef.current,
+        agent_voices: agentVoiceConfigRef.current
+          ? Object.fromEntries(
+              Object.entries(agentVoiceConfigRef.current).map(([id, v]) => [
+                id,
+                { openai_voice: v.openaiVoice },
+              ])
+            )
+          : {},
         voice_config: vpc ? {
           tts_provider:        vpc.ttsProvider,
           stt_provider:        vpc.sttProvider,
@@ -684,6 +676,16 @@ export function useOrchestratorRuntime(
           smarthome: {
             endpoint: ac.smarthome.endpoint,
             token:    ac.smarthome.token,
+          },
+          portfolio: {
+            endpoint:     ac.portfolio.endpoint,
+            access_token: ac.portfolio.accessToken,
+          },
+          whatsapp: {
+            phone_number_id:      ac.whatsapp.phoneNumberId,
+            access_token:         ac.whatsapp.accessToken,
+            webhook_verify_token: ac.whatsapp.webhookVerifyToken,
+            contacts:             ac.whatsapp.contacts,
           },
         } : {},
       });
@@ -849,7 +851,9 @@ export function useOrchestratorRuntime(
       if (phaseRef.current !== 'ready' || !voiceEnabledRef.current || !autoListenRef.current) return;
       const cmd = pendingCmdRef.current;
       pendingCmdRef.current = null;
-      askRef.current(cmd ?? undefined);
+      // Pass '' (not undefined) when no pending command so ask() opens the mic
+      // instead of submitting whatever the user has typed in the input field.
+      askRef.current(cmd ?? '');
     }, 300); // 300 ms gap lets TTS settle before mic opens
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -907,6 +911,27 @@ export function useOrchestratorRuntime(
     if (canSpeak) enqueueTTS({ text, agentId });
   }, [appendTurn, enqueueTTS]);
 
+  /* ── scheduleAlert — frontend-initiated, backend fires after delay ── */
+  const scheduleAlert = useCallback((
+    title: string,
+    body: string,
+    delaySeconds: number,
+    id?: string,
+  ) => {
+    const alertId = id ?? `alert-${Date.now()}`;
+    wsSend('schedule_alert', {
+      id:             alertId,
+      title,
+      body,
+      delay_seconds:  Math.max(1, Math.min(delaySeconds, 86400)),
+    });
+  }, [wsSend]);
+
+  /* ── clearPendingAlert — removes from local queue after handled ── */
+  const clearPendingAlert = useCallback((id: string) => {
+    setPendingAlerts((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
   return {
     phase,
     heard,
@@ -937,5 +962,9 @@ export function useOrchestratorRuntime(
     agentBootMessages,
     isAutoListening,
     pushNotification,
+    speak,
+    pendingAlerts,
+    clearPendingAlert,
+    scheduleAlert,
   };
 }

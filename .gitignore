@@ -28,10 +28,12 @@ apps/desktop/.vite/
 apps/orchestrator/data/
 apps/mcp-gateway/logs/
 .pids
+apps/mcp-gateway/.cf-tunnel.pid
 
 # ── Cloudflare tunnel config (contains real tunnel UUIDs and hostnames) ────────
-apps/mcp-gateway/.cloudflared/
-.cloudflared/
+# Canonical location: apps/mcp-gateway/.cloudflared/
+# Ignore only the live config (contains real UUID); track the example template
+apps/mcp-gateway/.cloudflared/tunnel-whatsapp.yml
 
 # ── OS / editor ───────────────────────────────────────────────────────────────
 .DS_Store

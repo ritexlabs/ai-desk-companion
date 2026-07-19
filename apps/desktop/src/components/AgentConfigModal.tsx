@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot, Brain, Calculator, ChevronRight,
-  Cloud, Github, Globe, Globe2, Home, Layers,
+  Cloud, GitBranch, Globe, Globe2, Home, Layers,
   Loader2, Lock, MessageCircle, Monitor, Newspaper,
   PieChart, RefreshCw, Sparkles, TrendingUp, X, Zap,
 } from 'lucide-react';
@@ -39,7 +39,7 @@ const META: Record<string, AgentMeta> = {
   system:     { Icon: Monitor,       color: '#2dd4bf', iconBg: 'rgba(45,212,191,0.1)',   iconRing: 'rgba(45,212,191,0.25)',  label: 'System',       tagline: 'CPU · memory · battery · network',      category: 'service' },
   weather:    { Icon: Cloud,         color: '#22d3ee', iconBg: 'rgba(34,211,238,0.1)',   iconRing: 'rgba(34,211,238,0.25)',  label: 'Weather',      tagline: 'Forecasts & current conditions',         category: 'service' },
   google:     { Icon: Globe2,        color: '#60a5fa', iconBg: 'rgba(96,165,250,0.1)',   iconRing: 'rgba(96,165,250,0.25)',  label: 'Google',       tagline: 'Calendar · Gmail · Drive',               category: 'service' },
-  github:     { Icon: Github,        color: '#fbbf24', iconBg: 'rgba(251,191,36,0.1)',   iconRing: 'rgba(251,191,36,0.25)',  label: 'GitHub',       tagline: 'PRs · issues · CI workflows',            category: 'service' },
+  github:     { Icon: GitBranch,        color: '#fbbf24', iconBg: 'rgba(251,191,36,0.1)',   iconRing: 'rgba(251,191,36,0.25)',  label: 'GitHub',       tagline: 'PRs · issues · CI workflows',            category: 'service' },
   stock:      { Icon: TrendingUp,    color: '#4ade80', iconBg: 'rgba(74,222,128,0.1)',   iconRing: 'rgba(74,222,128,0.25)',  label: 'Stock Market', tagline: 'NSE · BSE · US markets · portfolio',     category: 'service' },
   news:       { Icon: Newspaper,     color: '#38bdf8', iconBg: 'rgba(56,189,248,0.1)',   iconRing: 'rgba(56,189,248,0.25)',  label: 'News',         tagline: 'Headlines from 50+ countries',           category: 'service' },
   smarthome:  { Icon: Home,          color: '#fb923c', iconBg: 'rgba(251,146,60,0.1)',   iconRing: 'rgba(251,146,60,0.25)',  label: 'Smart Home',   tagline: 'Lights · climate · scenes',              category: 'service' },

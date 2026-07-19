@@ -391,10 +391,12 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
     if not call:
         return True, ''
     tool_name, args = call
+    # smarthome needs extra time for Docker cold-start on first boot
+    _boot_timeout = 25.0 if agent_id == 'smarthome' else 5.0
     try:
         raw = await asyncio.wait_for(
             gateway_client.call_tool(tool_name, args),
-            timeout=5.0,
+            timeout=_boot_timeout,
         )
         if not raw:
             return True, ''

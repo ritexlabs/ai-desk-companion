@@ -82,7 +82,24 @@
       "Bash(python3 -m py_compile apps/orchestrator/app/agents/notes.py)",
       "Bash(python3 -m py_compile apps/orchestrator/app/api/routes/notes.py)",
       "Bash(python3 -m py_compile apps/orchestrator/app/agents/registry.py)",
-      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/orchestrator/app/api/ws.py)"
+      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/orchestrator/app/api/ws.py)",
+      "Bash(npm test *)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion ls-files --error-unmatch .cloudflared/)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion ls-files --error-unmatch apps/mcp-gateway/.cloudflared/)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion rm --cached .cloudflared/whatsapp-config.yml .cloudflared/whatsapp-config.example.yml)",
+      "Bash(cp /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared/whatsapp-config.example.yml \\\\ *)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion status --short)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion add apps/mcp-gateway/.cloudflared/tunnel-whatsapp.example.yml)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion status --short apps/mcp-gateway/.cloudflared/)",
+      "Bash(git add *)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion check-ignore -v apps/mcp-gateway/.cloudflared/tunnel-whatsapp.yml)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -10 -- apps/orchestrator/ apps/mcp-gateway/)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion show a984046 --stat)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion show 39a6f90 --stat)",
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -5 -- apps/orchestrator/app/services/session.py apps/mcp-gateway/src/tools/smarthome.py apps/mcp-gateway/src/tools/whatsapp.py)"
+    ],
+    "additionalDirectories": [
+      "/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared"
     ]
   }
 }

@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home,
+  Cloud, Calendar, Mail, GitBranch, Monitor, TrendingUp, Newspaper, Home,
   MessageCircle, Globe, Globe2, PieChart, Calculator, Brain, Layers, Bell,
   type LucideIcon,
 } from 'lucide-react';
@@ -14,7 +14,7 @@ const ICON: Record<string, LucideIcon> = {
   google:     Globe2,
   calendar:   Calendar,
   email:      Mail,
-  github:     Github,
+  github:     GitBranch,
   stock:      TrendingUp,
   news:       Newspaper,
   smarthome:  Home,

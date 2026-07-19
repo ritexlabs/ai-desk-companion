@@ -1,16 +1,16 @@
 # Cloudflare Named Tunnel configuration for the WhatsApp webhook.
 #
-# Copy this file to .cloudflared/whatsapp-config.yml and fill in your values.
-# whatsapp-config.yml is git-ignored — never commit it.
+# Copy this file to apps/mcp-gateway/.cloudflared/tunnel-whatsapp.yml and fill in your values.
+# tunnel-whatsapp.yml is git-ignored — never commit it.
 #
 # Usage:
 #   1. Create the tunnel:
 #        cloudflared tunnel login
 #        cloudflared tunnel create whatsapp
 #   2. Copy this file:
-#        cp .cloudflared/whatsapp-config.example.yml .cloudflared/whatsapp-config.yml
+#        cp apps/mcp-gateway/.cloudflared/tunnel-whatsapp.example.yml apps/mcp-gateway/.cloudflared/tunnel-whatsapp.yml
 #   3. Fill in your tunnel UUID and credentials-file path below.
-#   4. Add your domain to apps/orchestrator/.env:
+#   4. Add your domain to apps/mcp-gateway/.env:
 #        CLOUDFLARE_DOMAIN=yourdomain.com
 #   5. Start the app — the tunnel starts automatically.
 
@@ -19,5 +19,5 @@ credentials-file: /Users/<you>/.cloudflared/<your-tunnel-uuid>.json
 
 ingress:
   - hostname: whatsapp.yourdomain.com
-    service: http://localhost:8787
+    service: http://localhost:8788
   - service: http_status:404

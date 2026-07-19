@@ -93,5 +93,21 @@ class SmartHomeTool(BaseTool):
 
         raise ToolNotFoundError(f'Unknown smarthome tool: {tool_name}')
 
+    async def startup(self) -> None:
+        if not (settings.myhome_mcp_endpoint or '').strip() or not (settings.myhome_mcp_token or '').strip():
+            return
+        import asyncio as _asyncio
+        _asyncio.create_task(self._prewarm())
+
+    async def _prewarm(self) -> None:
+        import asyncio as _asyncio
+        try:
+            endpoint = settings.myhome_mcp_endpoint.strip().rstrip('/')
+            token    = settings.myhome_mcp_token.strip()
+            client   = get_hass_client(endpoint, token)
+            await _asyncio.wait_for(client.call_tool('system_overview'), timeout=60.0)
+        except Exception:
+            pass
+
     async def shutdown(self) -> None:
         await close_all()

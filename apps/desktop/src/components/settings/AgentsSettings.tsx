@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Bot, Brain, Calculator, ChevronLeft, ChevronRight,
-  Cloud, Github, Globe, Globe2, Home, Layers,
+  Cloud, GitBranch, Globe, Globe2, Home, Layers,
   Loader2, Lock, MessageCircle, Monitor, Newspaper,
   PieChart, RefreshCw, Search, Sparkles, TrendingUp, Zap,
 } from 'lucide-react';
@@ -38,7 +38,7 @@ const AGENT_META: Record<string, AgentMeta> = {
   system:     { Icon: Monitor,        color: 'text-teal-400',    ring: 'ring-teal-400/30',    bg: 'bg-teal-400/10',    label: 'System',      tagline: 'CPU · memory · battery · network' },
   weather:    { Icon: Cloud,          color: 'text-cyan-400',    ring: 'ring-cyan-400/30',    bg: 'bg-cyan-400/10',    label: 'Weather',     tagline: 'Forecasts & current conditions' },
   google:     { Icon: Globe2,         color: 'text-blue-400',    ring: 'ring-blue-400/30',    bg: 'bg-blue-400/10',    label: 'Google',      tagline: 'Calendar · Gmail' },
-  github:     { Icon: Github,         color: 'text-amber-400',   ring: 'ring-amber-400/30',   bg: 'bg-amber-400/10',   label: 'GitHub',      tagline: 'PRs · issues · CI workflows' },
+  github:     { Icon: GitBranch,         color: 'text-amber-400',   ring: 'ring-amber-400/30',   bg: 'bg-amber-400/10',   label: 'GitHub',      tagline: 'PRs · issues · CI workflows' },
   stock:      { Icon: TrendingUp,     color: 'text-green-400',   ring: 'ring-green-400/30',   bg: 'bg-green-400/10',   label: 'Stock Market',tagline: 'NSE · BSE · US markets' },
   news:       { Icon: Newspaper,      color: 'text-sky-400',     ring: 'ring-sky-400/30',     bg: 'bg-sky-400/10',     label: 'News',        tagline: 'Headlines from 50+ countries' },
   smarthome:  { Icon: Home,           color: 'text-orange-400',  ring: 'ring-orange-400/30',  bg: 'bg-orange-400/10',  label: 'Smart Home',  tagline: 'Lights · climate · scenes' },

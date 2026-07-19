@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Cloud, Calendar, Mail, Github, Monitor, TrendingUp, Newspaper, Home,
+  Cloud, Calendar, Mail, GitBranch, Monitor, TrendingUp, Newspaper, Home,
   MessageCircle, Globe, Globe2, Calculator, Brain, Layers, PieChart,
   Bell, Wrench, Loader2, RotateCw,
 } from 'lucide-react';
@@ -13,7 +13,7 @@ const AGENT_META: Record<
   system:   { icon: <Monitor    className="h-4 w-4" />, text: 'text-teal-400',   border: 'border-teal-400/40',   bg: 'bg-teal-400/10',   dot: 'bg-teal-400',   rgb: '45,212,191'  },
   weather:  { icon: <Cloud      className="h-4 w-4" />, text: 'text-cyan-400',   border: 'border-cyan-400/40',   bg: 'bg-cyan-400/10',   dot: 'bg-cyan-400',   rgb: '34,211,238'  },
   google:   { icon: <Globe2     className="h-4 w-4" />, text: 'text-blue-400',   border: 'border-blue-400/40',   bg: 'bg-blue-400/10',   dot: 'bg-blue-400',   rgb: '96,165,250'  },
-  github:   { icon: <Github     className="h-4 w-4" />, text: 'text-amber-400',  border: 'border-amber-400/40',  bg: 'bg-amber-400/10',  dot: 'bg-amber-400',  rgb: '251,191,36'  },
+  github:   { icon: <GitBranch     className="h-4 w-4" />, text: 'text-amber-400',  border: 'border-amber-400/40',  bg: 'bg-amber-400/10',  dot: 'bg-amber-400',  rgb: '251,191,36'  },
   stock:    { icon: <TrendingUp className="h-4 w-4" />, text: 'text-green-400',  border: 'border-green-400/40',  bg: 'bg-green-400/10',  dot: 'bg-green-400',  rgb: '74,222,128'  },
   news:     { icon: <Newspaper  className="h-4 w-4" />, text: 'text-sky-400',    border: 'border-sky-400/40',    bg: 'bg-sky-400/10',    dot: 'bg-sky-400',    rgb: '56,189,248'  },
   smarthome:{ icon: <Home       className="h-4 w-4" />, text: 'text-orange-400', border: 'border-orange-400/40', bg: 'bg-orange-400/10', dot: 'bg-orange-400', rgb: '251,146,60'  },

@@ -27,6 +27,7 @@ apps/desktop/.vite/
 # ── Runtime data (user-generated, never commit) ───────────────────────────────
 apps/orchestrator/data/
 apps/mcp-gateway/logs/
+apps/mcp-gateway/.whatsapp-messages.json
 .pids
 apps/mcp-gateway/.cf-tunnel.pid
 

@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   Droplets,
+  ExternalLink,
   Fan,
   Flame,
   Home,
@@ -728,6 +729,17 @@ export function SmartHomeDashboard({ endpoint, token, onClose, onVoice }: SmartH
             </div>
 
             <div className="flex items-center gap-1.5">
+              <a
+                href={endpoint}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open Home Assistant — ${endpoint}`}
+                className="flex items-center gap-1 h-7 px-2 rounded-xl border border-orange-400/25 bg-orange-400/6 text-[10px] text-orange-400/80 hover:text-orange-200 hover:bg-orange-400/15 transition"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Open HA
+              </a>
+
               <motion.button
                 whileHover={{ rotate: 180 }}
                 transition={{ duration: 0.4 }}
@@ -871,9 +883,20 @@ export function SmartHomeDashboard({ endpoint, token, onClose, onVoice }: SmartH
                 <div className="rounded-xl border border-white/8 bg-white/3 px-4 py-3 text-[10px] text-slate-500 space-y-1 max-w-xs">
                   <p className="font-semibold text-slate-400 mb-1">Check:</p>
                   <p>• Docker Desktop is running</p>
-                  <p>• <code className="text-slate-400">voska/hass-mcp</code> image is pulled</p>
-                  <p>• <code className="text-slate-400">MYHOME_MCP_ENDPOINT</code> uses an IP (not <code className="text-slate-400">.local</code>)</p>
-                  <p>• Home Assistant long-lived token is valid</p>
+                  {endpoint.includes('localhost') || endpoint.includes('127.0.0.1') ? (
+                    <>
+                      <p>• HA container is up: <code className="text-slate-400">docker ps | grep homeassistant</code></p>
+                      <p>• Complete HA onboarding at <a href={endpoint} target="_blank" rel="noreferrer" className="text-orange-400 underline">{endpoint}</a> if first run</p>
+                      <p>• <code className="text-slate-400">MYHOME_MCP_TOKEN</code> in gateway <code className="text-slate-400">.env</code> is a token from <em>this</em> local HA (not your Pi token)</p>
+                    </>
+                  ) : (
+                    <>
+                      <p>• HA is reachable at <code className="text-slate-400">{endpoint}</code></p>
+                      <p>• <code className="text-slate-400">MYHOME_MCP_ENDPOINT</code> in gateway <code className="text-slate-400">.env</code> matches this URL</p>
+                      <p>• Long-lived access token is valid</p>
+                    </>
+                  )}
+                  <p>• <code className="text-slate-400">voska/hass-mcp</code> image is pulled: <code className="text-slate-400">docker pull voska/hass-mcp:latest</code></p>
                 </div>
                 <motion.button
                   whileHover={{ scale: 1.04 }}

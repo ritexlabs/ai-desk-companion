@@ -1285,7 +1285,10 @@ export default function App() {
       {/* WhatsApp dashboard */}
       <AnimatePresence>
         {whatsappDashboardOpen && (
-          <WhatsAppDashboard onClose={() => setWhatsappDashboardOpen(false)} />
+          <WhatsAppDashboard
+            onClose={() => setWhatsappDashboardOpen(false)}
+            onVoice={(text) => { setWhatsappDashboardOpen(false); rt.ask(text); }}
+          />
         )}
       </AnimatePresence>
 

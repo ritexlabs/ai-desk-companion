@@ -48,11 +48,20 @@ apps/mcp-gateway/
 | `POST /tools/{tool_name}` | Bearer | `{ arguments: {...} }` → `{ ok: true, result: ... }` |
 | `GET /mcp` | Bearer | MCP StreamableHTTP protocol endpoint |
 | `POST /mcp` | Bearer | MCP StreamableHTTP protocol endpoint |
+| **Session credential endpoints** | | |
+| `PUT /session/smarthome` | Bearer | Update HA endpoint + token in-memory |
+| `PUT /session/weather` | Bearer | Update weather API key, city, provider in-memory |
+| `PUT /session/github` | Bearer | Update GitHub token in-memory |
+| `PUT /session/news` | Bearer | Update news API key + country in-memory |
+| `PUT /session/whatsapp` | Bearer | Update WhatsApp phone ID, token, contacts in-memory |
+| `PUT /session/portfolio` | Bearer | Update INDmoney credentials in-memory |
+| **Portfolio OAuth** | | |
 | `GET /api/portfolio/data` | — | Portfolio summary using stored OAuth token |
 | `GET /api/portfolio/status` | — | INDmoney connection status + token freshness |
 | `GET /auth/indmoney` | — | Start INDmoney OAuth PKCE flow (opens browser redirect) |
 | `GET /auth/indmoney/callback` | — | OAuth code exchange, saves token to .env |
 | `DELETE /auth/indmoney/token` | Bearer | Remove stored INDmoney token |
+| **Other** | | |
 | `GET /api/system/config` | — | Enabled/disabled metrics list |
 | `GET /api/tunnel/status` | — | Cloudflare tunnel status |
 | `POST /api/tunnel/start` | — | Start Cloudflare tunnel |
@@ -62,6 +71,17 @@ apps/mcp-gateway/
 | `POST /webhook/whatsapp` | — | Receive incoming WhatsApp messages |
 
 Auth-exempt endpoints (no Bearer token required) are listed in `_AUTH_EXEMPT` in `main.py`.
+
+### Session credential push
+
+The `PUT /session/*` endpoints allow the orchestrator to inject per-session credentials into the gateway at runtime, without editing `.env`. Each endpoint mutates `GatewaySettings` fields in-memory:
+
+```python
+# Example: PUT /session/github
+settings.github_token = body.token.strip()
+```
+
+All `PUT /session/*` endpoints require the Bearer token — they are **not** in `_AUTH_EXEMPT`. The orchestrator calls these automatically during `boot_sequence` using values from the WebSocket `start_session` → `agent_config` payload. `.env` values remain as fallbacks when no session push has occurred.
 
 ---
 
@@ -87,7 +107,13 @@ The `ToolRegistry` applies the prefix automatically — tool implementations use
 
 ## Credentials
 
-Credentials are stored in `apps/mcp-gateway/.env` and read at startup via `GatewaySettings`. They are **never forwarded per-call** from the orchestrator — each tool reads from `settings` directly.
+Credentials reach the gateway via two paths:
+
+1. **Session push (runtime)** — orchestrator calls `PUT /session/<agent>` during `boot_sequence`. The gateway mutates `GatewaySettings` fields in-memory. No `.env` write occurs. This is the primary path for credentials entered in the UI.
+
+2. **`.env` file (startup defaults)** — `GatewaySettings` reads `apps/mcp-gateway/.env` at process start. These values are used as initial defaults and as fallbacks between sessions.
+
+Each tool reads from `settings` directly — credentials are **never forwarded per-call** from the orchestrator.
 
 | Tool | Credential keys in `GatewaySettings` |
 |---|---|

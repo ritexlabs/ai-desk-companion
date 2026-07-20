@@ -375,26 +375,34 @@ Credentials are split across two `.env` files — one per service. Copy the matc
 
 ### `apps/mcp-gateway/.env`
 
+> **Note:** Most integration credentials below can be set either in `.env` (static startup default) **or** via the Settings UI (session push). UI-entered values take effect immediately without a restart and are not written to `.env`. `.env` values serve as fallbacks between sessions.
+
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `GATEWAY_API_TOKEN` | Must match the orchestrator's `GATEWAY_API_TOKEN` | No (leave blank for local dev) |
-| `GITHUB_TOKEN` | GitHub Personal Access Token | For GitHub agent |
+| `GITHUB_TOKEN` | GitHub Personal Access Token | No (can be set via UI Settings) |
 | `GOOGLE_ACCESS_TOKEN` | Google OAuth2 access token | For Calendar/Gmail agents |
 | `GOOGLE_REFRESH_TOKEN` | Google OAuth2 refresh token | For token refresh |
 | `GOOGLE_CLIENT_ID` | Google OAuth2 client ID | For token refresh |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth2 client secret | For token refresh |
-| `WEATHER_API_KEY` | OpenWeatherMap or WeatherAPI key | No (Open-Meteo free fallback) |
+| `WEATHER_API_KEY` | OpenWeatherMap or WeatherAPI key | No (Open-Meteo free fallback; can be set via UI) |
 | `WEATHER_PROVIDER` | `open_meteo` / `openweathermap` / `weatherapi` | No (defaults to open_meteo) |
-| `WEATHER_DEFAULT_CITY` | Default city for weather queries | No |
+| `WEATHER_DEFAULT_CITY` | Default city for weather queries | No (can be set via UI) |
 | `STOCK_DEFAULT_MARKET` | `IN` (NSE) or `US` (NYSE/NASDAQ) | No (defaults to IN) |
-| `NEWS_API_KEY` | GNews API key | For News agent |
-| `NEWS_DEFAULT_COUNTRY` | ISO 3166-1 alpha-2 code (`in`, `us`, …) | No |
-| `MYHOME_MCP_ENDPOINT` | Home Assistant URL | For Smart Home agent |
-| `MYHOME_MCP_TOKEN` | Home Assistant long-lived access token | For Smart Home agent |
-| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp phone number ID | For WhatsApp agent |
-| `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp system user token | For WhatsApp agent |
+| `NEWS_API_KEY` | GNews API key | No (can be set via UI Settings) |
+| `NEWS_DEFAULT_COUNTRY` | ISO 3166-1 alpha-2 code (`in`, `us`, …) | No (can be set via UI) |
+| `MYHOME_MCP_ENDPOINT` | Home Assistant URL | No (can be set via UI; auto-set to localhost when Local Docker mode) |
+| `MYHOME_MCP_TOKEN` | Home Assistant long-lived access token | No (can be set via UI Settings) |
+| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp phone number ID | No (can be set via UI Settings) |
+| `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp system user token | No (can be set via UI Settings) |
 | `WHATSAPP_APP_SECRET` | Meta app secret (webhook signature validation) | For WhatsApp webhooks |
 | `INDMONEY_OAUTH_TOKEN` | Written automatically by the OAuth flow | — (do not set manually) |
+
+### Runtime files (gitignored, do not commit)
+
+| File | Created by | Purpose |
+|---|---|---|
+| `apps/smarthome/.mode` | UI Settings toggle / orchestrator `/docker/start|stop` | Persists `local` or `remote` HA mode across restarts |
 
 ---
 

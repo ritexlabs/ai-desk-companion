@@ -188,7 +188,7 @@ describe('verifySmartHome', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const base: AgentConfig['smarthome'] = {
-    enabled: true, endpoint: 'http://homeassistant.local:8123',
+    enabled: true, mode: 'remote', endpoint: 'http://homeassistant.local:8123',
     token: '', status: 'idle', info: '', notificationsEnabled: false,
   };
 

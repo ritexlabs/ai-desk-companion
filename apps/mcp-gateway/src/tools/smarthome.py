@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
+
 from src.config.settings import settings
 from src.tools.base import BaseTool
 from src.tools.hass_mcp import close_all, get_hass_client
@@ -71,6 +73,25 @@ class SmartHomeTool(BaseTool):
             )
         return get_hass_client(endpoint, token)
 
+    async def _list_entities_rest(self, arguments: dict) -> list:
+        """Direct HA REST API fallback when voska/hass-mcp raises a validation error."""
+        endpoint = (settings.myhome_mcp_endpoint or '').strip().rstrip('/')
+        token    = (settings.myhome_mcp_token    or '').strip()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f'{endpoint}/api/states',
+                headers={'Authorization': f'Bearer {token}'},
+            )
+            resp.raise_for_status()
+            states = resp.json()
+        if not isinstance(states, list):
+            raise RuntimeError(f'HA /api/states returned {type(states).__name__}, expected list')
+        domain = arguments.get('domain')
+        if domain:
+            states = [s for s in states if s.get('entity_id', '').split('.')[0] == domain]
+        limit = int(arguments.get('limit', 20))
+        return states[:limit]
+
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         client = self._require_client()
 
@@ -82,7 +103,13 @@ class SmartHomeTool(BaseTool):
             if 'domain'       in arguments: args['domain']       = arguments['domain']
             if 'search_query' in arguments: args['search_query'] = arguments['search_query']
             args['limit'] = arguments.get('limit', 20)
-            return await client.call_tool('list_entities', args)
+            try:
+                return await client.call_tool('list_entities', args)
+            except RuntimeError as exc:
+                # voska/hass-mcp Pydantic output validation failure — fall back to HA REST API
+                if 'valid list' in str(exc) or 'validation error' in str(exc).lower():
+                    return await self._list_entities_rest(arguments)
+                raise
 
         if tool_name == 'call_service':
             return await client.call_tool('call_service_tool', {

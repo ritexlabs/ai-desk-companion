@@ -51,9 +51,32 @@ _GATEWAY_AGENT_MAP: dict[str, str] = {
     'whatsapp':  'whatsapp',
 }
 
-# Per-session Google token — stored so reload_agent can re-push it to the gateway
+# Per-session credentials stored so reload_agent can re-push to the gateway
 _session_google_access_token:  str = ''
 _session_google_refresh_token: str = ''
+
+_session_smarthome_endpoint: str = ''
+_session_smarthome_token:    str = ''
+
+_session_weather_api_key:    str = ''
+_session_weather_city:       str = ''
+_session_weather_provider:   str = ''
+
+_session_github_token: str = ''
+
+_session_news_api_key: str = ''
+_session_news_country: str = ''
+
+_session_whatsapp_phone_id:    str = ''
+_session_whatsapp_token:       str = ''
+_session_whatsapp_verify:      str = ''
+_session_whatsapp_contacts:    str = ''
+
+_session_portfolio_client_id:     str = ''
+_session_portfolio_client_secret: str = ''
+_session_portfolio_access_token:  str = ''
+_session_portfolio_refresh_token: str = ''
+_session_portfolio_expires_at:    int = 0
 
 # Human-readable labels for gateway-served agents (used in boot messages)
 _GATEWAY_LABELS: dict[str, str] = {
@@ -383,6 +406,9 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
     success=False means the agent is unconfigured or the call failed — the
     gateway may be up but this specific integration has no working credentials.
     snippet may be empty even on success when there is no useful live data.
+
+    For smarthome: snippet '__auth__' means credentials are missing (PermissionError).
+    snippet '' with success=False means connection failure (HA still starting).
     """
     if agent_id == 'stock':
         return await _fetch_stock_boot_snippet()
@@ -391,12 +417,10 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
     if not call:
         return True, ''
     tool_name, args = call
-    # smarthome needs extra time for Docker cold-start on first boot
-    _boot_timeout = 25.0 if agent_id == 'smarthome' else 5.0
     try:
         raw = await asyncio.wait_for(
             gateway_client.call_tool(tool_name, args),
-            timeout=_boot_timeout,
+            timeout=5.0,
         )
         if not raw:
             return True, ''
@@ -406,8 +430,60 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
             return False, ''
         fn = _GW_SNIP_FN.get(agent_id)
         return True, (fn(text) if fn else text[:55])
+    except PermissionError:
+        return False, '__auth__' if agent_id == 'smarthome' else ''
     except Exception:
         return False, ''
+
+
+_HA_POLL_INTERVAL = 5.0   # seconds between retries during background polling
+_HA_POLL_TIMEOUT  = 120.0  # give up after 2 minutes
+
+
+async def _poll_smarthome_until_online(
+    send_fn:      SendFn,
+    speak_fn:     SpeakFn,
+    tts:          TTSProvider,
+    agent_voices: dict | None,
+) -> None:
+    """Background task: polls HA every 5 s until online, not-configured, or 2-min timeout."""
+    import json as _json
+    deadline = asyncio.get_event_loop().time() + _HA_POLL_TIMEOUT
+    try:
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(_HA_POLL_INTERVAL)
+            try:
+                raw  = await asyncio.wait_for(
+                    gateway_client.call_tool('smarthome__system_overview', {}),
+                    timeout=10.0,
+                )
+                text  = _json.dumps(raw) if isinstance(raw, (dict, list)) else str(raw)
+                snip  = _snip_smarthome(text)
+                label = _GATEWAY_LABELS['smarthome']
+                base  = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
+                msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
+                await speak_fn(
+                    'boot_status', msg,
+                    {'agent_id': 'smarthome', 'agent_status': 'online'},
+                    agent_tts(tts, 'smarthome', agent_voices),
+                )
+                await send_fn('agent_status_changed', {'agent': 'smarthome', 'status': 'online'})
+                return
+            except PermissionError:
+                await speak_fn(
+                    'boot_status',
+                    'Smart Home not configured — please add your Home Assistant token in Settings.',
+                    {'agent_id': 'smarthome', 'agent_status': 'degraded'},
+                    agent_tts(tts, 'smarthome', agent_voices),
+                )
+                await send_fn('agent_status_changed', {'agent': 'smarthome', 'status': 'degraded'})
+                return
+            except Exception:
+                pass  # still starting — keep polling
+        # 2-minute timeout — mark degraded silently
+        await send_fn('agent_status_changed', {'agent': 'smarthome', 'status': 'degraded'})
+    except Exception:
+        pass  # WebSocket closed or fatal error — background task exits quietly
 
 
 def _time_of_day() -> str:
@@ -486,9 +562,30 @@ async def reload_agent(agent_id: str) -> tuple[str, str]:
     label = AGENT_LABELS.get(agent_id) or _GATEWAY_LABELS.get(agent_id) or agent_id.title()
 
     if agent_id in _GATEWAY_AGENT_MAP:
-        # Re-push Google token before checking calendar/email so the gateway has it
+        # Re-push the stored session credentials to the gateway before re-checking
         if agent_id in ('calendar', 'email') and _session_google_access_token:
             await gateway_client.update_google_session(_session_google_access_token, _session_google_refresh_token)
+        if agent_id == 'smarthome' and _session_smarthome_endpoint and _session_smarthome_token:
+            await gateway_client.update_smarthome_session(_session_smarthome_endpoint, _session_smarthome_token)
+        if agent_id == 'weather':
+            await gateway_client.update_weather_session(
+                _session_weather_api_key, _session_weather_city, _session_weather_provider,
+            )
+        if agent_id == 'github' and _session_github_token:
+            await gateway_client.update_github_session(_session_github_token)
+        if agent_id == 'news':
+            await gateway_client.update_news_session(_session_news_api_key, _session_news_country)
+        if agent_id == 'whatsapp' and _session_whatsapp_phone_id and _session_whatsapp_token:
+            await gateway_client.update_whatsapp_session(
+                _session_whatsapp_phone_id, _session_whatsapp_token,
+                _session_whatsapp_verify, _session_whatsapp_contacts,
+            )
+        if agent_id == 'portfolio' and _session_portfolio_access_token:
+            await gateway_client.update_portfolio_session(
+                _session_portfolio_client_id, _session_portfolio_client_secret,
+                _session_portfolio_access_token, _session_portfolio_refresh_token,
+                _session_portfolio_expires_at,
+            )
         ok, snippet = await _fetch_boot_snippet(agent_id)
         if ok:
             phrase = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
@@ -533,14 +630,92 @@ async def boot_sequence(
     router_service.configure_session(llm_config, registered_agents)
     metrics_service.record_session()
 
-    # Store and push Google OAuth token to gateway so it can serve calendar/email
+    # Push all agent credentials from the frontend session to the gateway.
+    # The gateway reads from its .env at startup; these in-memory overrides let
+    # users configure everything from the Settings UI without editing .env.
     global _session_google_access_token, _session_google_refresh_token
-    g = agent_config.get('google', {}) if agent_config else {}
+    global _session_smarthome_endpoint, _session_smarthome_token
+    global _session_weather_api_key, _session_weather_city, _session_weather_provider
+    global _session_github_token
+    global _session_news_api_key, _session_news_country
+    global _session_whatsapp_phone_id, _session_whatsapp_token, _session_whatsapp_verify, _session_whatsapp_contacts
+    global _session_portfolio_client_id, _session_portfolio_client_secret
+    global _session_portfolio_access_token, _session_portfolio_refresh_token, _session_portfolio_expires_at
+    ac = agent_config if agent_config else {}
+
+    # Google
+    g = ac.get('google', {})
     _session_google_access_token  = (g.get('access_token')  or '').strip()
     _session_google_refresh_token = (g.get('refresh_token') or '').strip()
     if _session_google_access_token:
         asyncio.create_task(
             gateway_client.update_google_session(_session_google_access_token, _session_google_refresh_token)
+        )
+
+    # SmartHome — awaited so credentials are live before the boot check
+    sh = ac.get('smarthome', {})
+    _session_smarthome_endpoint = (sh.get('endpoint') or '').strip().rstrip('/')
+    if (sh.get('mode') or 'remote') == 'local' and not _session_smarthome_endpoint:
+        _session_smarthome_endpoint = 'http://localhost:8123'
+    _session_smarthome_token = (sh.get('token') or '').strip()
+    if 'smarthome' in registered_agents and _session_smarthome_endpoint and _session_smarthome_token:
+        await gateway_client.update_smarthome_session(_session_smarthome_endpoint, _session_smarthome_token)
+
+    # Weather
+    w = ac.get('weather', {})
+    _session_weather_api_key  = (w.get('api_key')      or '').strip()
+    _session_weather_city     = (w.get('default_city') or '').strip()
+    _session_weather_provider = (w.get('provider')     or '').strip()
+    if 'weather' in registered_agents:
+        asyncio.create_task(
+            gateway_client.update_weather_session(
+                _session_weather_api_key, _session_weather_city, _session_weather_provider,
+            )
+        )
+
+    # GitHub
+    gh = ac.get('github', {})
+    _session_github_token = (gh.get('personal_access_token') or '').strip()
+    if 'github' in registered_agents and _session_github_token:
+        asyncio.create_task(gateway_client.update_github_session(_session_github_token))
+
+    # News
+    nw = ac.get('news', {})
+    _session_news_api_key = (nw.get('api_key') or '').strip()
+    _session_news_country = (nw.get('country')  or '').strip()
+    if 'news' in registered_agents:
+        asyncio.create_task(
+            gateway_client.update_news_session(_session_news_api_key, _session_news_country)
+        )
+
+    # WhatsApp
+    wa = ac.get('whatsapp', {})
+    _session_whatsapp_phone_id  = (wa.get('phone_number_id')      or '').strip()
+    _session_whatsapp_token     = (wa.get('access_token')          or '').strip()
+    _session_whatsapp_verify    = (wa.get('webhook_verify_token')  or '').strip()
+    _session_whatsapp_contacts  = (wa.get('contacts')              or '').strip()
+    if 'whatsapp' in registered_agents and _session_whatsapp_phone_id and _session_whatsapp_token:
+        asyncio.create_task(
+            gateway_client.update_whatsapp_session(
+                _session_whatsapp_phone_id, _session_whatsapp_token,
+                _session_whatsapp_verify, _session_whatsapp_contacts,
+            )
+        )
+
+    # Portfolio (INDmoney)
+    pf = ac.get('portfolio', {})
+    _session_portfolio_client_id     = (pf.get('client_id')     or '').strip()
+    _session_portfolio_client_secret = (pf.get('client_secret') or '').strip()
+    _session_portfolio_access_token  = (pf.get('access_token')  or '').strip()
+    _session_portfolio_refresh_token = (pf.get('refresh_token') or '').strip()
+    _session_portfolio_expires_at    = int(pf.get('expires_at') or 0)
+    if 'portfolio' in registered_agents and _session_portfolio_access_token:
+        asyncio.create_task(
+            gateway_client.update_portfolio_session(
+                _session_portfolio_client_id, _session_portfolio_client_secret,
+                _session_portfolio_access_token, _session_portfolio_refresh_token,
+                _session_portfolio_expires_at,
+            )
         )
 
     await send_fn('session_config', {
@@ -613,6 +788,42 @@ async def boot_sequence(
         # use the per-agent success flag from the boot call.
         agent_ok = gw_ok and success_map.get(agent_id, False)
         status   = 'online' if agent_ok else 'degraded'
+
+        if agent_id == 'smarthome':
+            if agent_ok:
+                # Responded within 5 s — announce immediately
+                gw_online += 1
+                label = _GATEWAY_LABELS['smarthome']
+                base  = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
+                snip  = snippet_map.get(agent_id, '')
+                msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
+                await speak_fn(
+                    'boot_status', msg,
+                    {'agent_id': agent_id, 'agent_status': 'online'},
+                    agent_tts(tts, agent_id, agent_voices),
+                )
+                await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
+            elif snippet_map.get(agent_id) == '__auth__' or not gw_ok:
+                # Credentials missing — tell the user to configure
+                await speak_fn(
+                    'boot_status',
+                    'Smart Home not configured — please add your Home Assistant token in Settings.',
+                    {'agent_id': agent_id, 'agent_status': 'degraded'},
+                    agent_tts(tts, agent_id, agent_voices),
+                )
+                await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'degraded'})
+            else:
+                # HA still booting — keep 'starting', poll in background
+                await speak_fn(
+                    'boot_status',
+                    'Smart Home bridge is starting — I will notify you when it comes online.',
+                    {'agent_id': agent_id, 'agent_status': 'starting'},
+                    agent_tts(tts, agent_id, agent_voices),
+                )
+                asyncio.create_task(
+                    _poll_smarthome_until_online(send_fn, speak_fn, tts, agent_voices)
+                )
+            continue
 
         if agent_id in _GOOGLE_GROUP:
             # Announce both Google sub-services together on the first one encountered

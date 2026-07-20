@@ -495,9 +495,9 @@ export function AgentConfigModal(props: Props) {
             {/* Close */}
             <button
               onClick={props.onClose}
-              className="absolute top-4 right-4 z-10 w-8 h-8 rounded-xl border border-white/8 bg-white/4 hover:bg-white/10 text-slate-500 hover:text-white transition flex items-center justify-center"
+              className="absolute top-4 right-4 z-10 w-7 h-7 rounded-xl border border-white/10 bg-white/4 hover:bg-white/10 text-slate-500 hover:text-white transition flex items-center justify-center"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
 
             <AnimatePresence mode="wait">

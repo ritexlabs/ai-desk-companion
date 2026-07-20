@@ -30,6 +30,10 @@ apps/mcp-gateway/logs/
 .pids
 apps/mcp-gateway/.cf-tunnel.pid
 
+# ── Smart Home — Home Assistant config and runtime data (git-ignored) ──────────
+apps/smarthome/ha-config/
+apps/smarthome/.mode
+
 # ── Cloudflare tunnel config (contains real tunnel UUIDs and hostnames) ────────
 # Canonical location: apps/mcp-gateway/.cloudflared/
 # Ignore only the live config (contains real UUID); track the example template

@@ -135,9 +135,21 @@ function EmailPanel({ accessToken, c }: { accessToken: string; c: typeof COLORS.
     fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?maxResults=8&q=in:inbox`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
-      .then((r) => r.json())
+      .then(async (r) => {
+        const data = await r.json();
+        if (data.error) {
+          const msg: string = data.error.message ?? '';
+          const status: number = data.error.code ?? r.status;
+          if (status === 401) throw new Error('Token expired — re-sign in with Google.');
+          if (msg.includes('insufficient') || msg.includes('scope') || msg.includes('permission'))
+            throw new Error('Gmail not authorized — re-sign in to enable Gmail scope.');
+          if (msg.includes('API has not been used') || msg.includes('disabled'))
+            throw new Error('Gmail API is disabled — enable it at console.cloud.google.com → APIs & Services.');
+          throw new Error(msg || 'Gmail API error');
+        }
+        return data;
+      })
       .then(async (data) => {
-        if (data.error) throw new Error(data.error.message ?? 'API error');
         const ids: string[] = (data.messages ?? []).map((m: any) => m.id);
         const details = await Promise.all(ids.map((id) =>
           fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`, {

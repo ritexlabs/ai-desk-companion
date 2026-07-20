@@ -88,6 +88,11 @@ class GatewaySettings(BaseSettings):
     # if your portfolio is not on the first sheet.
     mystocks_range:           str = 'A:Z'
 
+    # ── Social Media ──────────────────────────────────────────────────────────
+    # JSON array of account objects — set per-session via PUT /session/socialmedia.
+    # Schema: [{"id":"..","platform":"youtube"|"instagram","label":"..","token":"..","channelId":"..","enabled":true}]
+    social_accounts: str = ''
+
     # ── System metrics ────────────────────────────────────────────────────────
     # Comma-separated list of metric names to skip when collecting system info.
     # Metrics that may require elevated permissions or optional CLI tools are

@@ -98,15 +98,16 @@ async def lifespan(app: FastAPI):
 
 
 def _register_tools() -> None:
-    from src.tools.weather    import WeatherTool
-    from src.tools.stocks     import StocksTool
-    from src.tools.news       import NewsTool
-    from src.tools.github     import GitHubTool
-    from src.tools.google     import GoogleTool
-    from src.tools.system     import SystemTool
-    from src.tools.portfolio  import PortfolioTool
-    from src.tools.smarthome  import SmartHomeTool
-    from src.tools.whatsapp   import WhatsAppTool
+    from src.tools.weather     import WeatherTool
+    from src.tools.stocks      import StocksTool
+    from src.tools.news        import NewsTool
+    from src.tools.github      import GitHubTool
+    from src.tools.google      import GoogleTool
+    from src.tools.system      import SystemTool
+    from src.tools.portfolio   import PortfolioTool
+    from src.tools.smarthome   import SmartHomeTool
+    from src.tools.whatsapp    import WhatsAppTool
+    from src.tools.socialmedia import SocialMediaTool
 
     registry.register(WeatherTool())
     registry.register(StocksTool())
@@ -117,6 +118,7 @@ def _register_tools() -> None:
     registry.register(PortfolioTool())
     registry.register(SmartHomeTool())
     registry.register(WhatsAppTool())
+    registry.register(SocialMediaTool())
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -258,8 +260,16 @@ class SmartHomeSessionRequest(BaseModel):
 @app.put('/session/smarthome')
 async def update_smarthome_session(body: SmartHomeSessionRequest) -> dict:
     """Accept per-session SmartHome credentials from the orchestrator."""
-    settings.myhome_mcp_endpoint = body.endpoint.strip().rstrip('/')
-    settings.myhome_mcp_token    = body.token.strip()
+    new_endpoint = body.endpoint.strip().rstrip('/')
+    new_token    = body.token.strip()
+    # When the endpoint or token changes, kill existing hass-mcp containers so the
+    # next call creates a fresh one with the new credentials instead of reusing a
+    # stale pool entry that was started with the old (possibly wrong) URL.
+    if new_endpoint != settings.myhome_mcp_endpoint or new_token != settings.myhome_mcp_token:
+        from src.tools.hass_mcp import close_all
+        await close_all()
+    settings.myhome_mcp_endpoint = new_endpoint
+    settings.myhome_mcp_token    = new_token
     configured = bool(settings.myhome_mcp_endpoint and settings.myhome_mcp_token)
     return {'ok': True, 'configured': configured}
 
@@ -329,6 +339,25 @@ async def update_whatsapp_session(body: WhatsAppSessionRequest) -> dict:
         settings.whatsapp_contacts = body.contacts.strip()
     configured = bool(settings.whatsapp_phone_number_id and settings.whatsapp_access_token)
     return {'ok': True, 'configured': configured}
+
+
+class SocialMediaSessionRequest(BaseModel):
+    accounts: str = ''  # JSON-encoded list of SocialAccount objects
+
+
+@app.put('/session/socialmedia')
+async def update_socialmedia_session(body: SocialMediaSessionRequest) -> dict:
+    """Accept per-session social media accounts from the orchestrator.
+
+    Stores the JSON-encoded accounts list in-memory so the SocialMediaTool
+    can read credentials without accessing the .env file.
+    """
+    settings.social_accounts = body.accounts.strip()
+    try:
+        count = len([a for a in json.loads(settings.social_accounts) if a.get('enabled')]) if settings.social_accounts else 0
+    except Exception:
+        count = 0
+    return {'ok': True, 'configured': count > 0, 'account_count': count}
 
 
 class PortfolioSessionRequest(BaseModel):

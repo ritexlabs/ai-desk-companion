@@ -95,6 +95,11 @@ def _build_headers() -> dict[str, str]:
         raise ToolAuthError('INDmoney access_token missing — please reconnect via Settings.')
 
     expires_at = token_data.get('expires_at')
+    # Normalise to seconds — the frontend sends tokenExpiresAt in milliseconds (JS Date.now())
+    # while time.time() returns seconds. 1e10 s ≈ year 2286, so anything larger is in ms.
+    if expires_at and expires_at > 1e10:
+        expires_at = expires_at / 1000
+
     now = time.time()
     if expires_at and now > expires_at - 60 and token_data.get('refresh_token'):
         if now - _last_refresh >= _REFRESH_THROTTLE:
@@ -105,6 +110,12 @@ def _build_headers() -> dict[str, str]:
                 logger.info('INDmoney access token auto-refreshed')
             except Exception as exc:
                 logger.warning('INDmoney token refresh failed: %s', exc)
+                # Token is past expiry and refresh failed — tell the user to reconnect
+                if now > (expires_at or 0) + 300:
+                    raise ToolAuthError(
+                        'INDmoney token expired and refresh failed — '
+                        'please reconnect in Settings → Portfolio.'
+                    ) from exc
 
     return {'Authorization': f'Bearer {access_token}'}
 
@@ -236,5 +247,12 @@ class PortfolioTool(BaseTool):
         except ToolAuthError:
             raise
         except Exception as exc:
+            # Unwrap ExceptionGroup (anyio TaskGroup, Python 3.11+) to surface 401 from INDmoney.
+            # streamablehttp_client wraps transport errors in ExceptionGroup via anyio task groups.
+            for sub in getattr(exc, 'exceptions', []):
+                if isinstance(sub, httpx.HTTPStatusError) and sub.response.status_code == 401:
+                    raise ToolAuthError(
+                        'INDmoney token expired — please reconnect in Settings → Portfolio.'
+                    ) from sub
             logger.warning('INDmoney call_tool failed: %s', exc)
             raise

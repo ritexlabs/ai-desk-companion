@@ -36,7 +36,8 @@ const AGENT_CATALOGUE: AgentDefinition[] = [
   { id: 'calculator', label: 'Calculator',  description: 'Precise math, percentages, tip and unit calc.', example: 'What is 18% tip on 850?',               status: 'offline', color: 'from-amber-400 to-orange-600' },
   { id: 'memory',     label: 'Memory',      description: 'Save and recall personal notes any time.',       example: 'Remember wife birthday is March 5.',    status: 'offline', color: 'from-purple-400 to-violet-600' },
   { id: 'briefing',   label: 'Briefing',    description: 'Morning summary across all connected agents.',   example: 'Give me my morning briefing.',           status: 'offline', color: 'from-cyan-400 to-teal-600'    },
-  { id: 'notes',      label: 'Notes & Reminders', description: 'Personal notes, tasks, reminders, and alarms.', example: 'Remind me to take medicines at 8pm.',  status: 'offline', color: 'from-violet-400 to-purple-600' },
+  { id: 'notes',       label: 'Notes & Reminders', description: 'Personal notes, tasks, reminders, and alarms.', example: 'Remind me to take medicines at 8pm.',  status: 'offline', color: 'from-violet-400 to-purple-600' },
+  { id: 'socialmedia', label: 'Social Media',      description: 'YouTube channels and Instagram accounts — views, subs, likes.', example: 'How did my channels perform today?', status: 'offline', color: 'from-purple-400 to-pink-500' },
 ];
 
 function agentsFromIds(ids: string[]): AgentDefinition[] {
@@ -690,6 +691,9 @@ export function useOrchestratorRuntime(
             access_token:         ac.whatsapp.accessToken,
             webhook_verify_token: ac.whatsapp.webhookVerifyToken,
             contacts:             ac.whatsapp.contacts,
+          },
+          socialmedia: {
+            accounts: ac.socialmedia.accounts.map(({ refreshToken: _r, tokenExpiresAt: _e, googleEmail: _g, ...safe }) => safe),
           },
         } : {},
       });

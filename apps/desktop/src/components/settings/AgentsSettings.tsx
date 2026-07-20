@@ -4,22 +4,24 @@ import {
   Bot, Brain, Calculator, ChevronLeft, ChevronRight,
   Cloud, GitBranch, Globe, Globe2, Home, Layers,
   Loader2, Lock, MessageCircle, Monitor, Newspaper,
-  PieChart, RefreshCw, Search, Sparkles, TrendingUp, Zap,
+  PieChart, RefreshCw, Search, Sparkles, TrendingUp, Tv, Zap,
 } from 'lucide-react';
 import type { AgentConfig, ConnectionStatus } from '../../hooks/useAgentConfig';
 import type { AgentVoiceMap, AgentVoiceSetting } from '../../hooks/useAgentVoiceConfig';
 import { AgentToggle } from './AgentAccordion';
 import { AgentVoiceRow } from './AgentVoiceRow';
 import { SecurityNotice, StatusBadge } from './shared';
-import { WeatherSettings }   from './WeatherSettings';
-import { GoogleSettings }    from './GoogleSettings';
-import { GithubSettings }    from './GithubSettings';
-import { StockSettings }     from './StockSettings';
-import { NewsSettings }      from './NewsSettings';
-import { SmartHomeSettings } from './SmartHomeSettings';
-import { PortfolioSettings } from './PortfolioSettings';
-import { WhatsappSettings }  from './WhatsappSettings';
-import { SystemSettings }    from './SystemSettings';
+import { WeatherSettings }     from './WeatherSettings';
+import { GoogleSettings }      from './GoogleSettings';
+import { GithubSettings }      from './GithubSettings';
+import { StockSettings }       from './StockSettings';
+import { NewsSettings }        from './NewsSettings';
+import { SmartHomeSettings }   from './SmartHomeSettings';
+import { PortfolioSettings }   from './PortfolioSettings';
+import { WhatsappSettings }    from './WhatsappSettings';
+import { SystemSettings }      from './SystemSettings';
+import { SocialMediaSettings } from './SocialMediaSettings';
+import type { YouTubeDiscovery } from '../../hooks/agentVerify';
 
 // ── Agent metadata ────────────────────────────────────────────────────────────
 
@@ -43,7 +45,8 @@ const AGENT_META: Record<string, AgentMeta> = {
   news:       { Icon: Newspaper,      color: 'text-sky-400',     ring: 'ring-sky-400/30',     bg: 'bg-sky-400/10',     label: 'News',        tagline: 'Headlines from 50+ countries' },
   smarthome:  { Icon: Home,           color: 'text-orange-400',  ring: 'ring-orange-400/30',  bg: 'bg-orange-400/10',  label: 'Smart Home',  tagline: 'Lights · climate · scenes' },
   portfolio:  { Icon: PieChart,       color: 'text-rose-400',    ring: 'ring-rose-400/30',    bg: 'bg-rose-400/10',    label: 'Portfolio',   tagline: 'Holdings · P&L · mutual funds' },
-  whatsapp:   { Icon: MessageCircle,  color: 'text-emerald-400', ring: 'ring-emerald-400/30', bg: 'bg-emerald-400/10', label: 'WhatsApp',    tagline: 'Send & receive by voice' },
+  whatsapp:     { Icon: MessageCircle, color: 'text-emerald-400', ring: 'ring-emerald-400/30', bg: 'bg-emerald-400/10', label: 'WhatsApp',     tagline: 'Send & receive by voice'             },
+  socialmedia:  { Icon: Tv,           color: 'text-purple-400',  ring: 'ring-purple-400/30',  bg: 'bg-purple-400/10',  label: 'Social Media', tagline: 'YouTube channels · Instagram accounts' },
   // Built-in skills
   websearch:  { Icon: Globe,          color: 'text-indigo-400',  ring: 'ring-indigo-400/30',  bg: 'bg-indigo-400/10',  label: 'Web Search',  tagline: 'Live web · no API key' },
   calculator: { Icon: Calculator,     color: 'text-amber-300',   ring: 'ring-amber-300/30',   bg: 'bg-amber-300/10',   label: 'Calculator',  tagline: 'Precise math & percentages' },
@@ -53,7 +56,7 @@ const AGENT_META: Record<string, AgentMeta> = {
   general:    { Icon: Bot,            color: 'text-violet-400',  ring: 'ring-violet-400/30',  bg: 'bg-violet-400/10',  label: 'General AI',  tagline: 'Open-ended knowledge & writing' },
 };
 
-const CONFIGURABLE = ['system', 'weather', 'google', 'github', 'stock', 'news', 'smarthome', 'portfolio', 'whatsapp'] as const;
+const CONFIGURABLE = ['system', 'weather', 'google', 'github', 'stock', 'news', 'smarthome', 'portfolio', 'whatsapp', 'socialmedia'] as const;
 const SKILLS       = ['websearch', 'calculator', 'memory', 'briefing'] as const;
 
 // ── Status helpers ────────────────────────────────────────────────────────────
@@ -70,8 +73,9 @@ function getState(id: string, config: AgentConfig): AgentState {
     case 'news':      return { status: config.news.status,      enabled: config.news.enabled,      info: config.news.info };
     case 'smarthome': return { status: config.smarthome.status, enabled: config.smarthome.enabled, info: config.smarthome.info };
     case 'portfolio': return { status: config.portfolio.status, enabled: config.portfolio.enabled, info: config.portfolio.info };
-    case 'whatsapp':  return { status: config.whatsapp.status,  enabled: config.whatsapp.enabled,  info: config.whatsapp.info };
-    default:          return { status: 'connected', enabled: true, info: '' };
+    case 'whatsapp':    return { status: config.whatsapp.status,    enabled: config.whatsapp.enabled,    info: config.whatsapp.info };
+    case 'socialmedia': return { status: config.socialmedia.status, enabled: config.socialmedia.enabled, info: config.socialmedia.info };
+    default:            return { status: 'connected', enabled: true, info: '' };
   }
 }
 
@@ -84,8 +88,9 @@ function getToggle(id: string, config: AgentConfig, onPatch: Props['onPatch']): 
     case 'news':      return () => onPatch('news',      { enabled: !config.news.enabled });
     case 'smarthome': return () => onPatch('smarthome', { enabled: !config.smarthome.enabled });
     case 'portfolio': return () => onPatch('portfolio', { enabled: !config.portfolio.enabled });
-    case 'whatsapp':  return () => onPatch('whatsapp',  { enabled: !config.whatsapp.enabled });
-    default:          return undefined;
+    case 'whatsapp':    return () => onPatch('whatsapp',    { enabled: !config.whatsapp.enabled });
+    case 'socialmedia': return () => onPatch('socialmedia', { enabled: !config.socialmedia.enabled });
+    default:            return undefined;
   }
 }
 
@@ -322,6 +327,8 @@ interface Props {
   onDisconnectPortfolio: () => void;
   onRefreshPortfolio:    () => void;
   onVerifyWhatsApp:      () => void;
+  onVerifySocialMedia:   () => void;
+  onConnectYoutube:      (loginHint?: string) => Promise<YouTubeDiscovery | null>;
   onCheckTunnel:       () => Promise<boolean>;
   onStartTunnel:       () => void;
   onStopTunnel:        () => void;
@@ -340,7 +347,7 @@ function DetailView({
   onVerifyGitHub, onDisconnectGitHub, onVerifyNews,
   onVerifySmartHome,
   onConnectPortfolio, onDisconnectPortfolio, onRefreshPortfolio,
-  onVerifyWhatsApp,
+  onVerifyWhatsApp, onVerifySocialMedia, onConnectYoutube,
   onCheckTunnel, onStartTunnel, onStopTunnel,
   agentVoices, onAgentVoiceUpdate, onAgentVoiceReset, voices, onTestAgentVoice,
 }: Props & { agentId: string; dir: number; onBack: () => void }) {
@@ -378,6 +385,8 @@ function DetailView({
         return <PortfolioSettings config={config.portfolio} onPatch={(p) => onPatch('portfolio', p)} onConnect={onConnectPortfolio} onDisconnect={onDisconnectPortfolio} onRefresh={onRefreshPortfolio} />;
       case 'whatsapp':
         return <WhatsappSettings config={config.whatsapp} onPatch={(p) => onPatch('whatsapp', p)} onVerify={onVerifyWhatsApp} onCheckTunnel={onCheckTunnel} onStartTunnel={onStartTunnel} onStopTunnel={onStopTunnel} />;
+      case 'socialmedia':
+        return <SocialMediaSettings config={config.socialmedia} onPatch={(p) => onPatch('socialmedia', p)} onVerify={onVerifySocialMedia} onConnectYoutube={onConnectYoutube} />;
       case 'websearch':  return <WebSearchInfo />;
       case 'calculator': return <CalculatorInfo />;
       case 'memory':     return <MemoryInfo />;

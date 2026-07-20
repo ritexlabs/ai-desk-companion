@@ -98,7 +98,18 @@
       "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion show 39a6f90 --stat)",
       "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -5 -- apps/orchestrator/app/services/session.py apps/mcp-gateway/src/tools/smarthome.py apps/mcp-gateway/src/tools/whatsapp.py)",
       "Bash(node -e \"const l = require\\('./node_modules/lucide-react'\\); console.log\\('Container:', !!l.Container, 'Globe:', !!l.Globe, 'Server:', !!l.Server, 'ExternalLink:', !!l.ExternalLink\\)\")",
-      "Bash(python3 -m py_compile launch.py)"
+      "Bash(python3 -m py_compile launch.py)",
+      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/mcp-gateway/src/tools/socialmedia.py)",
+      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/mcp-gateway/src/config/settings.py)",
+      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/mcp-gateway/src/main.py)",
+      "Bash(python3 -m py_compile /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/orchestrator/app/services/gateway_client.py)",
+      "Bash(node -e \"const l = require\\('/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/apps/desktop/node_modules/lucide-react'\\); const keys = Object.keys\\(l\\); console.log\\(keys.filter\\(k => /you|tube|insta|play|video|camera|heart|share|tv|social|rss/i.test\\(k\\)\\).join\\(', '\\)\\)\")",
+      "Bash(.venv/bin/python3 -c \"import mcp; print\\(mcp.__version__\\)\")",
+      "Bash(.venv/bin/python3 -c \"from mcp.client.streamable_http import streamablehttp_client; print\\('OK'\\)\")",
+      "Bash(.venv/bin/pip show *)",
+      "Bash(.venv/bin/python3 -c ' *)",
+      "Bash(xargs ls -la)",
+      "Bash(grep -v \"^$\")"
     ],
     "additionalDirectories": [
       "/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared"

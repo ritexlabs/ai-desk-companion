@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Cloud, Calendar, Mail, GitBranch, Monitor, TrendingUp, Newspaper, Home,
   MessageCircle, Globe, Globe2, Calculator, Brain, Layers, PieChart,
-  Bell, Wrench, Loader2, RotateCw,
+  Bell, Wrench, Loader2, RotateCw, Play,
 } from 'lucide-react';
 import type { AgentDefinition, AgentStatus } from '../types/runtime';
 
@@ -19,8 +19,9 @@ const AGENT_META: Record<
   smarthome:{ icon: <Home       className="h-4 w-4" />, text: 'text-orange-400', border: 'border-orange-400/40', bg: 'bg-orange-400/10', dot: 'bg-orange-400', rgb: '251,146,60'  },
   whatsapp: { icon: <MessageCircle className="h-4 w-4" />, text: 'text-green-400', border: 'border-green-400/40', bg: 'bg-green-400/10', dot: 'bg-green-400', rgb: '74,222,128'   },
   portfolio:{ icon: <PieChart   className="h-4 w-4" />, text: 'text-rose-400',   border: 'border-rose-400/40',   bg: 'bg-rose-400/10',   dot: 'bg-rose-400',   rgb: '251,113,133' },
-  utility:  { icon: <Wrench     className="h-4 w-4" />, text: 'text-indigo-400', border: 'border-indigo-400/40', bg: 'bg-indigo-400/10', dot: 'bg-indigo-400', rgb: '129,140,248' },
-  general:  { icon: <Monitor    className="h-4 w-4" />, text: 'text-slate-400',  border: 'border-slate-400/40',  bg: 'bg-slate-400/10',  dot: 'bg-slate-400',  rgb: '148,163,184' },
+  utility:     { icon: <Wrench className="h-4 w-4" />, text: 'text-indigo-400', border: 'border-indigo-400/40', bg: 'bg-indigo-400/10', dot: 'bg-indigo-400', rgb: '129,140,248' },
+  socialmedia: { icon: <Play   className="h-4 w-4" />, text: 'text-red-400',    border: 'border-red-400/40',    bg: 'bg-red-400/10',    dot: 'bg-red-400',    rgb: '248,113,113' },
+  general:     { icon: <Monitor className="h-4 w-4" />, text: 'text-slate-400', border: 'border-slate-400/40',  bg: 'bg-slate-400/10',  dot: 'bg-slate-400',  rgb: '148,163,184' },
 };
 
 // Sub-service chips for Google card

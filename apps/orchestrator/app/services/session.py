@@ -39,16 +39,17 @@ AGENT_BOOT_QUERY: dict[str, str] = {
 # All external integrations are served by the MCP Gateway.
 # Key: frontend agent ID  →  Value: gateway server namespace
 _GATEWAY_AGENT_MAP: dict[str, str] = {
-    'weather':   'weather',
-    'system':    'system',
-    'calendar':  'google',
-    'email':     'google',
-    'github':    'github',
-    'stock':     'stocks',
-    'news':      'news',
-    'portfolio': 'indmoney',
-    'smarthome': 'smarthome',
-    'whatsapp':  'whatsapp',
+    'weather':     'weather',
+    'system':      'system',
+    'calendar':    'google',
+    'email':       'google',
+    'github':      'github',
+    'stock':       'stocks',
+    'news':        'news',
+    'portfolio':   'indmoney',
+    'smarthome':   'smarthome',
+    'whatsapp':    'whatsapp',
+    'socialmedia': 'socialmedia',
 }
 
 # Per-session credentials stored so reload_agent can re-push to the gateway
@@ -78,18 +79,21 @@ _session_portfolio_access_token:  str = ''
 _session_portfolio_refresh_token: str = ''
 _session_portfolio_expires_at:    int = 0
 
+_session_socialmedia_accounts: str = ''
+
 # Human-readable labels for gateway-served agents (used in boot messages)
 _GATEWAY_LABELS: dict[str, str] = {
-    'weather':   'Weather',
-    'system':    'System',
-    'calendar':  'Google Calendar',
-    'email':     'Google Email',
-    'github':    'GitHub',
-    'stock':     'Stock Market',
-    'news':      'News',
-    'portfolio': 'Portfolio',
-    'smarthome': 'Smart Home',
-    'whatsapp':  'WhatsApp',
+    'weather':     'Weather',
+    'system':      'System',
+    'calendar':    'Google Calendar',
+    'email':       'Google Email',
+    'github':      'GitHub',
+    'stock':       'Stock Market',
+    'news':        'News',
+    'portfolio':   'Portfolio',
+    'smarthome':   'Smart Home',
+    'whatsapp':    'WhatsApp',
+    'socialmedia': 'Social Media',
 }
 
 # Randomised phrases for gateway-level events
@@ -350,17 +354,27 @@ def _snip_whatsapp(raw: str) -> str:
     # "Connected — +91... (Name). N messages received this session."
     return str(raw).split('.')[0][:65]
 
+def _snip_socialmedia(raw: str) -> str:
+    # raw is "; "-joined channel summaries, e.g. "MyChannel: 3 new videos, 1.2K views; MyIG: 2 new posts"
+    # Empty string means no activity — return empty to skip announcement
+    raw = str(raw).strip()
+    if not raw:
+        return ''
+    # Truncate to keep boot message concise
+    return raw[:120]
+
 _GW_SNIP_FN: dict[str, Callable[[str], str]] = {
-    'weather':   _snip_weather,
-    'stock':     _snip_stock,
-    'news':      _snip_news,
-    'github':    _snip_github,
-    'calendar':  _snip_calendar,
-    'email':     _snip_email,
-    'system':    _snip_system,
-    'portfolio': _snip_portfolio,
-    'smarthome': _snip_smarthome,
-    'whatsapp':  _snip_whatsapp,
+    'weather':     _snip_weather,
+    'stock':       _snip_stock,
+    'news':        _snip_news,
+    'github':      _snip_github,
+    'calendar':    _snip_calendar,
+    'email':       _snip_email,
+    'system':      _snip_system,
+    'portfolio':   _snip_portfolio,
+    'smarthome':   _snip_smarthome,
+    'whatsapp':    _snip_whatsapp,
+    'socialmedia': _snip_socialmedia,
 }
 
 
@@ -431,7 +445,7 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
         fn = _GW_SNIP_FN.get(agent_id)
         return True, (fn(text) if fn else text[:55])
     except PermissionError:
-        return False, '__auth__' if agent_id == 'smarthome' else ''
+        return False, '__auth__' if agent_id in ('smarthome', 'portfolio') else ''
     except Exception:
         return False, ''
 
@@ -480,7 +494,15 @@ async def _poll_smarthome_until_online(
                 return
             except Exception:
                 pass  # still starting — keep polling
-        # 2-minute timeout — mark degraded silently
+        # 2-minute timeout — tell the user what to check
+        await speak_fn(
+            'boot_status',
+            'Smart Home took too long to connect. '
+            'Verify your Home Assistant token and endpoint in Settings, '
+            'and ensure the voska/hass-mcp container can reach your Home Assistant instance.',
+            {'agent_id': 'smarthome', 'agent_status': 'degraded'},
+            agent_tts(tts, 'smarthome', agent_voices),
+        )
         await send_fn('agent_status_changed', {'agent': 'smarthome', 'status': 'degraded'})
     except Exception:
         pass  # WebSocket closed or fatal error — background task exits quietly
@@ -586,6 +608,8 @@ async def reload_agent(agent_id: str) -> tuple[str, str]:
                 _session_portfolio_access_token, _session_portfolio_refresh_token,
                 _session_portfolio_expires_at,
             )
+        if agent_id == 'socialmedia' and _session_socialmedia_accounts:
+            await gateway_client.update_socialmedia_session(_session_socialmedia_accounts)
         ok, snippet = await _fetch_boot_snippet(agent_id)
         if ok:
             phrase = random.choice(_GW_AGENT_ONLINE_PHRASES).format(label=label)
@@ -641,6 +665,7 @@ async def boot_sequence(
     global _session_whatsapp_phone_id, _session_whatsapp_token, _session_whatsapp_verify, _session_whatsapp_contacts
     global _session_portfolio_client_id, _session_portfolio_client_secret
     global _session_portfolio_access_token, _session_portfolio_refresh_token, _session_portfolio_expires_at
+    global _session_socialmedia_accounts
     ac = agent_config if agent_config else {}
 
     # Google
@@ -716,6 +741,16 @@ async def boot_sequence(
                 _session_portfolio_access_token, _session_portfolio_refresh_token,
                 _session_portfolio_expires_at,
             )
+        )
+
+    # Social Media
+    sm = ac.get('socialmedia', {})
+    accounts_raw = sm.get('accounts', [])
+    import json as _json
+    _session_socialmedia_accounts = _json.dumps(accounts_raw) if accounts_raw else ''
+    if 'socialmedia' in registered_agents and _session_socialmedia_accounts:
+        asyncio.create_task(
+            gateway_client.update_socialmedia_session(_session_socialmedia_accounts)
         )
 
     await send_fn('session_config', {
@@ -864,6 +899,14 @@ async def boot_sequence(
                 await speak_fn(
                     'boot_status', msg,
                     {'agent_id': agent_id, 'agent_status': status},
+                    agent_tts(tts, agent_id, agent_voices),
+                )
+            elif agent_id == 'portfolio' and snippet_map.get(agent_id) == '__auth__':
+                await speak_fn(
+                    'boot_status',
+                    'Portfolio offline — INDmoney token may have expired. '
+                    'Please reconnect in Settings to restore access.',
+                    {'agent_id': agent_id, 'agent_status': 'degraded'},
                     agent_tts(tts, agent_id, agent_voices),
                 )
             await send_fn('agent_status_changed', {'agent': agent_id, 'status': status})

@@ -59,6 +59,103 @@ class GatewayClient:
         except Exception:
             return False
 
+    async def update_smarthome_session(self, endpoint: str, token: str) -> bool:
+        """Push per-session SmartHome credentials to the gateway (in-memory only)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/smarthome',
+                    json={'endpoint': endpoint, 'token': token},
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
+    async def update_weather_session(self, api_key: str, default_city: str, provider: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/weather',
+                    json={'api_key': api_key, 'default_city': default_city, 'provider': provider},
+                    headers=self._headers(),
+                )
+                return r.is_success
+        except Exception:
+            return False
+
+    async def update_github_session(self, token: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/github',
+                    json={'token': token},
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
+    async def update_news_session(self, api_key: str, default_country: str) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/news',
+                    json={'api_key': api_key, 'default_country': default_country},
+                    headers=self._headers(),
+                )
+                return r.is_success
+        except Exception:
+            return False
+
+    async def update_whatsapp_session(
+        self,
+        phone_number_id: str,
+        access_token: str,
+        webhook_verify_token: str,
+        contacts: str,
+    ) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/whatsapp',
+                    json={
+                        'phone_number_id':      phone_number_id,
+                        'access_token':         access_token,
+                        'webhook_verify_token': webhook_verify_token,
+                        'contacts':             contacts,
+                    },
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
+    async def update_portfolio_session(
+        self,
+        client_id: str,
+        client_secret: str,
+        access_token: str,
+        refresh_token: str,
+        expires_at: int,
+    ) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/portfolio',
+                    json={
+                        'client_id':     client_id,
+                        'client_secret': client_secret,
+                        'access_token':  access_token,
+                        'refresh_token': refresh_token,
+                        'expires_at':    expires_at,
+                    },
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.post(

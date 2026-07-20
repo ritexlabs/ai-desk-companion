@@ -91,6 +91,7 @@ export interface NewsCreds {
 
 export interface SmartHomeCreds {
   enabled:  boolean;
+  mode:     'local' | 'remote';
   endpoint: string;
   token:    string;
   status:   ConnectionStatus;
@@ -153,6 +154,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
   },
   smarthome: {
     enabled:  false,
+    mode:     'remote',
     endpoint: 'http://homeassistant.local:8123',
     token:    '',
     status:   'idle',

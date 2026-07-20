@@ -259,11 +259,25 @@ Local agent tools keep their plain IDs: `websearch`, `calculator`, `memory`, `br
 ```
 start_session (WebSocket message from UI)
   │
+  │  payload includes:
+  │    calling_name, assistant_name, registered_agents, voice_config,
+  │    llm_config, agent_config (credentials per agent), agent_voices
+  │
+  ├─ build_session_providers(voice_config)     ← TTS / STT for this session
   ├─ agent_manager.configure_session(llm_config, agent_config, registered_agents)
   ├─ speak greeting
   ├─ emit agent_status_changed: starting (for all registered agents)
   │
-  ├─ GET http://localhost:8788/health   ← one gateway health check
+  ├─ ── Credential push (async, fire-and-forget per agent) ──────────────────
+  │  gateway_client.update_smarthome_session(endpoint, token)   PUT /session/smarthome
+  │  gateway_client.update_weather_session(api_key, city, …)   PUT /session/weather
+  │  gateway_client.update_github_session(token)               PUT /session/github
+  │  gateway_client.update_news_session(api_key, country)      PUT /session/news
+  │  gateway_client.update_whatsapp_session(phone_id, token)   PUT /session/whatsapp
+  │  gateway_client.update_portfolio_session(…)                PUT /session/portfolio
+  │  Each call mutates GatewaySettings in-memory — no .env writes.
+  │
+  ├─ GET http://localhost:8788/health   ← gateway health check
   │
   │  ── Gateway online ────────────────────────────────────────────────────────
   │  speak (randomised) "MCP gateway link established — tool matrix online."
@@ -305,41 +319,70 @@ user_message (WebSocket)
 
 ## 8. Credential Architecture
 
-Credentials are split across two `.env` files — one per service:
+### Two-tier credential model
+
+Credentials flow from the browser UI to the gateway through two complementary paths:
+
+```
+Browser localStorage
+   │
+   │  (1) WebSocket start_session  →  Orchestrator  →  PUT /session/<agent>  →  Gateway RAM
+   │      agent_config payload          session.py        gateway_client.py       GatewaySettings
+   │
+   │  (2) .env files (fallback / static)
+   │      apps/orchestrator/.env        apps/mcp-gateway/.env
+```
+
+**Path 1 — session push (primary for runtime credentials):**
+
+When the UI sends `start_session`, the orchestrator reads credential fields from `agent_config` and pushes them to the gateway via `PUT /session/<agent>` endpoints. The gateway mutates `GatewaySettings` fields in-memory (e.g. `settings.github_token = body.token.strip()`). All subsequent tool calls for that session use the in-memory values. No `.env` file is written.
+
+```
+PUT /session/smarthome   → settings.myhome_mcp_endpoint, myhome_mcp_token
+PUT /session/weather     → settings.weather_api_key, weather_default_city, weather_provider
+PUT /session/github      → settings.github_token
+PUT /session/news        → settings.news_api_key, news_default_country
+PUT /session/whatsapp    → settings.whatsapp_phone_number_id, whatsapp_access_token, …
+PUT /session/portfolio   → settings.indmoney_client_id, indmoney_oauth_token, …
+```
+
+**Path 2 — `.env` files (static startup defaults):**
 
 ```
 apps/orchestrator/.env          apps/mcp-gateway/.env
 ─────────────────────           ───────────────────────
 LLM_PROVIDER / LLM_API_KEY      GATEWAY_API_TOKEN          ← shared Bearer token
-GATEWAY_URL                     GITHUB_TOKEN
-GATEWAY_API_TOKEN               WEATHER_API_KEY
-WAKE_PHRASE                     NEWS_API_KEY
+GATEWAY_URL                     GITHUB_TOKEN               ← overridden per-session
+GATEWAY_API_TOKEN               WEATHER_API_KEY            ← overridden per-session
+WAKE_PHRASE                     NEWS_API_KEY               ← overridden per-session
 …                               GOOGLE_ACCESS_TOKEN
-                                MYHOME_MCP_TOKEN
-                                WHATSAPP_ACCESS_TOKEN
-                                INDMONEY_OAUTH_TOKEN        ← written by OAuth flow
+                                MYHOME_MCP_TOKEN           ← overridden per-session
+                                WHATSAPP_ACCESS_TOKEN      ← overridden per-session
+                                INDMONEY_OAUTH_TOKEN       ← written by OAuth flow
                                 …
 ```
 
-The orchestrator holds **no** integration credentials. It sends only `GATEWAY_API_TOKEN` as a Bearer header. All integration credentials live in the gateway's own `.env` and are read at startup by `GatewaySettings`.
+The orchestrator holds **no** integration credentials — it reads them from the UI's `agent_config` and forwards them to the gateway via `PUT /session/*`. `.env` values serve as fallbacks when no session push has occurred (e.g. gateway restarts between sessions).
 
-The INDmoney `access_token` is written to `apps/mcp-gateway/.env` by the OAuth callback handler — the desktop UI never receives or stores it.
+The INDmoney `access_token` is written to `apps/mcp-gateway/.env` by the OAuth callback handler and is not subject to session push — the OAuth flow persists it directly.
 
 ---
 
 ## 9. WebSocket Protocol
 
-All messages follow `{ "type": "<event>", "payload": { ... } }`.
+All messages follow `{ "command": "<cmd>", "payload": { ... } }` (client→server) or `{ "event": "<event>", "payload": { ... } }` (server→client).
 
 **UI → Orchestrator (client sends)**
 
-| type | payload | description |
+| command | key payload fields | description |
 |---|---|---|
-| `start_session` | `assistant_name`, `calling_name`, `registered_agents`, `llm_config`, `agent_config`, `tts`, `stt`, `agent_voices` | Begin session |
+| `start_session` | `assistant_name`, `calling_name`, `registered_agents`, `voice_config`, `llm_config`, `agent_config` (per-agent credentials), `agent_voices` | Begin session; triggers credential push to gateway |
 | `stop_session` | — | End session |
-| `voice_input` | `text` | Transcribed speech |
-| `audio_chunk` | `data` (base64) | Raw audio for Whisper STT |
-| `audio_end` | — | Signal end of audio stream |
+| `send_text_command` | `text` | Text command (typed or post-STT) |
+| `audio_chunk` | `data_b64` (base64), `format` | Raw audio for server-side Whisper STT |
+| `farewell_session` | `phrase` | LLM-synthesised goodbye, then shutdown |
+| `retry_agent` | `agent` | Re-run boot check for a specific agent |
+| `schedule_alert` | `title`, `body`, `delay_seconds`, `id` | Schedule a push alert after a delay |
 
 **Orchestrator → UI (server sends)**
 
@@ -377,18 +420,67 @@ No keyword routing happens in this path. The LLM selects the tool from descripti
 ## 11. Security
 
 - WebSocket origin enforced against an allowlist (`ALLOWED_ORIGINS`).
-- Per-connection rate limiting: 30 messages / 60 s sliding window.
+- Per-connection rate limiting: 20 commands / 10 s sliding window (covers `start_session`, `send_text_command`, `audio_chunk`, `retry_agent`).
 - Input length capped at 2000 characters per message.
 - Orchestrator authenticates to the gateway with a shared Bearer token (`GATEWAY_API_TOKEN`).
-- All integration credentials live in `apps/mcp-gateway/.env` — never in the orchestrator or the UI.
+- All `PUT /session/*` gateway endpoints require the same Bearer token — no auth-exempt path for credential push.
+- Integration credentials flow: browser localStorage → WebSocket `agent_config` → orchestrator session.py → gateway `PUT /session/*` → in-memory GatewaySettings mutation. No credential persisted server-side beyond the process lifetime.
+- Docker subprocess commands in `/api/smarthome/docker/start|stop` use a fully hardcoded command array (`['docker', 'compose', 'up', ...]`); `cwd` is resolved from source-file path at import time — no user-controlled input reaches the subprocess call.
 - INDmoney MCP endpoint is hardcoded (`https://mcp.indmoney.com/mcp`) — no user-controlled URL parameters for MCP connections (SSRF prevention).
 - Portfolio OAuth uses PKCE + Dynamic Client Registration (RFC 7591); the access token is stored only in the gateway's `.env`.
 - No credentials are logged at any level.
 - `.cloudflared/` (Cloudflare tunnel config containing tunnel UUIDs and hostnames) is gitignored.
+- `apps/smarthome/.mode` (local/remote persistence file) is gitignored.
 
 ---
 
-## 12. Start Order
+## 12. SmartHome Docker Lifecycle
+
+The Smart Home agent supports two modes: **Local Docker** (runs `apps/smarthome/docker-compose.yml`) and **Self-Hosted** (points to an existing HA instance). Mode is persisted to `apps/smarthome/.mode` (gitignored) so `launch.py` skips or starts the container on the next restart without user intervention.
+
+### Mode switching flow
+
+```
+UI Settings → SmartHome → mode toggle
+  │
+  ├─ Local selected:
+  │    POST /api/smarthome/docker/start  (orchestrator)
+  │      ├─ writes .mode = 'local'
+  │      ├─ asyncio.to_thread(subprocess.run ['docker', 'compose', 'up', '-d', …])
+  │      └─ returns 200 when container is up; UI auto-tests connection
+  │
+  └─ Self-Hosted selected:
+       writes .mode = 'remote' immediately
+       fires asyncio.create_task(_bg_docker_stop())  ← non-blocking, returns at once
+       UI switches instantly; container stops in background
+```
+
+### launch.py behavior
+
+```python
+ha_mode = _smarthome_mode()   # reads apps/smarthome/.mode; defaults to 'local'
+if ha_active:                 # local mode + docker available + compose file present
+    docker compose up -d      # shown as: Home Assistant  [local docker]  http://localhost:8123
+elif ha_mode == 'remote':
+    skip Docker               # shown as: Home Assistant  [self-hosted]
+else:
+    warn: Docker not found    # Docker Desktop not running
+```
+
+### Orchestrator REST endpoints (smarthome router)
+
+| Endpoint | Description |
+|---|---|
+| `GET /api/smarthome/docker/mode` | Return current persisted mode (`local`/`remote`) |
+| `POST /api/smarthome/docker/start` | Write mode=local, start container via `docker compose up -d` |
+| `POST /api/smarthome/docker/stop` | Write mode=remote immediately, stop container in background |
+| `GET /api/smarthome/ping` | Verify HA connectivity through gateway |
+| `GET /api/smarthome/states` | Fetch all entity states via gateway |
+| `POST /api/smarthome/call` | Call an HA service (domain/service/data) via gateway |
+
+---
+
+## 13. Start Order
 
 `launch.py` manages all three services:
 

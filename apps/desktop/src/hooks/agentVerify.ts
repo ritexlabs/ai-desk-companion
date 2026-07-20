@@ -118,12 +118,16 @@ export async function connectGoogle(
         info: '',
       });
 
+      const agentToggles = {
+        calendarEnabled: selectedScopes.includes('calendar'),
+        emailEnabled:    selectedScopes.includes('gmail'),
+      };
       fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
         headers: { Authorization: `Bearer ${tokens.access_token}` },
       })
         .then((r) => r.json())
-        .then((u) => patch('google', { connectedEmail: u.email ?? '', status: 'connected', info: u.email ?? '' }))
-        .catch(() => patch('google', { status: 'connected', info: 'Connected (email unavailable)' }));
+        .then((u) => patch('google', { connectedEmail: u.email ?? '', status: 'connected', info: u.email ?? '', ...agentToggles }))
+        .catch(() => patch('google', { status: 'connected', info: 'Connected (email unavailable)', ...agentToggles }));
     } catch {
       // cross-origin while popup is still on google.com — keep polling
     }

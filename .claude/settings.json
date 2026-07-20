@@ -96,7 +96,9 @@
       "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -10 -- apps/orchestrator/ apps/mcp-gateway/)",
       "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion show a984046 --stat)",
       "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion show 39a6f90 --stat)",
-      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -5 -- apps/orchestrator/app/services/session.py apps/mcp-gateway/src/tools/smarthome.py apps/mcp-gateway/src/tools/whatsapp.py)"
+      "Bash(git -C /Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion log --oneline -5 -- apps/orchestrator/app/services/session.py apps/mcp-gateway/src/tools/smarthome.py apps/mcp-gateway/src/tools/whatsapp.py)",
+      "Bash(node -e \"const l = require\\('./node_modules/lucide-react'\\); console.log\\('Container:', !!l.Container, 'Globe:', !!l.Globe, 'Server:', !!l.Server, 'ExternalLink:', !!l.ExternalLink\\)\")",
+      "Bash(python3 -m py_compile launch.py)"
     ],
     "additionalDirectories": [
       "/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared"

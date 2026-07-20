@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, CheckCheck, MessageCircle, Plus, RefreshCw, Send, X } from 'lucide-react';
+import { Check, CheckCheck, MessageCircle, Mic, Plus, RefreshCw, Send, X } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -158,11 +158,11 @@ function StatusBanner({ status }: { status: string }) {
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
-interface Props { onClose: () => void }
+interface Props { onClose: () => void; onVoice?: (text: string) => void }
 
 // ── Root ──────────────────────────────────────────────────────────────────────
 
-export function WhatsAppDashboard({ onClose }: Props) {
+export function WhatsAppDashboard({ onClose, onVoice }: Props) {
   const [convs, setConvs]             = useState<WaConversation[]>([]);
   const [selected, setSelected]       = useState<string | null>(null);
   const [loading, setLoading]         = useState(true);
@@ -306,25 +306,41 @@ export function WhatsAppDashboard({ onClose }: Props) {
             style={{ width: 260, background: 'rgba(0,0,0,0.22)' }}
           >
             {/* Header */}
-            <div className="flex items-center gap-2.5 px-4 pt-4 pb-3 border-b border-white/5 shrink-0">
-              <div className="w-7 h-7 rounded-lg bg-green-400/12 border border-green-400/20 flex items-center justify-center">
+            <div className="flex items-center gap-2 px-3 pt-3.5 pb-3 border-b border-white/5 shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-green-400/12 border border-green-400/20 flex items-center justify-center flex-shrink-0">
                 <MessageCircle className="h-3.5 w-3.5 text-green-400" />
               </div>
-              <span className="text-[13px] font-semibold text-white flex-1">WhatsApp</span>
+              <span className="text-[13px] font-semibold text-white flex-1 min-w-0 truncate">WhatsApp</span>
               <button
                 onClick={() => load(true)}
                 disabled={refreshing}
                 title="Refresh"
-                className="p-1 rounded-lg text-slate-600 hover:text-slate-300 hover:bg-white/8 transition"
+                className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-500 hover:text-slate-200 transition disabled:opacity-40"
               >
                 <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin text-green-400' : ''}`} />
               </button>
               <button
                 onClick={handleNew}
                 title="New message"
-                className="p-1 rounded-lg text-slate-600 hover:text-green-400 hover:bg-green-400/8 transition"
+                className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-500 hover:text-green-400 transition"
               >
                 <Plus className="h-3.5 w-3.5" />
+              </button>
+              {onVoice && (
+                <button
+                  onClick={() => { onVoice('Show my WhatsApp messages'); onClose(); }}
+                  title="Voice"
+                  className="h-7 px-2 rounded-xl border border-green-400/25 bg-green-400/8 text-[11px] font-medium flex items-center gap-1 text-green-300 hover:bg-green-400/15 transition"
+                >
+                  <Mic className="h-3 w-3" /> Voice
+                </button>
+              )}
+              <button
+                onClick={onClose}
+                title="Close"
+                className="h-7 w-7 rounded-xl border border-white/10 bg-white/4 flex items-center justify-center text-slate-500 hover:text-slate-200 transition"
+              >
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
 
@@ -390,17 +406,9 @@ export function WhatsAppDashboard({ onClose }: Props) {
 
           {/* ── Right: thread + compose ───────────────────────── */}
           <div className="flex-1 flex flex-col min-w-0 relative">
-            {/* Close */}
-            <button
-              onClick={onClose}
-              className="absolute top-3.5 right-3.5 z-10 w-7 h-7 rounded-xl border border-white/8 bg-white/4 hover:bg-white/10 text-slate-500 hover:text-white transition flex items-center justify-center"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-
             {/* Thread header */}
             <div
-              className="flex items-center gap-3 px-5 py-3.5 border-b border-white/6 shrink-0 pr-12"
+              className="flex items-center gap-3 px-5 py-3.5 border-b border-white/6 shrink-0"
               style={{ background: newMode ? 'rgba(74,222,128,0.04)' : 'rgba(0,0,0,0.12)' }}
             >
               {newMode ? (

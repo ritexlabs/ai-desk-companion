@@ -207,11 +207,15 @@ Queries weather, calendar, news, and smart home in parallel via the gateway and 
 
 | Where stored | Scope | Notes |
 |---|---|---|
-| Browser `localStorage` | Client-side, sandboxed to origin | Never written to disk |
-| WebSocket session payload | In-memory, discarded after session | Not persisted server-side |
-| Orchestrator `.env` | Server-side only, never committed | Used as fallback defaults |
+| Browser `localStorage` | Client-side, sandboxed to origin | Persists across browser sessions; never sent to disk |
+| WebSocket `start_session` payload | In-transit only | Sent once per session to the orchestrator |
+| Orchestrator `session.py` module vars | Process memory, session lifetime | Module-level vars cleared on session stop |
+| Gateway `GatewaySettings` fields | Process memory | Mutated via `PUT /session/*`; reverts to `.env` defaults on restart |
+| `apps/mcp-gateway/.env` | Server-side only, never committed | Startup defaults; overridden per-session |
 
-Keys entered in the UI are not written to any server file. The orchestrator uses them only for the active session, forwarding them per tool call to the gateway.
+**Credential flow:** UI `localStorage` → WebSocket `agent_config` → orchestrator `boot_sequence` → `PUT /session/<agent>` (Bearer-authenticated) → gateway in-memory `GatewaySettings`.
+
+Keys entered in the UI are **never written to any `.env` file** during a session. The gateway holds them in process memory only; they are lost on gateway restart (the next session push re-supplies them). Google OAuth and INDmoney OAuth tokens are the only credentials written to `.env` — only by their respective OAuth callback handlers, not by the UI.
 
 ## Graceful degradation
 

@@ -21,20 +21,31 @@ _MCP_VERSION = '2024-11-05'
 
 def _resolve_for_docker(url: str) -> str:
     """
-    Replace mDNS / .local hostnames with their resolved IPv4 address.
-    Docker Desktop on macOS/Windows runs in a VM whose DNS resolver does not
-    participate in mDNS, so homeassistant.local cannot be looked up inside a
-    container.  We resolve on the host first and hand the IP to Docker instead.
+    Rewrite the HA URL so it is reachable from inside a Docker container.
+
+    Two cases:
+    1. localhost / 127.0.0.1 → host.docker.internal   (Docker Desktop on macOS/Windows
+       routes host.docker.internal to the host machine; localhost is the container's own
+       loopback and never reaches the host.)
+    2. *.local mDNS names → resolved IPv4 address   (Docker Desktop's VM DNS does not
+       participate in mDNS, so .local names fail inside containers.)
     """
     try:
         parsed = urlparse(url)
-        host = parsed.hostname or ''
+        host   = parsed.hostname or ''
+        port   = parsed.port
+
+        if host in ('localhost', '127.0.0.1'):
+            netloc   = f'host.docker.internal:{port}' if port else 'host.docker.internal'
+            resolved = urlunparse(parsed._replace(netloc=netloc))
+            logger.info('hass-mcp: resolved %s → %s for Docker', url, resolved)
+            return resolved
+
         if host.endswith('.local') or not host:
             results = socket.getaddrinfo(host, None, socket.AF_INET)
             if results:
-                ip = results[0][4][0]
-                port = parsed.port
-                netloc = f'{ip}:{port}' if port else ip
+                ip       = results[0][4][0]
+                netloc   = f'{ip}:{port}' if port else ip
                 resolved = urlunparse(parsed._replace(netloc=netloc))
                 logger.info('hass-mcp: resolved %s → %s for Docker', url, resolved)
                 return resolved

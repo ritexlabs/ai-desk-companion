@@ -109,7 +109,23 @@
       "Bash(.venv/bin/pip show *)",
       "Bash(.venv/bin/python3 -c ' *)",
       "Bash(xargs ls -la)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(python3 -m py_compile apps/orchestrator/app/services/phrases.py)",
+      "Bash(python3 -m py_compile apps/orchestrator/app/services/session.py)",
+      "Bash(python3 -m py_compile apps/orchestrator/app/api/ws.py)",
+      "Bash(python3 -m py_compile app/services/phrases.py)",
+      "Bash(python3 -m py_compile app/services/session.py)",
+      "Bash(python3 -m py_compile app/api/ws.py)",
+      "Bash(.venv/bin/python3 -c \"from app.services.phrases import phrase_engine; phrase_engine.configure\\({}\\); r = phrase_engine._static\\('greeting', {'tod':'Good morning','name':'Ritesh','assistant_name':'Robo'}\\); print\\('greeting:', r\\); r2 = phrase_engine._static\\('gw_connect', {}\\); print\\('gw_connect:', r2\\)\")",
+      "Bash(.venv/bin/python3 -m pytest tests/ -v)",
+      "Bash(python3 -m py_compile app/services/language.py)",
+      "Bash(python3 -m py_compile app/services/agent_manager.py)",
+      "Bash(python3 -m py_compile app/services/orchestrator.py)",
+      "Bash(.venv/bin/python3 -m pytest tests/ -q)",
+      "Bash(python3 -m py_compile app/models/agent_message.py)",
+      "Bash(python3 -m py_compile app/services/cache.py)",
+      "Bash(python3 -m py_compile app/agents/briefing.py)",
+      "Bash(python3 -m py_compile app/services/notification_scheduler.py)"
     ],
     "additionalDirectories": [
       "/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared"

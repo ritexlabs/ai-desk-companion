@@ -47,11 +47,12 @@ import { useAppConfig } from './hooks/useAppConfig';
 import { useAgentConfig } from './hooks/useAgentConfig';
 import { useLLMConfig } from './hooks/useLLMConfig';
 import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
-import type { RuntimePhase, AgentNotification } from './types/runtime';
+import type { RuntimePhase, AgentNotification, NotificationSeverity } from './types/runtime';
 import { useOrchSystemStats } from './hooks/useOrchSystemStats';
 import { useProactiveNotifications } from './hooks/useProactiveNotifications';
 import { useAgentVoiceConfig } from './hooks/useAgentVoiceConfig';
 import { AgentNotificationPanel } from './components/AgentNotificationPanel';
+import { AGENT_PALETTE } from './lib/agentPalette';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 
@@ -144,20 +145,19 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
-const AGENT_PILL_META: Record<string, { icon: LucideIcon; text: string; bg: string; border: string }> = {
-  weather:   { icon: Cloud,      text: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' },
-  calendar:  { icon: Calendar,   text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
-  email:     { icon: Mail,       text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
-  github:    { icon: GitBranch,     text: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' },
-  stock:     { icon: TrendingUp, text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
-  news:      { icon: Newspaper,  text: 'text-sky-400',     bg: 'bg-sky-400/10',     border: 'border-sky-400/20' },
-  smarthome: { icon: Home,       text: 'text-orange-400',  bg: 'bg-orange-400/10',  border: 'border-orange-400/20' },
-  portfolio: { icon: Briefcase,  text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
-  whatsapp:  { icon: Send,       text: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/20' },
-  notes:       { icon: Bell,   text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
-  socialmedia: { icon: Play,   text: 'text-red-400',     bg: 'bg-red-400/10',     border: 'border-red-400/20' },
-  general:     { icon: Zap,    text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  weather: Cloud, calendar: Calendar, email: Mail, github: GitBranch,
+  stock: TrendingUp, news: Newspaper, smarthome: Home, portfolio: Briefcase,
+  whatsapp: Send, notes: Bell, socialmedia: Play, general: Zap,
+  websearch: Zap, calculator: Activity, memory: Zap, briefing: Zap, system: Cpu,
 };
+
+const AGENT_PILL_META = Object.fromEntries(
+  Object.entries(AGENT_PALETTE).map(([id, p]) => [
+    id,
+    { icon: AGENT_ICONS[id] ?? Zap, text: p.text, bg: p.bg, border: p.border },
+  ])
+);
 
 /* ─── App ───────────────────────────────────────────────────── */
 
@@ -244,6 +244,29 @@ export default function App() {
     },
     isDismissed,
   );
+
+  // Listen for backend-pushed agent_notification events dispatched via custom DOM event
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text, agentId, severity, conditionKey } = (e as CustomEvent<{
+        text: string; agentId: string; severity: string; conditionKey: string;
+      }>).detail;
+      setActiveNotifications((prev) => {
+        const without = prev.filter((n) => n.conditionKey !== conditionKey);
+        return [...without, {
+          id:           `${conditionKey}-${Date.now()}`,
+          conditionKey,
+          agentId,
+          agentLabel:   AGENT_LABELS[agentId] ?? agentId,
+          message:      text,
+          severity:     severity as NotificationSeverity,
+          timestamp:    Date.now(),
+        }];
+      });
+    };
+    window.addEventListener('agent-notification', handler);
+    return () => window.removeEventListener('agent-notification', handler);
+  }, []);
 
   const notificationsEnabledFor = (agentId: string): boolean => {
     if (agentId === 'system')    return agentConfig.system.notificationsEnabled;

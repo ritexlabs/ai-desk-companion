@@ -346,6 +346,20 @@ export function useOrchestratorRuntime(
         break;
       }
 
+      case 'agent_notification': {
+        const text     = payload.text      as string;
+        const agentId  = payload.agent_id  as string;
+        const severity = (payload.severity  as string) ?? 'info';
+        const condKey  = (payload.condition_key as string) ?? agentId;
+        // Speak the notification and append to transcript
+        pushNotification(text, agentId);
+        // Dispatch custom DOM event so App.tsx can surface it visually
+        window.dispatchEvent(new CustomEvent('agent-notification', {
+          detail: { text, agentId, severity, conditionKey: condKey },
+        }));
+        break;
+      }
+
       case 'error':
         appendTurn('system', `Orchestrator error: ${payload.message}`);
         // Unblock any pending server-STT wait so ask() doesn't hang when STT fails

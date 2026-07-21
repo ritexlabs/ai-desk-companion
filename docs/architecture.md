@@ -124,8 +124,12 @@ ai-desk-companion/
 │   │       │                 AgentBootList · AgentDetailModal
 │   │       │                 SmartHomeDashboard · PortfolioDashboard
 │   │       │                 settings/      Per-agent settings accordions
+│   │       │                   HoloCard.tsx          — 3D perspective-tilt holographic card wrapper
+│   │       │                   AgentSettingsCard.tsx — accordion card with neon icon, enable toggle, AnimatePresence collapse
 │   │       ├── hooks/        React hooks (useOrchestratorRuntime, useVoiceLoop,
 │   │       │                 useAgentConfig, useAgentVoiceConfig, …)
+│   │       ├── lib/          Client-side utilities
+│   │       │                 agentPalette.ts — AGENT_PALETTE; per-agent neon color/glow tokens (single source of truth)
 │   │       └── types/        Shared TypeScript types (runtime.ts)
 │   ├── orchestrator/         Python FastAPI orchestrator (port 8787)
 │   │   └── app/
@@ -133,6 +137,8 @@ ai-desk-companion/
 │   │       ├── api/          FastAPI routes + WebSocket (ws.py)
 │   │       ├── core/         Config (pydantic-settings, reads .env)
 │   │       ├── models/       Pydantic contracts
+│   │       │                 contracts.py      — AgentRequest / AgentResponse / AgentHealth
+│   │       │                 agent_message.py  — AgentMessage dataclass for inter-agent calls
 │   │       └── services/     LLM, TTS, STT, boot sequence, gateway client, session
 │   └── mcp-gateway/          Python FastAPI MCP tool gateway (port 8788)
 │       └── src/
@@ -168,15 +174,21 @@ apps/orchestrator/app/
 │   ├── routes/           REST endpoints (smarthome proxy, whatsapp relay, health)
 │   └── ws.py             WebSocket handler
 ├── core/config.py        Settings (pydantic-settings)
-├── models/contracts.py   AgentRequest / AgentResponse / AgentHealth
+├── models/
+│   ├── contracts.py      AgentRequest / AgentResponse / AgentHealth
+│   └── agent_message.py  AgentMessage — formal inter-agent call protocol
 └── services/
-    ├── agent_manager.py  Session state, LLM config merge, local agent dispatch
-    ├── orchestrator.py   LLMOrchestrator — tool-call loop
-    ├── session.py        Boot sequence, phrase pools, gateway/snippet maps, AGENT_LABELS
-    ├── gateway_client.py GatewayClient — GET /tools, POST /tools/{name} (Bearer auth)
-    ├── router.py         Keyword fallback router (no-LLM mode)
-    ├── llm.py            LLM provider abstraction
-    └── tts_helpers.py    Per-agent voice config
+    ├── agent_manager.py          Session state, LLM config merge, local agent dispatch
+    ├── orchestrator.py           LLMOrchestrator — tool-call loop
+    ├── session.py                Boot sequence, AGENT_LABELS, _GW_BOOT_CALLS, gateway/snippet maps
+    ├── phrases.py                PhraseEngine — centralised phrase library, LLM-first + static fallback
+    ├── language.py               detect_language() — Devanagari ratio classifier
+    ├── cache.py                  AgentResponseCache — per-agent TTL cache (MD5-keyed)
+    ├── notification_scheduler.py NotificationScheduler — per-agent background polling, WebSocket push
+    ├── gateway_client.py         GatewayClient — GET /tools, POST /tools/{name} (Bearer auth)
+    ├── router.py                 Keyword fallback router (no-LLM mode)
+    ├── llm.py                    LLM provider abstraction
+    └── tts_helpers.py            Per-agent voice config
 ```
 
 ### MCP Gateway layout
@@ -212,6 +224,9 @@ apps/mcp-gateway/src/
 ```
 1. User speaks          → Browser STT (or OpenAI Whisper)
 2. Text sent            → WebSocket to Orchestrator
+2.5 Language detected  → detect_language(text) → 'en' | 'hi'
+                         phrase_engine.configure(llm_config, lang)
+                         agent_manager.update_language(lang)
 3. Orchestrator         → GET http://localhost:8788/tools
                           (fetches namespaced tool list; cached per-turn)
 4. LLM call             → POST {provider}/chat/completions
@@ -264,7 +279,11 @@ start_session (WebSocket message from UI)
   │    llm_config, agent_config (credentials per agent), agent_voices
   │
   ├─ build_session_providers(voice_config)     ← TTS / STT for this session
-  ├─ agent_manager.configure_session(llm_config, agent_config, registered_agents)
+  ├─ phrase_engine.configure(llm_config, language)   ← PhraseEngine configured for session
+  ├─ agent_manager.configure_session(llm_config, agent_config, registered_agents, language)
+  │                                            ← language stored in session state
+  ├─ asyncio.gather(greeting_task, init_task, _sh_push_task)
+  │                                            ← SmartHome credential push runs concurrent with greeting
   ├─ speak greeting
   ├─ emit agent_status_changed: starting (for all registered agents)
   │
@@ -280,7 +299,7 @@ start_session (WebSocket message from UI)
   ├─ GET http://localhost:8788/health   ← gateway health check
   │
   │  ── Gateway online ────────────────────────────────────────────────────────
-  │  speak (randomised) "MCP gateway link established — tool matrix online."
+  │  speak (PhraseEngine) "MCP gateway link established — tool matrix online."
   │  asyncio.gather(_fetch_boot_snippet × N agents, timeout=5 s each)
   │    ├─ weather__get_current_weather  → "Bengaluru 28°C, partly cloudy"
   │    ├─ stocks__get_quote (Nifty 50)  → "Nifty ₹24,150 (+0.43%)"
@@ -295,11 +314,14 @@ start_session (WebSocket message from UI)
   │    … (snippet suppressed silently if token not configured or call failed)
   │
   │  ── Gateway offline ─────────────────────────────────────────────────────
-  │  speak (randomised) "MCP gateway unreachable — tool network dark."
+  │  speak (PhraseEngine) "MCP gateway unreachable — tool network dark."
   │  for each gateway agent: emit agent_status_changed: degraded (silent)
   │
   ├─ emit online (websearch, calculator, memory, briefing) — silent, always online
-  └─ emit phase_changed: ready
+  ├─ emit phase_changed: ready
+  │
+  └─ notification_scheduler.configure(enabled_agents, notif_enabled, broadcast)
+     asyncio.create_task(notification_scheduler.start())
 ```
 
 ### Per-turn orchestration
@@ -307,12 +329,16 @@ start_session (WebSocket message from UI)
 ```
 user_message (WebSocket)
   │
-  ├─ _fetch_gateway_tools()   GET /tools  (every turn)
-  ├─ llm_orchestrator.handle(message, tools=[local + gateway])
+  ├─ detect_language(text)           → lang ('en' | 'hi')
+  ├─ agent_manager.update_language(lang)
+  ├─ phrase_engine.configure(llm_config, lang)
+  ├─ _fetch_gateway_tools()          GET /tools (every turn)
+  ├─ llm_orchestrator.handle(message, tools=[local + gateway], language=lang)
   │    LLM picks tool → call_agent(fn_name, query)
   │    if '__' in fn_name → gateway_client.call_tool(fn_name, args)  ← Bearer auth
   │    else               → agent_manager.handle(fn_name, request)
-  └─ LLM synthesises → TTS → audio
+  │                           └─ check AgentResponseCache first → cache hit returns instantly
+  └─ LLM synthesises → TTS → audio (in session language)
 ```
 
 ---
@@ -397,6 +423,7 @@ All messages follow `{ "command": "<cmd>", "payload": { ... } }` (client→serve
 | `transcription` | `text` | STT result echo |
 | `performance` | `latency_ms`, `agent`, `timestamp` | Per-turn timing |
 | `metrics` | `session_count`, `uptime_s`, … | Periodic health broadcast |
+| `agent_notification` | `agent_id`, `text`, `severity`, `condition_key` | Proactive notification from background scheduler |
 
 ---
 
@@ -413,11 +440,110 @@ Supports OpenAI, Anthropic, Gemini, and Ollama. All implement the same loop:
 
 No keyword routing happens in this path. The LLM selects the tool from descriptions alone.
 
+When `language == 'hi'`, a "Respond in Hindi using Devanagari script" suffix is appended to the system prompt.
+
 **Keyword fallback** (`services/router.py`) applies only when no LLM is configured.
 
 ---
 
-## 11. Security
+## 11. PhraseEngine
+
+`apps/orchestrator/app/services/phrases.py` — `PhraseEngine` singleton
+
+Centralises all spoken phrases used during boot and session lifecycle. Eliminates hard-coded strings from `session.py`.
+
+**Categories:** `greeting`, `farewell`, `gw_connect`, `gw_fail`, `agent_online`, `agent_online_local`,
+`agent_degraded_local`, `boot_summary`, `smarthome_starting`, `smarthome_auth_error`,
+`smarthome_timeout`, `google_connected`, `google_online`, `google_not_configured`, `portfolio_auth_error`
+
+**Generation order:**
+1. LLM call (when LLM is configured) — `_LLM_PROMPTS[category].format(**context)` with 3 s timeout
+2. Static pool — `_HI[category]` (Hindi) or `_EN[category]` (English), `random.choice` with `format()`
+
+**Language support:** Call `phrase_engine.configure(llm_config, language='hi')` to switch to Hindi.
+Hindi pool (`_HI`) covers the highest-frequency phrases; missing categories fall back to `_EN`.
+
+---
+
+## 12. Language Detection
+
+`apps/orchestrator/app/services/language.py` — `detect_language(text: str) → str`
+
+Classifies input as `'hi'` (Hindi) or `'en'` (English) using Devanagari character ratio.
+A ratio > 15% of non-space characters triggers Hindi mode.
+
+Called in `ws.py` on every user turn (including voice input). Result is passed to:
+- `agent_manager.update_language(lang)` — updates session language state
+- `phrase_engine.configure(session_llm_config, lang)` — re-configures phrase generation
+- `llm_orchestrator.handle(..., language=lang)` — appends "Respond in Hindi" to system prompt if `lang == 'hi'`
+
+---
+
+## 13. Inter-Agent Communication
+
+`apps/orchestrator/app/models/agent_message.py` — `AgentMessage` dataclass
+
+Agents must never import each other directly. Cross-agent calls go through `agent_manager.call_agent_from_agent(msg)`:
+
+```python
+@dataclass
+class AgentMessage:
+    source_agent: str
+    tool_name:    str
+    arguments:    dict  = field(default_factory=dict)
+    timeout:      float = 5.0
+```
+
+`agent_manager.call_agent_from_agent(msg)` checks the `AgentResponseCache` first, then dispatches to `handle_as_tool(tool_name, arguments)`. The result is written back to cache before returning.
+
+The `Briefing` agent uses this to query weather, calendar, news, and smart home concurrently without direct imports.
+
+---
+
+## 14. AgentResponseCache
+
+`apps/orchestrator/app/services/cache.py` — `AgentResponseCache` singleton (`agent_cache`)
+
+MD5-keyed in-memory cache with per-agent TTLs. Prevents redundant gateway calls when multiple agents or the briefing agent request the same data within the same window.
+
+| Agent | TTL |
+|---|---|
+| weather | 300 s |
+| stock | 60 s |
+| news | 900 s |
+| github | 120 s |
+| calendar | 30 s |
+| email | 30 s |
+| system | 10 s |
+| smarthome | 15 s |
+| portfolio | 120 s |
+| whatsapp | 20 s |
+
+Cache is cleared on `clear_session()`. Individual entries can be invalidated via `agent_cache.invalidate(agent_id)`.
+
+---
+
+## 15. Notification Scheduler
+
+`apps/orchestrator/app/services/notification_scheduler.py` — `NotificationScheduler` singleton (`notification_scheduler`)
+
+Starts per-agent background `asyncio.Task` loops after `boot_sequence()` completes. Each loop polls the agent's boot tool on a fixed interval and evaluates the result against threshold rules. When a rule fires, an `agent_notification` WebSocket event is pushed to the frontend.
+
+**Poll intervals:** system 30 s · whatsapp 45 s · calendar/email/smarthome 60 s · github 3 min · stock 2 min · weather/portfolio 5 min · news 10 min
+
+**Evaluation rules:**
+- `system` — CPU > 85% → `severity: warning`, `condition_key: system_cpu_high`
+- `weather` — severe keywords (storm, thunder, heavy rain, cyclone, flood) → `severity: alert`
+- `stock` — Nifty move > 2% → `severity: info`, `condition_key: stock_move_up|down`
+- `github` — open PRs > 0 → `severity: info`
+
+**Frontend bridge:** `useOrchestratorRuntime.ts` handles `agent_notification` by calling `pushNotification()` (TTS) and dispatching a `CustomEvent('agent-notification')` on `window`. `App.tsx` listens for this event and deduplicates entries in `activeNotifications` by `condition_key`.
+
+Scheduler is started after boot and stopped on `farewell_session` / `stop_session`.
+
+---
+
+## 16. Security
 
 - WebSocket origin enforced against an allowlist (`ALLOWED_ORIGINS`).
 - Per-connection rate limiting: 20 commands / 10 s sliding window (covers `start_session`, `send_text_command`, `audio_chunk`, `retry_agent`).
@@ -434,7 +560,7 @@ No keyword routing happens in this path. The LLM selects the tool from descripti
 
 ---
 
-## 12. SmartHome Docker Lifecycle
+## 17. SmartHome Docker Lifecycle
 
 The Smart Home agent supports two modes: **Local Docker** (runs `apps/smarthome/docker-compose.yml`) and **Self-Hosted** (points to an existing HA instance). Mode is persisted to `apps/smarthome/.mode` (gitignored) so `launch.py` skips or starts the container on the next restart without user intervention.
 
@@ -480,7 +606,7 @@ else:
 
 ---
 
-## 13. Start Order
+## 18. Start Order
 
 `launch.py` manages all three services:
 
@@ -505,7 +631,7 @@ python3 launch.py restart  # stop then start
 
 ---
 
-## 13. Dashboard UI Layout
+## 19. Dashboard UI Layout
 
 The desktop UI (`apps/desktop/src/App.tsx`) is a full-viewport 3-column layout rendered at `http://localhost:5173`.
 
@@ -563,6 +689,24 @@ Three cards stacked vertically:
 | System Status (teal) | CPU %, RAM %, disk %, uptime — spread label/value layout |
 | App Status (violet) | Orchestrator, MCP Gateway, Desktop — live health dots |
 | Config | LLM provider, TTS/STT mode, wake-word status |
+
+### Settings panel
+
+Opened via the header gear icon. Agent settings are rendered in three groups:
+
+- **Built-in Skills** — always-on agents (websearch, calculator, memory, briefing, general)
+- **Services** — gateway integrations (weather, calendar, email, github, stock, news, portfolio, whatsapp)
+- **Smart Devices** — smarthome
+
+#### Settings Panel — Agent Cards
+
+The Agents tab uses `AgentSettingsCard` wrapped in `HoloCard`:
+
+- **HoloCard** (`components/settings/HoloCard.tsx`): 3D perspective-tilt driven by mouse position; shimmer radial-gradient overlay; neon top-edge highlight — per-agent color from `AGENT_PALETTE`.
+- **AgentSettingsCard** (`components/settings/AgentSettingsCard.tsx`): accordion header with neon icon badge, enable/disable toggle, animated `ChevronDown`, `AnimatePresence` height-animated collapse.
+- **Three sections:** Built-in Skills · Services (gateway integrations) · Smart Devices
+- **Stagger entrance:** each card animates in with `delay: index * 50 ms`
+- **Palette:** all neon colors, glow rgba values, and border classes are sourced from `AGENT_PALETTE` in `apps/desktop/src/lib/agentPalette.ts` — one definition drives both the settings cards and the main dashboard agent pills.
 
 ### AI Core — voice reactivity
 

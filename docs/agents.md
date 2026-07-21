@@ -43,7 +43,7 @@ Always active — no credentials, no toggle. Exposed as tools to the LLM alongsi
 | **Web Search** | Live DuckDuckGo search for current facts and recent events | [Full guide →](agents/websearch.md) |
 | **Calculator** | Precise arithmetic, percentages, tips, unit formulas, trig | [Full guide →](agents/calculator.md) |
 | **Memory** | Store and recall personal notes, preferences, and reminders | [Full guide →](agents/memory.md) |
-| **Briefing** | One-command morning summary — calls gateway tools in parallel | [Full guide →](agents/briefing.md) |
+| **Briefing** | One-command morning summary — calls gateway tools in parallel via `AgentMessage` protocol; no direct agent imports | [Full guide →](agents/briefing.md) |
 
 ---
 
@@ -60,6 +60,8 @@ On every turn the orchestrator:
 5. If the tool name contains `__` it is routed to the gateway (`POST /tools/{name}`).
    Otherwise it is dispatched to the local agent.
 6. The result is sent back to the LLM for synthesis into a spoken response.
+   - If the tool is a local agent call, `agent_manager.handle_as_tool()` checks `AgentResponseCache` before dispatching — cache hits return immediately without calling the agent.
+   - Agents communicate with each other via `AgentMessage` routed through `agent_manager.call_agent_from_agent()` — never via direct imports.
 
 ### Tier 2 — Keyword fallback (when no LLM is configured)
 
@@ -77,6 +79,18 @@ On every turn the orchestrator:
 | light, switch, fan, lock, thermostat, smart home, turn on/off | Smart Home (local) |
 | whatsapp, message, send whatsapp | WhatsApp (local) |
 | _(anything else)_ | General AI (local) |
+
+---
+
+## Language Support
+
+The orchestrator detects the language of every user message using `detect_language()` (Devanagari character ratio > 15% → Hindi). On every turn:
+
+- The LLM receives a "Respond in Hindi using Devanagari script" system-prompt suffix when Hindi is detected.
+- All boot and farewell phrases are generated in the detected language via `PhraseEngine`.
+- Language switches mid-session — asking in Hindi after an English conversation works without restart.
+
+Supported languages: **English** (default), **Hindi** (Devanagari script).
 
 ---
 
@@ -199,6 +213,7 @@ Persists key-value notes to `apps/orchestrator/data/user_memory.json` — surviv
 Queries weather, calendar, news, and smart home in parallel via the gateway and merges results.
 
 - Skips services not configured — adapts to whatever is connected
+- Uses `AgentMessage` protocol to call gateway agents via `agent_manager` — no direct imports between agents
 - Voice commands: *"Give me my morning briefing"*, *"What's happening today?"*
 
 ---
@@ -220,3 +235,5 @@ Keys entered in the UI are **never written to any `.env` file** during a session
 ## Graceful degradation
 
 Every gateway tool returns a clear message when credentials are missing or the upstream is unavailable. All other tools continue working. Credentials can be added at any time without restarting the app.
+
+Agents share data via the `AgentResponseCache` — if the same data was recently fetched (e.g. weather during briefing), the cached result is returned without a gateway call.

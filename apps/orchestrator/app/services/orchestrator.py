@@ -6,8 +6,8 @@ import httpx
 
 # ── System prompt ─────────────────────────────────────────────────────────────
 
-def _make_system_prompt(name: str) -> str:
-    return (
+def _make_system_prompt(name: str, language: str = 'en') -> str:
+    base = (
         f'You are {name}, a voice assistant. '
         'Your role is synthesis only: receive data from tools, speak it naturally. '
         'You have NO built-in knowledge of the user\'s personal world. '
@@ -18,8 +18,16 @@ def _make_system_prompt(name: str) -> str:
         'If the user asks to control or query a smart device, ALWAYS call the smarthome tool. '
         'Only answer directly for pure general knowledge (maths, definitions, history). '
         'Replies: 1–3 sentences, no markdown, no bullet points, plain spoken language. '
-        'IMPORTANT: Always respond in English. Do not switch to another language unless the user explicitly asks you to.'
     )
+    if language == 'hi':
+        base += (
+            'IMPORTANT: The user is speaking Hindi. '
+            'Respond entirely in Hindi using Devanagari script. '
+            'Do not mix English words unless they are technical proper nouns (e.g. API, CPU).'
+        )
+    else:
+        base += 'IMPORTANT: Always respond in English unless the user explicitly asks otherwise.'
+    return base
 
 
 # ── Provider-specific tool format builders ────────────────────────────────────
@@ -110,7 +118,9 @@ class LLMOrchestrator:
         call_agent: object,
         assistant_name: str = 'Robo',
         gateway_tools: dict | None = None,
+        language: str = 'en',
     ) -> tuple[str, str]:
+        self._language = language
         provider = (llm_config.get('provider') or 'openai').lower()
         api_key  = (llm_config.get('api_key')  or '').strip()
         model    = (llm_config.get('model')     or '').strip()
@@ -158,7 +168,7 @@ class LLMOrchestrator:
 
         tools    = [_openai_tool(aid, meta) for aid, meta in tools_available.items()]
         messages = [
-            {'role': 'system', 'content': _make_system_prompt(assistant_name)},
+            {'role': 'system', 'content': _make_system_prompt(assistant_name, language=getattr(self, '_language', 'en'))},
             {'role': 'user',   'content': message},
         ]
 
@@ -230,7 +240,7 @@ class LLMOrchestrator:
             'anthropic-version': '2023-06-01',
             'content-type':      'application/json',
         }
-        system_prompt = _make_system_prompt(assistant_name)
+        system_prompt = _make_system_prompt(assistant_name, language=getattr(self, '_language', 'en'))
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(
@@ -302,7 +312,7 @@ class LLMOrchestrator:
     ) -> tuple[str, str]:
         tool_defs     = [_gemini_tool(aid, meta) for aid, meta in tools_available.items()]
         base_url      = f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent'
-        system_prompt = _make_system_prompt(assistant_name)
+        system_prompt = _make_system_prompt(assistant_name, language=getattr(self, '_language', 'en'))
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(

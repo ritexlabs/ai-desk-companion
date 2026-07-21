@@ -20,16 +20,18 @@ from app.models.contracts import AgentRequest
 from app.voice.tts import TTSProvider
 from app.voice.stt import STTProvider
 from app.services.tts_helpers import agent_tts, build_session_providers, settings_label
+from app.services.phrases import phrase_engine
+from app.services.language import detect_language
 from app.services.session import (
     AGENT_LABELS,
     AGENT_BOOT_QUERY,
     boot_sequence,
-    llm_farewell,
     strip_agent_prefix,
     is_agent_error,
     test_agent,
     reload_agent,
 )
+from app.services.notification_scheduler import notification_scheduler
 
 router = APIRouter()
 
@@ -257,26 +259,51 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     assistant_name,
                     agent_voices=session_agent_voices,
                 )
+                # Build per-agent notifications_enabled map from the agent_config the frontend sent
+                _notif_enabled: dict[str, bool] = {}
+                for _k, _sub in (agent_config or {}).items():
+                    if isinstance(_sub, dict):
+                        _notif_enabled[_k] = bool(_sub.get('notifications_enabled', _sub.get('notificationsEnabled', False)))
+                # Google sub-agents use different keys
+                _google_cfg = (agent_config or {}).get('google', {})
+                _notif_enabled['calendar'] = bool(_google_cfg.get('calendar_notifications_enabled', _google_cfg.get('calendarNotificationsEnabled', False)))
+                _notif_enabled['email']    = bool(_google_cfg.get('email_notifications_enabled', _google_cfg.get('emailNotificationsEnabled', False)))
+                notification_scheduler.configure(
+                    enabled_agents=registered_agents,
+                    notifications_enabled=_notif_enabled,
+                    broadcast=broadcast,
+                )
+                asyncio.create_task(notification_scheduler.start())
 
             elif command == 'send_text_command':
                 raw_text = payload.get('text', '')[:MAX_INPUT_CHARS]
+                lang = detect_language(raw_text.strip())
+                agent_manager.update_language(lang)
+                phrase_engine.configure(session_llm_config, lang)
                 await _handle_text_command(ws, raw_text, session_tts, emit_transcript=False, agent_voices=session_agent_voices)
 
             elif command == 'audio_chunk':
                 await _handle_audio_chunk(ws, payload, session_stt, session_tts)
 
             elif command == 'farewell_session':
-                farewell = await llm_farewell(payload.get('phrase', ''), session_llm_config, session_calling_name)
+                phrase_engine.configure(session_llm_config)
+                farewell = await phrase_engine.generate('farewell', {
+                    'phrase': payload.get('phrase', ''),
+                    'name': session_calling_name,
+                    'assistant_name': session_assistant_name,
+                })
                 await _send(ws, 'phase_changed', {'phase': 'responding'})
                 await _speak_event(ws, 'assistant_speaking', farewell, tts=session_tts)
                 await _send(ws, 'assistant_done', {})
                 await agent_manager.shutdown()
                 agent_manager.clear_session()
+                await notification_scheduler.stop()
                 await _send(ws, 'phase_changed', {'phase': 'sleep'})
 
             elif command == 'stop_session':
                 await agent_manager.shutdown()
                 agent_manager.clear_session()
+                await notification_scheduler.stop()
                 await _send(ws, 'phase_changed', {'phase': 'sleep'})
 
             elif command == 'retry_agent':

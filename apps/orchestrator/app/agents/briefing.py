@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 
 from app.agents.base import AssistantAgent
-from app.models.contracts import AgentHealth, AgentResponse, AgentStatus
+from app.models.agent_message import AgentMessage
+from app.models.contracts import AgentHealth, AgentRequest, AgentResponse, AgentStatus
 
 
 class BriefingAgent(AssistantAgent):
@@ -32,17 +33,17 @@ class BriefingAgent(AssistantAgent):
     async def handle(self, request: AgentRequest) -> AgentResponse:
         from app.dependencies import agent_manager
 
-        enabled = set(agent_manager._session_enabled_agents)
+        enabled = set(agent_manager.enabled_agents)
 
         tasks = [
-            ('Weather',  self._gw('weather__get_current_weather',   {'query': 'current weather'})),
-            ('Calendar', self._gw('google__get_calendar_events',     {'query': 'events today'})),
-            ('News',     self._gw('news__get_news',                  {'query': 'top 3 headlines'})),
+            ('Weather',  self._call('weather__get_current_weather',   {'query': 'current weather'})),
+            ('Calendar', self._call('google__get_calendar_events',     {'query': 'events today'})),
+            ('News',     self._call('news__get_news',                  {'query': 'top 3 headlines'})),
         ]
 
         if 'smarthome' in enabled:
             tasks.append(
-                ('Home', self._gw('smarthome__system_overview', {}))
+                ('Home', self._call('smarthome__system_overview', {}))
             )
 
         labels, coros = zip(*tasks)
@@ -64,10 +65,11 @@ class BriefingAgent(AssistantAgent):
             )
         return AgentResponse(agent=self.id, text=' | '.join(parts))
 
-    async def _gw(self, tool_name: str, arguments: dict) -> str:
-        from app.dependencies import gateway_client
+    async def _call(self, tool_name: str, arguments: dict) -> str:
+        from app.dependencies import agent_manager
         try:
-            result = await gateway_client.call_tool(tool_name, arguments)
-            return str(result).strip() if result else ''
+            return await agent_manager.call_agent_from_agent(
+                AgentMessage(source_agent=self.id, tool_name=tool_name, arguments=arguments)
+            )
         except Exception:
             return ''

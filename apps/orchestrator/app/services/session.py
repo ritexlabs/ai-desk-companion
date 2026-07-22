@@ -873,10 +873,16 @@ async def boot_sequence(
         else:
             if agent_ok:
                 gw_online += 1
-                label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
-                base  = await phrase_engine.generate('agent_online', {'label': label})
-                snip  = snippet_map.get(agent_id, '')
-                msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
+                snip = snippet_map.get(agent_id, '')
+                if agent_id in ('dhan', 'zerodha'):
+                    broker = 'Dhan' if agent_id == 'dhan' else 'Zerodha'
+                    base = await phrase_engine.generate(
+                        'broker_connected', {'broker': broker, 'assistant_name': assistant_name}
+                    )
+                else:
+                    label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
+                    base  = await phrase_engine.generate('agent_online', {'label': label})
+                msg = f'{base.rstrip(".")} — {snip}.' if snip else base
                 await speak_fn(
                     'boot_status', msg,
                     {'agent_id': agent_id, 'agent_status': status},

@@ -178,7 +178,9 @@
       "Bash(curl -s http://localhost:8788/api/zerodha/holdings)",
       "Bash(python3 -m py_compile apps/mcp-gateway/src/tools/zerodha.py)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
-      "Bash(curl -s http://localhost:8788/health)"
+      "Bash(curl -s http://localhost:8788/health)",
+      "Bash(curl -s http://localhost:8788/api/zerodha/status)",
+      "Bash(curl -s http://localhost:8788/api/zerodha/tools)"
     ],
     "additionalDirectories": [
       "/Users/ritesh/MyWorkspace/github-accounts/ritexlabs/ai-desk-companion/.cloudflared",

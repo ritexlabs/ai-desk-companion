@@ -788,10 +788,12 @@ export function StocksPortfolio({
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [syncedAt, setSyncedAt] = useState('');
+  const [zerodhaError, setZerodhaError] = useState('');
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
     setError('');
+    setZerodhaError('');
     try {
       // Fetch sheet + Dhan + Zerodha holdings in parallel
       const sheetPromise = (async (): Promise<StockRow[]> => {
@@ -832,7 +834,13 @@ export function StocksPortfolio({
         if (!zerodhaEnabled) return [];
         const res = await fetch('http://localhost:8788/api/zerodha/holdings');
         const resp = await res.json();
-        if (!resp.ok) return [];
+        if (!resp.ok) {
+          const msg = resp.authRequired || /login|auth|session/i.test(resp.error ?? '')
+            ? 'Session expired — reconnect in Settings → Stock Market → Zerodha.'
+            : (resp.error ?? 'Failed to load Zerodha holdings');
+          setZerodhaError(msg);
+          return [];
+        }
         const raw = resp.data;
         const list: any[] = Array.isArray(raw) ? raw
           : Array.isArray(raw?.holdings) ? raw.holdings
@@ -1054,7 +1062,20 @@ export function StocksPortfolio({
               )}
               {!loading && !error && tab === 'zerodha' && (
                 <motion.div key="zerodha" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }}>
-                  <HoldingsTab rows={rows} hidden={hidden} broker="zerodha" />
+                  {zerodhaError ? (
+                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                      <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                        style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
+                        <AlertTriangle size={18} color="#f87171" />
+                      </div>
+                      <div>
+                        <p className="text-sm text-red-300 font-semibold font-mono">Zerodha session expired</p>
+                        <p className="text-[11px] text-slate-500 mt-1 font-mono leading-relaxed max-w-xs">{zerodhaError}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <HoldingsTab rows={rows} hidden={hidden} broker="zerodha" />
+                  )}
                 </motion.div>
               )}
               {tab === 'positions' && (

@@ -141,7 +141,8 @@ async def zerodha_status():
         result   = await _mcp_call(session_id, 'get_profile', {})
         content  = result.get('content', [])
         text     = content[0].get('text', '') if content else ''
-        connected = bool(text) and 'login' not in text.lower() and 'please' not in text.lower()
+        _bad     = ('login', 'log in', 'please', 'failed', 'error', 'unauthorized', 'authenticate')
+        connected = bool(text) and not any(p in text.lower() for p in _bad)
     except Exception:
         connected = False
     return {

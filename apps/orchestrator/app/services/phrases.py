@@ -68,6 +68,13 @@ _EN: dict[str, list[str]] = {
         "All agents assembled and ready — what's on your mind?",
         "Your full team is online — I'm ready when you are.",
     ],
+    'broker_connected': [
+        'Your {broker} stock broker is now connected.',
+        '{broker} trading account confirmed online.',
+        'Your {broker} broker account is live and ready.',
+        '{broker} broker link established — your account is active.',
+        'Connected to your {broker} trading account.',
+    ],
     'farewell': [
         'Goodbye! Have a wonderful day.',
         "Take care! I'll be here when you need me.",
@@ -150,6 +157,11 @@ _LLM_PROMPTS: dict[str, str] = {
         'Generate exactly ONE sentence (10-18 words) telling {name} that everything is online '
         'and you are ready to answer their questions. Warm, inviting, slightly sci-fi. '
         'Plain text only. No markdown.'
+    ),
+    'broker_connected': (
+        'You are {assistant_name}, a warm futuristic AI. '
+        'Generate exactly ONE sentence (8-14 words) announcing that the {broker} stock broker '
+        'account is now connected and ready. Natural, slightly sci-fi. Plain text only. No markdown.'
     ),
     'farewell': (
         'You are {assistant_name}, a warm AI voice assistant saying goodbye to {name}. '

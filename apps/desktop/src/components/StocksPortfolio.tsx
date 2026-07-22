@@ -908,6 +908,20 @@ export function StocksPortfolio({
   const overallPnl    = totalCurrent - totalInvested;
   const overallUp     = overallPnl >= 0;
 
+  // Footer rows: filter by active tab so footer reflects what's on screen
+  const footerRows = useMemo(() => {
+    if (tab === 'dhan')    return rows.filter(r => r.source === 'dhan' || r.source === 'both' || r.source === 'zerodha+dhan');
+    if (tab === 'zerodha') return rows.filter(r => r.source === 'zerodha' || r.source === 'zerodha+dhan' || r.source === 'zerodha+sheet');
+    if (tab === 'overview' || tab === 'holdings') return rows;
+    return null; // positions, options, orders — no footer
+  }, [rows, tab]);
+
+  const footerLabel    = tab === 'dhan' ? 'Dhan' : tab === 'zerodha' ? 'Zerodha' : 'All Holdings';
+  const footerInvested = (footerRows ?? []).reduce((s, r) => s + r.buy * r.qty, 0);
+  const footerCurrent  = (footerRows ?? []).reduce((s, r) => s + r.curr * r.qty, 0);
+  const footerPnl      = footerCurrent - footerInvested;
+  const footerUp       = footerPnl >= 0;
+
   return (
     <>
       {/* Backdrop */}
@@ -1096,21 +1110,26 @@ export function StocksPortfolio({
             </AnimatePresence>
           </div>
 
-          {/* Footer summary */}
-          {!loading && !error && rows.length > 0 && (
-            <div className="grid grid-cols-3 gap-3 px-5 py-3.5 border-t border-white/[0.06] flex-shrink-0">
-              {[
-                { label: 'Invested',      value: fmtINR(totalInvested, true),  color: '#94a3b8' },
-                { label: 'Current',       value: fmtINR(totalCurrent,  true),  color: '#e2e8f0' },
-                { label: 'Overall P&L',   value: fmtINR(overallPnl, true),     color: overallUp ? ACCENT : RED },
-              ].map(({ label, value, color }) => (
-                <div key={label}>
-                  <p className="text-[8px] font-semibold uppercase tracking-widest text-slate-600 mb-0.5 font-mono">{label}</p>
-                  <p className="text-xs font-bold tabular-nums font-mono" style={{ color }}>
-                    {hidden ? '••••••' : value}
-                  </p>
-                </div>
-              ))}
+          {/* Footer summary — scoped to the active tab */}
+          {!loading && !error && footerRows !== null && footerRows.length > 0 && (
+            <div className="border-t border-white/[0.06] flex-shrink-0">
+              <div className="px-5 pt-2 pb-0.5">
+                <span className="text-[8px] font-mono uppercase tracking-widest text-slate-700">{footerLabel}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-3 px-5 pb-3.5">
+                {[
+                  { label: 'Invested',    value: fmtINR(footerInvested, true), color: '#94a3b8' },
+                  { label: 'Current',     value: fmtINR(footerCurrent,  true), color: '#e2e8f0' },
+                  { label: 'Overall P&L', value: fmtINR(footerPnl, true),      color: footerUp ? ACCENT : RED },
+                ].map(({ label, value, color }) => (
+                  <div key={label}>
+                    <p className="text-[8px] font-semibold uppercase tracking-widest text-slate-600 mb-0.5 font-mono">{label}</p>
+                    <p className="text-xs font-bold tabular-nums font-mono" style={{ color }}>
+                      {hidden ? '••••••' : value}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import time
 from base64 import urlsafe_b64encode
@@ -10,6 +11,138 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from src.config.settings import settings
+
+
+def _parse_holdings_text(text: str) -> list[dict]:
+    """Parse the formatted text from portfolio_agent_tool into structured holding dicts.
+
+    The Dhan MCP returns human-readable text like:
+        RELIANCE (ALL)
+          Qty: 104 (avail 104, T1 0)
+          Avg Cost: ₹1,300.37 | Invested: ₹135,238.20
+    """
+    holdings: list[dict] = []
+    current: dict | None = None
+
+    def _flush() -> None:
+        if current and current.get('tradingSymbol'):
+            # If no LTP came back, use avg cost so frontend shows 0% P&L instead of -100%
+            if current['lastTradedPrice'] == 0.0 and current['avgCostPrice'] > 0:
+                current['lastTradedPrice'] = current['avgCostPrice']
+            holdings.append(current)
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+
+        if not line:
+            _flush()
+            current = None
+            continue
+
+        # Skip emoji headers: "📊 Holdings (17 securities)"
+        if not line[0].isalpha():
+            continue
+
+        # Symbol line: "RELIANCE (ALL)" or "BAJAJHFL (CNC)"
+        m = re.match(
+            r'^([A-Z][A-Z0-9&@.-]+(?:\s+[A-Z0-9&@.-]+)*)\s*'
+            r'\((?:ALL|INT|CNC|MIS|LONG|SHORT|BTST)\)',
+            line,
+        )
+        if m:
+            _flush()
+            current = {
+                'tradingSymbol':        m.group(1).strip(),
+                'totalQty':             0,
+                'avgCostPrice':         0.0,
+                'lastTradedPrice':      0.0,
+                'unrealizedPnl':        0.0,
+                'unrealizedPnlPercent': 0.0,
+            }
+            continue
+
+        if current is None:
+            continue
+
+        # Qty: 104 (avail 104, T1 0)
+        m = re.match(r'Qty:\s*([\d,]+)', line, re.I)
+        if m:
+            current['totalQty'] = int(m.group(1).replace(',', ''))
+            continue
+
+        # Avg Cost: ₹1,300.37 | Invested: ₹135,238.20
+        m = re.match(r'Avg\s+Cost:\s*[₹₹]?([\d,]+\.?\d*)', line, re.I)
+        if m:
+            current['avgCostPrice'] = float(m.group(1).replace(',', ''))
+            continue
+
+        # LTP / CMP / Current Price: ₹1,400.00
+        m = re.match(r'(?:LTP|CMP|Current\s+Price|Current):\s*[₹₹]?([\d,]+\.?\d*)', line, re.I)
+        if m:
+            current['lastTradedPrice'] = float(m.group(1).replace(',', ''))
+            continue
+
+        # P&L: ₹1,234.56 (1.23%)
+        m = re.match(r'P&L:\s*[₹₹]?([+-]?[\d,]+\.?\d*)\s*\(([+-]?[\d.]+)%\)', line, re.I)
+        if m:
+            current['unrealizedPnl'] = float(m.group(1).replace(',', ''))
+            current['unrealizedPnlPercent'] = float(m.group(2))
+            continue
+
+    _flush()
+    return holdings
+
+
+async def _enrich_with_ltp(holdings: list[dict]) -> list[dict]:
+    """Batch-fetch current NSE prices via yfinance and compute P&L for each holding."""
+    import asyncio
+    symbols = [h['tradingSymbol'] for h in holdings]
+
+    def _fetch() -> dict[str, float]:
+        try:
+            import yfinance as yf
+            ns_tickers = [s + '.NS' for s in symbols]
+            data = yf.download(
+                ' '.join(ns_tickers),
+                period='2d',
+                progress=False,
+                auto_adjust=True,
+            )
+            prices: dict[str, float] = {}
+            close = data.get('Close') if hasattr(data, 'get') else data['Close']
+            if close is None:
+                return prices
+            # Multi-ticker → Close is a DataFrame; single-ticker → Series
+            if hasattr(close, 'columns'):
+                for ns, sym in zip(ns_tickers, symbols):
+                    try:
+                        col = close[ns].dropna()
+                        if not col.empty:
+                            prices[sym] = float(col.iloc[-1])
+                    except Exception:
+                        pass
+            else:
+                col = close.dropna()
+                if not col.empty and symbols:
+                    prices[symbols[0]] = float(col.iloc[-1])
+            return prices
+        except Exception:
+            return {}
+
+    loop = asyncio.get_event_loop()
+    price_map = await loop.run_in_executor(None, _fetch)
+
+    for h in holdings:
+        ltp = price_map.get(h['tradingSymbol'], 0.0)
+        if ltp > 0:
+            h['lastTradedPrice'] = ltp
+            avg = h.get('avgCostPrice', 0.0)
+            qty = h.get('totalQty', 0)
+            if avg > 0 and qty > 0:
+                h['unrealizedPnl']        = round((ltp - avg) * qty, 2)
+                h['unrealizedPnlPercent'] = round(((ltp - avg) / avg) * 100, 2)
+
+    return holdings
 
 router = APIRouter(tags=['dhan'])
 
@@ -35,6 +168,11 @@ def _save_token(token_data: dict) -> None:
     if 'expires_in' in token_data and 'expires_at' not in token_data:
         token_data['expires_at'] = time.time() + int(token_data['expires_in'])
     settings.dhan_token_expires_at  = float(token_data.get('expires_at', 0))
+    settings.persist_to_env({
+        'dhan_access_token':     settings.dhan_access_token,
+        'dhan_refresh_token':    settings.dhan_refresh_token,
+        'dhan_token_expires_at': str(settings.dhan_token_expires_at),
+    })
     try:
         from src.tools.dhan import _tool_cache
         _tool_cache.clear()
@@ -279,8 +417,16 @@ async def dhan_holdings():
     if not settings.dhan_access_token:
         return JSONResponse({'ok': False, 'authRequired': True, 'error': 'Dhan not connected'})
     try:
-        from src.tools.dhan import _dispatch_query
-        result = await _dispatch_query('my holdings portfolio')
+        from src.tools.dhan import _call_mcp_tool
+        result = await _call_mcp_tool('portfolio_agent_tool', {'action': 'holdings'})
+        # Dhan MCP returns formatted text, not JSON — parse it into structured dicts
+        if isinstance(result, str):
+            result = _parse_holdings_text(result)
+        elif isinstance(result, dict):
+            result = result.get('holdings', result.get('data', []))
+        # Enrich with live NSE prices so P&L is calculated correctly
+        if isinstance(result, list) and result:
+            result = await _enrich_with_ltp(result)
         return {'ok': True, 'data': result}
     except Exception as exc:
         return JSONResponse({'ok': False, 'error': str(exc)[:400]})
@@ -337,8 +483,8 @@ async def dhan_orders():
     if not settings.dhan_access_token:
         return JSONResponse({'ok': False, 'authRequired': True, 'error': 'Dhan not connected'})
     try:
-        from src.tools.dhan import _dispatch_query
-        result = await _dispatch_query('my orders today')
+        from src.tools.dhan import _call_mcp_tool
+        result = await _call_mcp_tool('orderbook_agent_tool', {'action': 'list'})
         return {'ok': True, 'data': result}
     except Exception as exc:
         return JSONResponse({'ok': False, 'error': str(exc)[:400]})

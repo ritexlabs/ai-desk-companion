@@ -104,6 +104,7 @@ async def auth_zerodha():
 
     # Store session ID now — status endpoint polls get_profile to confirm auth
     settings.zerodha_access_token = session_id
+    settings.persist_to_env({'zerodha_access_token': session_id})
     try:
         from src.tools.zerodha import _tool_cache
         _tool_cache.clear()
@@ -118,6 +119,7 @@ async def disconnect_zerodha():
     settings.zerodha_access_token     = ''
     settings.zerodha_refresh_token    = ''
     settings.zerodha_token_expires_at = 0.0
+    settings.persist_to_env({'zerodha_access_token': '', 'zerodha_refresh_token': ''})
     try:
         from src.tools.zerodha import _tool_cache
         _tool_cache.clear()

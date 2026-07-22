@@ -3,13 +3,10 @@ from __future__ import annotations
 import pytest
 
 from app.services.session import (
-    FAREWELL_LINES,
-    GREETING_SUFFIXES,
     is_agent_error,
-    make_greeting,
-    pick_farewell,
     strip_agent_prefix,
 )
+from app.services.phrases import phrase_engine, _EN
 
 
 # ── strip_agent_prefix ────────────────────────────────────────────────────────
@@ -70,59 +67,108 @@ class TestIsAgentError:
         assert not is_agent_error("Connected — all clear.")
 
     def test_case_insensitive(self):
-        # is_agent_error lower-cases before matching; check that casing doesn't matter
-        assert is_agent_error("NOT CONFIGURED")       # contains "not configured"
-        assert is_agent_error("No API Key found")     # contains "no api key"
+        assert is_agent_error("NOT CONFIGURED")
+        assert is_agent_error("No API Key found")
 
 
-# ── make_greeting ─────────────────────────────────────────────────────────────
+# ── PhraseEngine — greeting ───────────────────────────────────────────────────
 
-class TestMakeGreeting:
+class TestPhraseEngineGreeting:
+    def setup_method(self):
+        phrase_engine.configure({})   # no LLM — uses static pool
+
     def test_contains_calling_name(self):
-        assert "Alice" in make_greeting("Alice")
+        result = phrase_engine._static('greeting', {'tod': 'Good morning', 'name': 'Alice', 'assistant_name': 'Robo'})
+        assert 'Alice' in result
 
     def test_ends_with_period(self):
-        assert make_greeting("Master").endswith(".")
+        result = phrase_engine._static('greeting', {'tod': 'Good morning', 'name': 'Master', 'assistant_name': 'Robo'})
+        assert result.endswith('.')
 
     def test_contains_time_of_day_phrase(self):
-        greeting = make_greeting("Ritesh")
-        time_phrases = ("Good morning", "Good afternoon", "Good evening")
-        assert any(p in greeting for p in time_phrases)
-
-    def test_contains_a_suffix_from_list(self):
-        greeting = make_greeting("Test")
-        assert any(suffix in greeting for suffix in GREETING_SUFFIXES)
+        result = phrase_engine._static('greeting', {'tod': 'Good afternoon', 'name': 'Ritesh', 'assistant_name': 'Robo'})
+        assert 'Good afternoon' in result
 
     def test_different_names_work(self):
-        for name in ("Master", "Boss", "User"):
-            g = make_greeting(name)
-            assert name in g
+        for name in ('Master', 'Boss', 'User'):
+            result = phrase_engine._static('greeting', {'tod': 'Good evening', 'name': name, 'assistant_name': 'Robo'})
+            assert name in result
+
+    def test_result_is_from_pool(self):
+        result = phrase_engine._static('greeting', {'tod': 'Good morning', 'name': 'Test', 'assistant_name': 'Robo'})
+        pool = _EN.get('greeting', [])
+        assert any(result == t.format(tod='Good morning', name='Test', assistant_name='Robo') for t in pool)
 
 
-# ── pick_farewell ─────────────────────────────────────────────────────────────
+# ── PhraseEngine — farewell ───────────────────────────────────────────────────
 
-class TestPickFarewell:
-    def test_night_farewell_is_nighttime_line(self):
-        result = pick_farewell("Good night Robo")
-        night_lines = [l for l in FAREWELL_LINES if 'night' in l.lower() or 'dream' in l.lower()]
-        assert result in night_lines, f"Expected a night line, got: {result!r}"
+class TestPhraseEngineFarewell:
+    def setup_method(self):
+        phrase_engine.configure({})
 
-    def test_goodbye_farewell_is_goodbye_line(self):
-        result = pick_farewell("Goodbye Robo")
-        goodbye_lines = [
-            l for l in FAREWELL_LINES
-            if any(w in l.lower() for w in ('goodbye', 'farewell', 'see you'))
-        ]
-        assert result in goodbye_lines, f"Expected a goodbye line, got: {result!r}"
+    def test_farewell_from_pool(self):
+        result = phrase_engine._static('farewell', {})
+        assert result in _EN['farewell']
 
-    def test_bye_farewell_is_from_list(self):
-        result = pick_farewell("Bye")
-        assert result in FAREWELL_LINES
+    def test_farewell_ends_with_period_or_exclamation(self):
+        result = phrase_engine._static('farewell', {})
+        assert result[-1] in ('.', '!')
 
-    def test_generic_farewell_is_from_list(self):
-        result = pick_farewell("See you later")
-        assert result in FAREWELL_LINES
+    def test_farewell_is_nonempty(self):
+        for _ in range(5):
+            result = phrase_engine._static('farewell', {})
+            assert len(result) > 5
 
-    def test_empty_phrase_returns_something(self):
-        result = pick_farewell("")
-        assert result in FAREWELL_LINES
+
+# ── PhraseEngine — gateway phrases ───────────────────────────────────────────
+
+class TestPhraseEngineGateway:
+    def setup_method(self):
+        phrase_engine.configure({})
+
+    def test_gw_connect_from_pool(self):
+        result = phrase_engine._static('gw_connect', {})
+        assert result in _EN['gw_connect']
+
+    def test_gw_fail_from_pool(self):
+        result = phrase_engine._static('gw_fail', {})
+        assert result in _EN['gw_fail']
+
+    def test_agent_online_substitutes_label(self):
+        result = phrase_engine._static('agent_online', {'label': 'Weather'})
+        assert 'Weather' in result
+        assert '{label}' not in result
+
+    def test_boot_summary_substitutes_values(self):
+        result = phrase_engine._static('boot_summary', {'total_online': 8, 'total': 10, 'plural': 's'})
+        assert '8' in result
+        assert '10' in result
+        assert '{' not in result
+
+
+# ── PhraseEngine — Hindi fallback ─────────────────────────────────────────────
+
+class TestPhraseEngineHindi:
+    def setup_method(self):
+        phrase_engine.configure({}, language='hi')
+
+    def teardown_method(self):
+        phrase_engine.configure({}, language='en')
+
+    def test_gw_connect_hindi(self):
+        result = phrase_engine._static('gw_connect', {})
+        assert result   # non-empty
+        # Hindi pool is defined for gw_connect
+        from app.services.phrases import _HI
+        assert result in _HI['gw_connect']
+
+    def test_greeting_hindi_with_name(self):
+        from app.services.phrases import _HI
+        result = phrase_engine._static('greeting', {'tod': 'Good morning', 'name': 'Ritesh', 'assistant_name': 'Robo'})
+        assert 'Ritesh' in result
+
+    def test_missing_category_falls_back_to_english(self):
+        # 'boot_summary' is not in _HI — should fall back to _EN
+        result = phrase_engine._static('boot_summary', {'total_online': 5, 'total': 10, 'plural': 's'})
+        assert '5' in result
+        assert '10' in result

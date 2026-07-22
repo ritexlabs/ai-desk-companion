@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   BarChart2,
   Bell,
+  BellOff,
   Briefcase,
   Calendar,
   Cloud,
@@ -16,6 +17,7 @@ import {
   MicOff,
   Moon,
   Newspaper,
+  Play,
   Power,
   RotateCw,
   Send,
@@ -45,10 +47,12 @@ import { useAppConfig } from './hooks/useAppConfig';
 import { useAgentConfig } from './hooks/useAgentConfig';
 import { useLLMConfig } from './hooks/useLLMConfig';
 import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
-import type { RuntimePhase } from './types/runtime';
+import type { RuntimePhase, AgentNotification, NotificationSeverity } from './types/runtime';
 import { useOrchSystemStats } from './hooks/useOrchSystemStats';
 import { useProactiveNotifications } from './hooks/useProactiveNotifications';
 import { useAgentVoiceConfig } from './hooks/useAgentVoiceConfig';
+import { AgentNotificationPanel } from './components/AgentNotificationPanel';
+import { AGENT_PALETTE } from './lib/agentPalette';
 
 /* ─── helpers ──────────────────────────────────────────────── */
 
@@ -141,19 +145,19 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   );
 }
 
-const AGENT_PILL_META: Record<string, { icon: LucideIcon; text: string; bg: string; border: string }> = {
-  weather:   { icon: Cloud,      text: 'text-cyan-400',    bg: 'bg-cyan-400/10',    border: 'border-cyan-400/20' },
-  calendar:  { icon: Calendar,   text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
-  email:     { icon: Mail,       text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
-  github:    { icon: GitBranch,     text: 'text-amber-400',   bg: 'bg-amber-400/10',   border: 'border-amber-400/20' },
-  stock:     { icon: TrendingUp, text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/20' },
-  news:      { icon: Newspaper,  text: 'text-sky-400',     bg: 'bg-sky-400/10',     border: 'border-sky-400/20' },
-  smarthome: { icon: Home,       text: 'text-orange-400',  bg: 'bg-orange-400/10',  border: 'border-orange-400/20' },
-  portfolio: { icon: Briefcase,  text: 'text-rose-400',    bg: 'bg-rose-400/10',    border: 'border-rose-400/20' },
-  whatsapp:  { icon: Send,       text: 'text-green-400',   bg: 'bg-green-400/10',   border: 'border-green-400/20' },
-  notes:     { icon: Bell,       text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
-  general:   { icon: Zap,        text: 'text-violet-400',  bg: 'bg-violet-400/10',  border: 'border-violet-400/20' },
+const AGENT_ICONS: Record<string, LucideIcon> = {
+  weather: Cloud, calendar: Calendar, email: Mail, github: GitBranch,
+  stock: TrendingUp, news: Newspaper, smarthome: Home, portfolio: Briefcase,
+  whatsapp: Send, notes: Bell, socialmedia: Play, general: Zap,
+  websearch: Zap, calculator: Activity, memory: Zap, briefing: Zap, system: Cpu,
 };
+
+const AGENT_PILL_META = Object.fromEntries(
+  Object.entries(AGENT_PALETTE).map(([id, p]) => [
+    id,
+    { icon: AGENT_ICONS[id] ?? Zap, text: p.text, bg: p.bg, border: p.border },
+  ])
+);
 
 /* ─── App ───────────────────────────────────────────────────── */
 
@@ -176,6 +180,8 @@ export default function App() {
     disconnectPortfolio,
     refreshPortfolioToken,
     verifyWhatsApp,
+    verifySocialMedia,
+    connectYouTube,
     checkTunnelStatus,
     startTunnel,
     stopTunnel,
@@ -199,21 +205,98 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agentConfigOpen, setAgentConfigOpen] = useState(false);
 
-  useProactiveNotifications(agentConfig, ({ text, agentId }) => rt.pushNotification(text, agentId));
+  /* ── Notification panel state ─────────────────────────────────── */
+  const [activeNotifications, setActiveNotifications] = useState<AgentNotification[]>([]);
+
+  const isDismissed = (conditionKey: string) =>
+    !activeNotifications.some((n) => n.conditionKey === conditionKey);
+
+  const dismissNotification = (id: string) =>
+    setActiveNotifications((prev) => prev.filter((n) => n.id !== id));
+
+  const AGENT_LABELS: Record<string, string> = {
+    system: 'System', weather: 'Weather', calendar: 'Calendar', email: 'Google Email',
+    github: 'GitHub', stock: 'Stock Market', news: 'News', smarthome: 'Smart Home',
+    portfolio: 'Portfolio', whatsapp: 'WhatsApp', socialmedia: 'Social Media',
+  };
+
+  useProactiveNotifications(
+    agentConfig,
+    ({ text, agentId, conditionKey, severity }) => {
+      // Add to visual panel (dedup by conditionKey — replace stale entry)
+      setActiveNotifications((prev) => {
+        const without = prev.filter((n) => n.conditionKey !== conditionKey);
+        return [
+          ...without,
+          {
+            id:           `${conditionKey}-${Date.now()}`,
+            conditionKey,
+            agentId,
+            agentLabel:   AGENT_LABELS[agentId] ?? agentId,
+            message:      text,
+            severity,
+            timestamp:    Date.now(),
+          },
+        ];
+      });
+      // Speak + append to transcript
+      rt.pushNotification(text, agentId);
+    },
+    isDismissed,
+  );
+
+  // Listen for backend-pushed agent_notification events dispatched via custom DOM event
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { text, agentId, severity, conditionKey } = (e as CustomEvent<{
+        text: string; agentId: string; severity: string; conditionKey: string;
+      }>).detail;
+      setActiveNotifications((prev) => {
+        const without = prev.filter((n) => n.conditionKey !== conditionKey);
+        return [...without, {
+          id:           `${conditionKey}-${Date.now()}`,
+          conditionKey,
+          agentId,
+          agentLabel:   AGENT_LABELS[agentId] ?? agentId,
+          message:      text,
+          severity:     severity as NotificationSeverity,
+          timestamp:    Date.now(),
+        }];
+      });
+    };
+    window.addEventListener('agent-notification', handler);
+    return () => window.removeEventListener('agent-notification', handler);
+  }, []);
 
   const notificationsEnabledFor = (agentId: string): boolean => {
     if (agentId === 'system')    return agentConfig.system.notificationsEnabled;
+    if (agentId === 'weather')   return agentConfig.weather.notificationsEnabled;
+    if (agentId === 'calendar')  return agentConfig.google.calendarNotificationsEnabled;
     if (agentId === 'email')     return agentConfig.google.emailNotificationsEnabled;
+    if (agentId === 'github')    return agentConfig.github.notificationsEnabled;
+    if (agentId === 'stock')     return agentConfig.stock.notificationsEnabled;
     if (agentId === 'news')      return agentConfig.news.notificationsEnabled;
     if (agentId === 'smarthome') return agentConfig.smarthome.notificationsEnabled;
+    if (agentId === 'portfolio') return agentConfig.portfolio.notificationsEnabled;
+    if (agentId === 'whatsapp')  return agentConfig.whatsapp.notificationsEnabled;
+    if (agentId === 'socialmedia') return agentConfig.socialmedia.notificationsEnabled;
+    if (agentId === 'notes')     return agentConfig.notes.notificationsEnabled;
     return false;
   };
 
   const toggleNotificationsFor = (agentId: string, enabled: boolean) => {
-    if (agentId === 'system')    patchAgent('system', { notificationsEnabled: enabled });
-    if (agentId === 'email')     patchAgent('google', { emailNotificationsEnabled: enabled });
-    if (agentId === 'news')      patchAgent('news',   { notificationsEnabled: enabled });
+    if (agentId === 'system')    patchAgent('system',    { notificationsEnabled: enabled });
+    if (agentId === 'weather')   patchAgent('weather',   { notificationsEnabled: enabled });
+    if (agentId === 'calendar')  patchAgent('google',    { calendarNotificationsEnabled: enabled });
+    if (agentId === 'email')     patchAgent('google',    { emailNotificationsEnabled: enabled });
+    if (agentId === 'github')    patchAgent('github',    { notificationsEnabled: enabled });
+    if (agentId === 'stock')     patchAgent('stock',     { notificationsEnabled: enabled });
+    if (agentId === 'news')      patchAgent('news',      { notificationsEnabled: enabled });
     if (agentId === 'smarthome') patchAgent('smarthome', { notificationsEnabled: enabled });
+    if (agentId === 'portfolio') patchAgent('portfolio', { notificationsEnabled: enabled });
+    if (agentId === 'whatsapp')  patchAgent('whatsapp',  { notificationsEnabled: enabled });
+    if (agentId === 'socialmedia') patchAgent('socialmedia', { notificationsEnabled: enabled });
+    if (agentId === 'notes')     patchAgent('notes',     { notificationsEnabled: enabled });
   };
 
   // Safari (and any WebKit browser without Chrome) blocks speechSynthesis.speak()
@@ -253,6 +336,66 @@ export default function App() {
   const [notesDashboardOpen,       setNotesDashboardOpen]       = useState(false);
   const [portfolioPnlPct,          setPortfolioPnlPct]          = useState<number | null>(null);
   const [upcomingReminders,        setUpcomingReminders]        = useState<UpcomingReminder[]>([]);
+
+  // Social media notification polling — checks for new subs/views/followers every 5 min
+  const socialStatsRef = useRef<Record<string, { subs?: number; followers?: number }>>({});
+  useEffect(() => {
+    const INTERVAL = 5 * 60 * 1000; // 5 min
+
+    const poll = async () => {
+      if (!rt.wsConnected) return;
+      const accounts = agentConfig.socialmedia.accounts.filter(
+        (a) => a.enabled && a.notificationsEnabled && a.token && a.channelId,
+      );
+      if (!accounts.length || !agentConfig.socialmedia.notificationsEnabled) return;
+
+      for (const acc of accounts) {
+        try {
+          if (acc.platform === 'youtube') {
+            const r = await fetch(
+              `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(acc.channelId)}`,
+              { headers: { Authorization: `Bearer ${acc.token}` } },
+            );
+            if (!r.ok) continue;
+            const data = await r.json();
+            const subs = parseInt(data.items?.[0]?.statistics?.subscriberCount ?? '0', 10);
+            const prev = socialStatsRef.current[acc.id];
+            if (prev !== undefined && prev.subs !== undefined && subs > prev.subs) {
+              const gained = subs - prev.subs;
+              rt.pushNotification(
+                `${acc.label} gained ${gained} new subscriber${gained !== 1 ? 's' : ''}!`,
+                'socialmedia',
+              );
+            }
+            socialStatsRef.current[acc.id] = { ...socialStatsRef.current[acc.id], subs };
+          } else if (acc.platform === 'instagram') {
+            const r = await fetch(
+              `https://graph.facebook.com/v21.0/${encodeURIComponent(acc.channelId)}?fields=followers_count&access_token=${encodeURIComponent(acc.token)}`,
+            );
+            if (!r.ok) continue;
+            const data = await r.json();
+            const followers = parseInt(data.followers_count ?? '0', 10);
+            const prev = socialStatsRef.current[acc.id];
+            if (prev !== undefined && prev.followers !== undefined && followers > prev.followers) {
+              const gained = followers - prev.followers;
+              rt.pushNotification(
+                `${acc.label} gained ${gained} new follower${gained !== 1 ? 's' : ''}!`,
+                'socialmedia',
+              );
+            }
+            socialStatsRef.current[acc.id] = { ...socialStatsRef.current[acc.id], followers };
+          }
+        } catch {
+          // silent — network errors don't need user-visible feedback during polling
+        }
+      }
+    };
+
+    // First poll initialises baseline counts without notifying
+    poll();
+    const id = setInterval(poll, INTERVAL);
+    return () => clearInterval(id);
+  }, [agentConfig.socialmedia, rt.wsConnected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll for reminders due within 5 minutes
   useEffect(() => {
@@ -739,9 +882,10 @@ export default function App() {
                     {onlineAgents.map((agent, idx) => {
                       const m = AGENT_PILL_META[agent.id];
                       if (!m) return null;
-                      const Icon = m.icon;
+                      const Icon            = m.icon;
+                      const notifEnabled    = notificationsEnabledFor(agent.id);
                       return (
-                        <motion.button
+                        <motion.div
                           key={agent.id}
                           initial={{ opacity: 0, scale: 0.88 }}
                           animate={{ opacity: 1, scale: 1 }}
@@ -750,23 +894,46 @@ export default function App() {
                           whileHover={{ scale: 1.04, y: -2 }}
                           whileTap={{ scale: 0.95 }}
                           onClick={() => handleAgentClick(agent.id)}
-                          className={`flex items-center gap-2 rounded-xl border ${m.border} ${m.bg} px-2.5 py-2.5 cursor-pointer w-full text-left`}
+                          className={`relative flex flex-col rounded-xl border ${m.border} ${m.bg} px-2.5 pt-2 pb-1.5 cursor-pointer w-full text-left`}
                         >
-                          <motion.div
-                            animate={{ rotate: [0, 8, -8, 0] }}
-                            transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
-                          >
-                            <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${m.text}`} />
-                          </motion.div>
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className={`text-[11px] font-medium truncate ${m.text}`}>{agent.label}</span>
-                            {agent.id === 'portfolio' && portfolioPnlPct !== null && (
-                              <span className={`text-[10px] font-mono font-bold leading-none ${portfolioPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                {portfolioPnlPct >= 0 ? '+' : ''}{portfolioPnlPct.toFixed(1)}%
-                              </span>
-                            )}
+                          {/* Top row: icon + label */}
+                          <div className="flex items-center gap-2">
+                            <motion.div
+                              animate={{ rotate: [0, 8, -8, 0] }}
+                              transition={{ duration: 3, repeat: Infinity, repeatDelay: idx * 1.5 + 2 }}
+                            >
+                              <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${m.text}`} />
+                            </motion.div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className={`text-[11px] font-medium truncate ${m.text}`}>{agent.label}</span>
+                              {agent.id === 'portfolio' && portfolioPnlPct !== null && (
+                                <span className={`text-[10px] font-mono font-bold leading-none ${portfolioPnlPct >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {portfolioPnlPct >= 0 ? '+' : ''}{portfolioPnlPct.toFixed(1)}%
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </motion.button>
+
+                          {/* Bottom row: notification toggle */}
+                          <div className="flex items-center justify-end mt-1 pt-1 border-t border-white/5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleNotificationsFor(agent.id, !notifEnabled); }}
+                              title={notifEnabled ? 'Disable notifications' : 'Enable notifications'}
+                              className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 transition text-[8px] ${
+                                notifEnabled
+                                  ? 'text-amber-400 hover:text-amber-300'
+                                  : 'text-slate-700 hover:text-slate-500'
+                              }`}
+                            >
+                              {notifEnabled
+                                ? <Bell    className="h-2.5 w-2.5" />
+                                : <BellOff className="h-2.5 w-2.5" />}
+                              <span className="font-mono uppercase tracking-wide">
+                                {notifEnabled ? 'on' : 'off'}
+                              </span>
+                            </button>
+                          </div>
+                        </motion.div>
                       );
                     })}
                   </AnimatePresence>
@@ -774,9 +941,73 @@ export default function App() {
               )}
 
               {onlineAgents.length > 0 && (
-                <p className="text-[9px] text-slate-700 text-center">tap card for details</p>
+                <p className="text-[9px] text-slate-700 text-center">tap card for details · bell toggles notifications</p>
               )}
+
+              {/* ── Offline registered agents ────────────────────── */}
+              {(() => {
+                const offlineAgents = rt.agents.filter(
+                  (a) => a.id !== 'system' && a.status !== 'online' && AGENT_PILL_META[a.id],
+                );
+                if (!offlineAgents.length) return null;
+                const noSession = !rt.wsConnected;
+                return (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 px-0.5">
+                      <div className="h-px flex-1 bg-white/5" />
+                      <span className="text-[8px] uppercase tracking-[0.3em] text-slate-700 font-mono">
+                        Offline ({offlineAgents.length})
+                      </span>
+                      <div className="h-px flex-1 bg-white/5" />
+                    </div>
+
+                    {noSession && (
+                      <p className="text-[9px] text-slate-700 text-center px-1 leading-relaxed">
+                        Start a session to bring all configured agents online
+                      </p>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {offlineAgents.map((agent) => {
+                        const m    = AGENT_PILL_META[agent.id]!;
+                        const Icon = m.icon;
+                        const isFailed  = agent.status === 'failed';
+                        const isStarting = agent.status === 'starting';
+                        return (
+                          <div
+                            key={agent.id}
+                            onClick={() => handleAgentClick(agent.id)}
+                            className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.015] px-2.5 py-2 opacity-45 hover:opacity-70 cursor-pointer transition-opacity"
+                          >
+                            <Icon className="h-3.5 w-3.5 flex-shrink-0 text-slate-600" />
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="text-[10px] font-medium truncate text-slate-600">{agent.label}</span>
+                              <span className={`text-[8px] font-mono leading-none ${
+                                isFailed   ? 'text-red-500'   :
+                                isStarting ? 'text-cyan-600'  :
+                                             'text-slate-700'
+                              }`}>
+                                {isFailed ? 'failed' : isStarting ? 'starting…' : 'offline'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
+
+            {/* ── Agent notification panel — pinned to bottom ── */}
+            <AnimatePresence>
+              {activeNotifications.length > 0 && (
+                <AgentNotificationPanel
+                  notifications={activeNotifications}
+                  onDismiss={dismissNotification}
+                />
+              )}
+            </AnimatePresence>
 
             {/* ── Upcoming reminder flash — pinned to bottom ── */}
             <AnimatePresence>
@@ -1232,11 +1463,7 @@ export default function App() {
             }
             agentConfig={agentConfig}
             notificationsEnabled={notificationsEnabledFor(selectedAgent.id)}
-            onToggleNotifications={
-              ['system', 'email', 'news', 'smarthome'].includes(selectedAgent.id)
-                ? (enabled) => toggleNotificationsFor(selectedAgent.id, enabled)
-                : undefined
-            }
+            onToggleNotifications={(enabled) => toggleNotificationsFor(selectedAgent.id, enabled)}
           />
         )}
       </AnimatePresence>
@@ -1330,6 +1557,8 @@ export default function App() {
             onDisconnectPortfolio={disconnectPortfolio}
             onRefreshPortfolio={refreshPortfolioToken}
             onVerifyWhatsApp={verifyWhatsApp}
+            onVerifySocialMedia={verifySocialMedia}
+            onConnectYoutube={connectYouTube}
             onCheckTunnel={checkTunnelStatus}
             onStartTunnel={startTunnel}
             onStopTunnel={stopTunnel}

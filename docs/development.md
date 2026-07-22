@@ -104,7 +104,7 @@ cd apps/orchestrator
 
 | Module | File | Tests |
 |--------|------|-------|
-| session.py | `test_services/test_session.py` | 26 — `strip_agent_prefix`, `is_agent_error`, `make_greeting`, `pick_farewell` |
+| session.py (phrases.py) | `test_services/test_session.py` | 26 — `strip_agent_prefix`, `is_agent_error`, `PhraseEngine._static()` (greeting, farewell, gateway phrases, Hindi fallback) |
 | tts_helpers.py | `test_services/test_tts_helpers.py` | 10 — `settings_label`, `agent_tts` voice assignment |
 | agent_manager.py | `test_services/test_agent_manager.py` | 20 — `_merge`, `_merge_llm`, configure/clear, `llm_configured` |
 | ws.py security | `test_api/test_ws_security.py` | 8 — `_RateLimiter` sliding window, `MAX_INPUT_CHARS` |
@@ -171,7 +171,9 @@ The LLM discovers the tool automatically from its description. No keyword rules,
 
 ### Case B — New local agent (for agents that run entirely in-process)
 
-Use this for pure in-process logic — calculators, memory stores, keyword tools. Services that call external APIs or receive webhooks should be gateway tools (Case A). Follow these steps in order — skipping any makes the agent invisible in the roster or silently ignored by the router.
+Use this for pure in-process logic — calculators, memory stores, keyword tools. Services that call external APIs or receive webhooks should be gateway tools (Case A). See the complete reference at [docs/adding-new-agent.md](adding-new-agent.md) for a step-by-step checklist with exact code shapes sourced from the live codebase.
+
+Follow these steps in order — skipping any makes the agent invisible in the roster or silently ignored by the router.
 
 #### Step 1 — Backend Python class
 
@@ -234,6 +236,23 @@ AGENT_VOICES['myagent'] = 'nova'   # alloy | echo | fable | nova | onyx | shimme
   example: 'Ask me about X', status: 'offline', color: 'from-X-400 to-Y-500' }
 ```
 
+#### Step 6.5 — Neon palette entry
+
+`apps/desktop/src/lib/agentPalette.ts` → `AGENT_PALETTE`:
+
+```typescript
+myagent: {
+  text:     'text-teal-400',
+  bg:       'bg-teal-400/10',
+  border:   'border-teal-400/25',
+  ring:     'ring-teal-400/30',
+  glowRgba: 'rgba(45,212,191,0.35)',
+  neonRgba: 'rgba(45,212,191,0.7)',
+},
+```
+
+This drives: neon color of the settings card, agent pill color in the main dashboard.
+
 #### Step 7 — Default per-agent browser voice
 
 `apps/desktop/src/hooks/useAgentVoiceConfig.ts` → `DEFAULT_AGENT_VOICES`:
@@ -242,23 +261,36 @@ AGENT_VOICES['myagent'] = 'nova'   # alloy | echo | fable | nova | onyx | shimme
 myagent: { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova' },
 ```
 
-#### Step 8 — Settings accordion + credentials
+#### Step 8 — Settings card + credentials
 
 If the agent has credentials, create `apps/desktop/src/components/settings/MyAgentSettings.tsx` and add `myagent` to `AgentConfig` in `useAgentConfig.ts`.
 
 Then in `apps/desktop/src/components/settings/AgentsSettings.tsx`:
 
 ```tsx
-<AgentAccordion
-  id="myagent" label="My Agent" emoji="🔧"
-  status={config.myagent.status} info={config.myagent.info}
-  open={openSection === 'myagent'} onToggle={() => toggle('myagent')}
-  enabled={config.myagent.enabled}
-  onToggleEnabled={() => onPatch('myagent', { enabled: !config.myagent.enabled })}
+// 1. Add to AGENT_META:
+myagent: { Icon: MyIcon, label: 'My Agent', tagline: 'What this agent does' },
+
+// 2. Add to the correct group constant:
+const ALWAYS_ON_IDS = [..., 'myagent'] as const;  // if always-on
+// OR
+const GATEWAY_IDS = [..., 'myagent'] as const;     // if gateway integration
+
+// 3. Add AgentSettingsCard (gateway agents only — credential form goes in children):
+<AgentSettingsCard
+  id="myagent"
+  name={AGENT_META['myagent'].label}
+  tagline={AGENT_META['myagent'].tagline}
+  icon={AGENT_META['myagent'].Icon}
+  status={getState('myagent', config).status}
+  info={getState('myagent', config).info}
+  enabled={getState('myagent', config).enabled}
+  onToggleEnabled={getToggle('myagent', config, onPatch)}
+  open={openId === 'myagent'}
+  onToggleOpen={() => toggle('myagent')}
 >
   <MyAgentSettings config={config.myagent} onPatch={(p) => onPatch('myagent', p)} onVerify={...} />
-  {voiceRow('myagent', 'My Agent')}
-</AgentAccordion>
+</AgentSettingsCard>
 ```
 
 ---
@@ -311,8 +343,9 @@ ai-desk-companion/
 │   │   │   │   HoloChat.tsx      — conversation history
 │   │   │   │   AgentBootList.tsx · AgentDetailModal.tsx
 │   │   │   │   SmartHomeDashboard.tsx · PortfolioDashboard.tsx
-│   │   │   │   └── settings/     Per-agent settings accordions
+│   │   │   │   └── settings/     Per-agent settings (AgentSettingsCard + HoloCard wrapper)
 │   │   │   ├── hooks/            React hooks (useOrchestratorRuntime, useVoiceLoop, …)
+│   │   │   ├── lib/              Client utilities (agentPalette.ts — neon color tokens)
 │   │   │   ├── types/            Shared TypeScript types (runtime.ts)
 │   │   │   └── App.tsx           Root component
 │   │   ├── src-tauri/            Tauri native wrapper (Rust)
@@ -323,8 +356,9 @@ ai-desk-companion/
 │   │   │   ├── agents/           Local agent implementations (websearch, calculator, memory, briefing, general_ai)
 │   │   │   ├── api/              FastAPI routes and WebSocket endpoint (ws.py)
 │   │   │   ├── core/             Config and settings (reads .env)
-│   │   │   ├── models/           Pydantic contracts
-│   │   │   └── services/         LLM, TTS, STT, routing, gateway client, session
+│   │   │   ├── models/           Pydantic contracts + AgentMessage inter-agent protocol
+│   │   │   └── services/         LLM, TTS, STT, routing, gateway client, session,
+│   │   │                         PhraseEngine, language detection, cache, notification scheduler
 │   │   ├── tests/                Pytest test suite
 │   │   │   ├── conftest.py       Shared fixtures
 │   │   │   ├── test_services/    Service-layer tests

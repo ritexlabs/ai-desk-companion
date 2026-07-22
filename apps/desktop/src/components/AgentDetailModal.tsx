@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, RotateCw, LayoutDashboard, Bell, BellOff, Loader2, AlertCircle, TrendingUp, TrendingDown } from 'lucide-react';
+import { X, RotateCw, LayoutDashboard, Bell, BellOff, Loader2, AlertCircle, TrendingUp, TrendingDown, Play, Camera } from 'lucide-react';
 import { WeatherPanel } from './WeatherWidget';
 import type { AgentDefinition } from '../types/runtime';
 import type { AgentConfig } from '../hooks/useAgentConfig';
@@ -38,8 +38,9 @@ const COLORS: Record<string, {
   news:      { text:'text-sky-300',     border:'border-sky-400/30',     bg:'bg-sky-400/8',     dot:'bg-sky-400',     glow:'rgba(56,189,248,.20)',  hex:'#38bdf8', rgb:'56,189,248'   },
   smarthome: { text:'text-orange-300',  border:'border-orange-400/30',  bg:'bg-orange-400/8',  dot:'bg-orange-400',  glow:'rgba(251,146,60,.20)',  hex:'#fb923c', rgb:'251,146,60'   },
   portfolio: { text:'text-teal-300',    border:'border-teal-400/30',    bg:'bg-teal-400/8',    dot:'bg-teal-400',    glow:'rgba(20,184,166,.20)',  hex:'#14b8a6', rgb:'20,184,166'   },
-  whatsapp:  { text:'text-emerald-300', border:'border-emerald-400/30', bg:'bg-emerald-400/8', dot:'bg-emerald-400', glow:'rgba(37,211,102,.20)',  hex:'#25d366', rgb:'37,211,102'   },
-  general:   { text:'text-violet-300',  border:'border-violet-400/30',  bg:'bg-violet-400/8',  dot:'bg-violet-400',  glow:'rgba(167,139,250,.20)', hex:'#a78bfa', rgb:'167,139,250'  },
+  whatsapp:    { text:'text-emerald-300', border:'border-emerald-400/30', bg:'bg-emerald-400/8', dot:'bg-emerald-400', glow:'rgba(37,211,102,.20)',  hex:'#25d366', rgb:'37,211,102'   },
+  socialmedia: { text:'text-purple-300',  border:'border-purple-400/30',  bg:'bg-purple-400/8',  dot:'bg-purple-400',  glow:'rgba(168,85,247,.20)',  hex:'#a855f7', rgb:'168,85,247'   },
+  general:     { text:'text-violet-300',  border:'border-violet-400/30',  bg:'bg-violet-400/8',  dot:'bg-violet-400',  glow:'rgba(167,139,250,.20)', hex:'#a78bfa', rgb:'167,139,250'  },
 };
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
@@ -337,6 +338,147 @@ function NewsPanel({ apiKey, country, c }: { apiKey: string; country: string; c:
   );
 }
 
+/* ─── Social Media panel ─────────────────────────────────── */
+interface SocialStat {
+  id:       string;
+  platform: 'youtube' | 'instagram';
+  label:    string;
+  subs?:    string;
+  views?:   string;
+  videos?:  string;
+  followers?: string;
+  posts?:   string;
+  error?:   string;
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000)     return `${(n / 1_000).toFixed(1)}K`;
+  return n.toString();
+}
+
+function SocialMediaPanel({ accounts, c }: {
+  accounts: import('../hooks/useAgentConfig').SocialAccount[];
+  c: typeof COLORS.socialmedia;
+}) {
+  const [stats, setStats]   = useState<SocialStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError]   = useState('');
+
+  const enabled = accounts.filter((a) => a.enabled && a.token && a.channelId);
+  // Fingerprint captures token/channelId changes, not just count changes
+  const accountFingerprint = enabled.map((a) => `${a.id}:${a.token}:${a.channelId}`).join('|');
+
+  useEffect(() => {
+    if (!enabled.length) {
+      setError('No social media accounts configured. Add accounts in Settings → Agents → Social Media.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    Promise.all(
+      enabled.map(async (acc): Promise<SocialStat> => {
+        try {
+          if (acc.platform === 'youtube') {
+            const r = await fetch(
+              `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(acc.channelId)}`,
+              { headers: { Authorization: `Bearer ${acc.token}` } },
+            );
+            const data = await r.json();
+            if (data.error) throw new Error(data.error.message ?? 'YouTube API error');
+            const item  = data.items?.[0];
+            if (!item) return { id: acc.id, platform: 'youtube', label: acc.label, error: 'Channel not found — verify Channel ID' };
+            const stats = item.statistics ?? {};
+            return {
+              id:       acc.id,
+              platform: 'youtube',
+              label:    acc.label,
+              subs:     fmtNum(parseInt(stats.subscriberCount ?? '0', 10)),
+              views:    fmtNum(parseInt(stats.viewCount        ?? '0', 10)),
+              videos:   stats.videoCount ?? '0',
+            };
+          } else {
+            const r = await fetch(
+              `https://graph.facebook.com/v21.0/${encodeURIComponent(acc.channelId)}?fields=name,followers_count,media_count&access_token=${encodeURIComponent(acc.token)}`,
+            );
+            const data = await r.json();
+            if (data.error) throw new Error(data.error.message ?? 'Instagram API error');
+            return {
+              id:        acc.id,
+              platform:  'instagram',
+              label:     acc.label,
+              followers: fmtNum(data.followers_count ?? 0),
+              posts:     (data.media_count ?? 0).toString(),
+            };
+          }
+        } catch (e: any) {
+          return { id: acc.id, platform: acc.platform, label: acc.label, error: e.message ?? 'Failed' };
+        }
+      }),
+    ).then((results) => {
+      setStats(results);
+      setLoading(false);
+    });
+  }, [accountFingerprint]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <PanelLoading />;
+  if (error)   return <PanelError msg={error} />;
+  if (!stats.length) return <p className="text-[10px] text-slate-600 py-4 text-center">No accounts to display.</p>;
+
+  return (
+    <div className="space-y-2">
+      {stats.map((s) => {
+        const isYT = s.platform === 'youtube';
+        const PlatformIcon = isYT ? Play : Camera;
+        const iconColor    = isYT ? 'text-red-400' : 'text-pink-400';
+        const borderClass  = isYT ? 'border-red-400/20' : 'border-pink-400/20';
+        const bgClass      = isYT ? 'bg-red-400/6'      : 'bg-pink-400/6';
+
+        return (
+          <div key={s.id} className={`rounded-xl border ${borderClass} ${bgClass} px-3 py-2.5`}>
+            <div className="flex items-center gap-2 mb-2">
+              <PlatformIcon className={`h-3.5 w-3.5 flex-shrink-0 ${iconColor}`} />
+              <span className="text-[12px] font-semibold text-white truncate flex-1">{s.label}</span>
+            </div>
+            {s.error ? (
+              <p className="text-[10px] text-red-400/70 leading-relaxed">{s.error}</p>
+            ) : isYT ? (
+              <div className="grid grid-cols-3 gap-2">
+                <div className="text-center">
+                  <div className="text-[14px] font-bold text-white tabular-nums">{s.subs}</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">Subscribers</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[14px] font-bold text-white tabular-nums">{s.views}</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">Total Views</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[14px] font-bold text-white tabular-nums">{s.videos}</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">Videos</div>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="text-center">
+                  <div className="text-[14px] font-bold text-white tabular-nums">{s.followers}</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">Followers</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[14px] font-bold text-white tabular-nums">{s.posts}</div>
+                  <div className="text-[9px] text-slate-500 mt-0.5">Posts</div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Section label ──────────────────────────────────────── */
 function SectionLabel({ label, borderClass }: { label: string; borderClass: string }) {
   return (
@@ -550,6 +692,13 @@ export function AgentDetailModal({
                 borderClass={c.border}
                 bgClass={c.bg}
               />
+            </div>
+          )}
+
+          {agent.id === 'socialmedia' && (
+            <div>
+              <SectionLabel label="Channel & Account Stats" borderClass={c.border} />
+              <SocialMediaPanel accounts={agentConfig.socialmedia.accounts} c={c} />
             </div>
           )}
         </div>

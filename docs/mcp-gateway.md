@@ -129,6 +129,8 @@ Each tool reads from `settings` directly — credentials are **never forwarded p
 
 The orchestrator sends only a shared `GATEWAY_API_TOKEN` Bearer token — not individual integration credentials.
 
+**Response caching:** The orchestrator's `AgentResponseCache` (in `apps/orchestrator/app/services/cache.py`) caches recent tool results per agent. If a result was fetched within the cache TTL, the gateway is not called again for that agent. This reduces unnecessary load on both the gateway and external APIs during repeated queries within the same session.
+
 ---
 
 ## BaseTool ABC — adding a new tool

@@ -386,3 +386,214 @@ export async function verifyNews(
     patch('news', { status: 'error', info: e.message ?? 'Connection failed' });
   }
 }
+
+/* ── YouTube OAuth (PKCE) ────────────────────────────────────────── */
+
+export interface YouTubeDiscovery {
+  googleEmail:    string;
+  accessToken:    string;
+  refreshToken:   string;
+  tokenExpiresAt: number;
+  channels:       Array<{ channelId: string; label: string }>;
+}
+
+/**
+ * Opens a Google OAuth popup, completes PKCE flow, discovers all YouTube
+ * channels on the signed-in account, and resolves with the raw discovery
+ * data. The caller decides which channels to add — nothing is patched into
+ * the accounts list here.
+ */
+export function connectYouTubeAccount(
+  socialmedia: AgentConfig['socialmedia'],
+  patch: Patcher,
+  loginHint?: string,
+): Promise<YouTubeDiscovery | null> {
+  return new Promise(async (resolve) => {
+    const { youtubeClientId, youtubeClientSecret } = socialmedia;
+    if (!youtubeClientId) { resolve(null); return; }
+
+    const codeVerifier  = randomBase64url(32);
+    const codeChallenge = await sha256Base64url(codeVerifier);
+    const redirectUri   = window.location.origin + '/';
+
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id',             youtubeClientId);
+    url.searchParams.set('redirect_uri',          redirectUri);
+    url.searchParams.set('response_type',         'code');
+    url.searchParams.set('scope',                 'https://www.googleapis.com/auth/youtube.readonly email profile');
+    url.searchParams.set('code_challenge',        codeChallenge);
+    url.searchParams.set('code_challenge_method', 'S256');
+    url.searchParams.set('access_type',           'offline');
+    // prompt=login forces Google to show a fresh sign-in form so the user can type
+    // any email address — this bypasses the current Chrome profile's account picker
+    // and allows connecting accounts from other profiles or brand-new accounts.
+    url.searchParams.set('prompt',                'login consent');
+    if (loginHint) url.searchParams.set('login_hint', loginHint);
+
+    const popup = window.open(url.toString(), 'youtube-oauth', 'width=520,height=640,left=200,top=100');
+    patch('socialmedia', { status: 'verifying', info: 'Waiting for Google sign-in…' });
+
+    const poll = setInterval(async () => {
+      try {
+        if (!popup || popup.closed) {
+          clearInterval(poll);
+          patch('socialmedia', { status: 'idle', info: '' });
+          resolve(null);
+          return;
+        }
+        const code = new URLSearchParams(popup.location.search).get('code');
+        if (!code) return;
+        clearInterval(poll);
+        popup.close();
+
+        // Exchange code for tokens
+        const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id:     youtubeClientId,
+            ...(youtubeClientSecret ? { client_secret: youtubeClientSecret } : {}),
+            code,
+            code_verifier: codeVerifier,
+            grant_type:    'authorization_code',
+            redirect_uri:  redirectUri,
+          }),
+        });
+        const tokens = await tokenRes.json();
+        if (!tokenRes.ok) {
+          patch('socialmedia', { status: 'error', info: tokens.error_description ?? 'Token exchange failed' });
+          resolve(null);
+          return;
+        }
+
+        const tokenExpiresAt = Date.now() + (tokens.expires_in ?? 3599) * 1000;
+
+        // Resolve Google account email
+        const userRes = await fetch('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', {
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+        });
+        const user        = userRes.ok ? await userRes.json() : {};
+        const googleEmail = user.email ?? '';
+
+        // Discover all channels on this account
+        const chRes = await fetch(
+          'https://www.googleapis.com/youtube/v3/channels?part=snippet,contentDetails&mine=true&maxResults=50',
+          { headers: { Authorization: `Bearer ${tokens.access_token}` } },
+        );
+        const chData   = chRes.ok ? await chRes.json() : { items: [] };
+        const items    = chData.items ?? [];
+
+        patch('socialmedia', { status: 'idle', info: '' });
+
+        // Resolve with whatever channels were found (may be empty — UI handles empty state)
+        resolve({
+          googleEmail,
+          accessToken:    tokens.access_token  ?? '',
+          refreshToken:   tokens.refresh_token ?? '',
+          tokenExpiresAt,
+          channels: items.map((ch: any) => ({
+            channelId: ch.id ?? '',
+            label:     ch.snippet?.title ?? 'My Channel',
+          })),
+        });
+      } catch {
+        // cross-origin while popup is still on accounts.google.com — keep polling
+      }
+    }, 400);
+  });
+}
+
+/* ── YouTube OAuth token refresh ─────────────────────────────────── */
+
+export async function refreshYouTubeAccounts(
+  socialmedia: AgentConfig['socialmedia'],
+  patch: Patcher,
+) {
+  const { youtubeClientId, youtubeClientSecret } = socialmedia;
+  if (!youtubeClientId) return;
+
+  const now       = Date.now();
+  let   changed   = false;
+  const updated   = socialmedia.accounts.map((acc) => ({ ...acc }));
+
+  for (let i = 0; i < updated.length; i++) {
+    const acc = updated[i];
+    if (acc.platform !== 'youtube' || !acc.refreshToken) continue;
+    if (acc.tokenExpiresAt > now + 5 * 60 * 1000) continue;   // not expiring yet
+
+    try {
+      const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          client_id:     youtubeClientId,
+          ...(youtubeClientSecret ? { client_secret: youtubeClientSecret } : {}),
+          refresh_token: acc.refreshToken,
+          grant_type:    'refresh_token',
+        }),
+      });
+      const tokens = await res.json();
+      if (!res.ok) continue;
+      updated[i] = {
+        ...acc,
+        token:          tokens.access_token ?? acc.token,
+        tokenExpiresAt: Date.now() + (tokens.expires_in ?? 3599) * 1000,
+      };
+      changed = true;
+    } catch {
+      // silent — token refresh failure handled at next poll
+    }
+  }
+
+  if (changed) patch('socialmedia', { accounts: updated });
+}
+
+/* ── Social Media ────────────────────────────────────────────────── */
+
+export async function verifySocialMedia(
+  socialmedia: AgentConfig['socialmedia'],
+  patch: Patcher,
+) {
+  const accounts = socialmedia.accounts.filter((a) => a.enabled && a.token && a.channelId);
+  if (!accounts.length) return;
+
+  patch('socialmedia', { status: 'verifying', info: '' });
+
+  const ok:   string[] = [];
+  const fail: string[] = [];
+
+  await Promise.all(
+    accounts.map(async (acc) => {
+      try {
+        if (acc.platform === 'youtube') {
+          const r = await fetch(
+            `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(acc.channelId)}`,
+            { headers: { Authorization: `Bearer ${acc.token}` } },
+          );
+          const data = await r.json();
+          if (data.error) throw new Error(data.error.message ?? 'YouTube API error');
+          if (!data.items?.length) throw new Error('Channel not found — reconnect via OAuth');
+          const subs = parseInt(data.items[0].statistics?.subscriberCount ?? '0', 10);
+          ok.push(`${acc.label} (${subs.toLocaleString()} subs)`);
+        } else {
+          const r = await fetch(
+            `https://graph.facebook.com/v21.0/${encodeURIComponent(acc.channelId)}?fields=name,followers_count&access_token=${encodeURIComponent(acc.token)}`,
+          );
+          const data = await r.json();
+          if (data.error) throw new Error(data.error.message ?? 'Instagram API error');
+          const followers = parseInt(data.followers_count ?? '0', 10);
+          ok.push(`${acc.label} (${followers.toLocaleString()} followers)`);
+        }
+      } catch (e: any) {
+        fail.push(`${acc.label}: ${e.message ?? 'failed'}`);
+      }
+    }),
+  );
+
+  if (ok.length > 0) {
+    const info = ok.join(' · ') + (fail.length ? ` | ⚠ ${fail.join(', ')}` : '');
+    patch('socialmedia', { status: 'connected', info });
+  } else {
+    patch('socialmedia', { status: 'error', info: fail.join(' · ') || 'All accounts failed' });
+  }
+}

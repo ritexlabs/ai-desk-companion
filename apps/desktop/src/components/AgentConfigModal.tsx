@@ -4,7 +4,7 @@ import {
   Bot, Brain, Calculator, ChevronRight,
   Cloud, GitBranch, Globe, Globe2, Home, Layers,
   Loader2, Lock, MessageCircle, Monitor, Newspaper,
-  PieChart, RefreshCw, Sparkles, TrendingUp, X, Zap,
+  PieChart, RefreshCw, Sparkles, TrendingUp, Tv, X, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AgentConfig, ConnectionStatus } from '../hooks/useAgentConfig';
@@ -19,8 +19,10 @@ import { StockSettings }     from './settings/StockSettings';
 import { NewsSettings }      from './settings/NewsSettings';
 import { SmartHomeSettings } from './settings/SmartHomeSettings';
 import { PortfolioSettings } from './settings/PortfolioSettings';
-import { WhatsappSettings }  from './settings/WhatsappSettings';
-import { SystemSettings }    from './settings/SystemSettings';
+import { WhatsappSettings }    from './settings/WhatsappSettings';
+import { SystemSettings }      from './settings/SystemSettings';
+import { SocialMediaSettings } from './settings/SocialMediaSettings';
+import type { YouTubeDiscovery } from '../hooks/agentVerify';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,15 +46,16 @@ const META: Record<string, AgentMeta> = {
   news:       { Icon: Newspaper,     color: '#38bdf8', iconBg: 'rgba(56,189,248,0.1)',   iconRing: 'rgba(56,189,248,0.25)',  label: 'News',         tagline: 'Headlines from 50+ countries',           category: 'service' },
   smarthome:  { Icon: Home,          color: '#fb923c', iconBg: 'rgba(251,146,60,0.1)',   iconRing: 'rgba(251,146,60,0.25)',  label: 'Smart Home',   tagline: 'Lights · climate · scenes',              category: 'service' },
   portfolio:  { Icon: PieChart,      color: '#fb7185', iconBg: 'rgba(251,113,133,0.1)',  iconRing: 'rgba(251,113,133,0.25)', label: 'Portfolio',    tagline: 'Holdings · P&L · mutual funds',          category: 'service' },
-  whatsapp:   { Icon: MessageCircle, color: '#34d399', iconBg: 'rgba(52,211,153,0.1)',   iconRing: 'rgba(52,211,153,0.25)',  label: 'WhatsApp',     tagline: 'Send & receive messages by voice',       category: 'service' },
-  websearch:  { Icon: Globe,         color: '#818cf8', iconBg: 'rgba(129,140,248,0.1)',  iconRing: 'rgba(129,140,248,0.25)', label: 'Web Search',   tagline: 'Live web · DuckDuckGo · no API key',     category: 'skill'   },
+  whatsapp:    { Icon: MessageCircle, color: '#34d399', iconBg: 'rgba(52,211,153,0.1)',   iconRing: 'rgba(52,211,153,0.25)',  label: 'WhatsApp',    tagline: 'Send & receive messages by voice',          category: 'service' },
+  socialmedia: { Icon: Tv,           color: '#a855f7', iconBg: 'rgba(168,85,247,0.1)',   iconRing: 'rgba(168,85,247,0.25)', label: 'Social Media', tagline: 'YouTube channels · Instagram accounts',    category: 'service' },
+  websearch:   { Icon: Globe,        color: '#818cf8', iconBg: 'rgba(129,140,248,0.1)',  iconRing: 'rgba(129,140,248,0.25)', label: 'Web Search',  tagline: 'Live web · DuckDuckGo · no API key',       category: 'skill'   },
   calculator: { Icon: Calculator,    color: '#fde68a', iconBg: 'rgba(253,230,138,0.08)', iconRing: 'rgba(253,230,138,0.2)',  label: 'Calculator',   tagline: 'Precise math · percentages · conversions',category: 'skill'  },
   memory:     { Icon: Brain,         color: '#c084fc', iconBg: 'rgba(192,132,252,0.1)',  iconRing: 'rgba(192,132,252,0.25)', label: 'Memory',       tagline: 'Save & recall personal notes',           category: 'skill'   },
   briefing:   { Icon: Layers,        color: '#67e8f9', iconBg: 'rgba(103,232,249,0.08)', iconRing: 'rgba(103,232,249,0.2)',  label: 'Briefing',     tagline: 'Morning summary across all agents',      category: 'skill'   },
   general:    { Icon: Bot,           color: '#a78bfa', iconBg: 'rgba(167,139,250,0.1)',  iconRing: 'rgba(167,139,250,0.25)', label: 'General AI',   tagline: 'Open-ended knowledge & writing',         category: 'ai'      },
 };
 
-const SERVICES = ['system','weather','google','github','stock','news','smarthome','portfolio','whatsapp'] as const;
+const SERVICES = ['system','weather','google','github','stock','news','smarthome','portfolio','whatsapp','socialmedia'] as const;
 const SKILLS   = ['websearch','calculator','memory','briefing'] as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -67,8 +70,9 @@ function getState(id: string, cfg: AgentConfig): { status: ConnectionStatus; ena
     case 'news':      return { status: cfg.news.status,      enabled: cfg.news.enabled,      info: cfg.news.info };
     case 'smarthome': return { status: cfg.smarthome.status, enabled: cfg.smarthome.enabled, info: cfg.smarthome.info };
     case 'portfolio': return { status: cfg.portfolio.status, enabled: cfg.portfolio.enabled, info: cfg.portfolio.info };
-    case 'whatsapp':  return { status: cfg.whatsapp.status,  enabled: cfg.whatsapp.enabled,  info: cfg.whatsapp.info };
-    default:          return { status: 'connected', enabled: true, info: '' };
+    case 'whatsapp':    return { status: cfg.whatsapp.status,    enabled: cfg.whatsapp.enabled,    info: cfg.whatsapp.info };
+    case 'socialmedia': return { status: cfg.socialmedia.status, enabled: cfg.socialmedia.enabled, info: cfg.socialmedia.info };
+    default:            return { status: 'connected', enabled: true, info: '' };
   }
 }
 
@@ -81,8 +85,9 @@ function getToggle(id: string, cfg: AgentConfig, onPatch: Props['onPatch']) {
     case 'news':      return () => onPatch('news',      { enabled: !cfg.news.enabled });
     case 'smarthome': return () => onPatch('smarthome', { enabled: !cfg.smarthome.enabled });
     case 'portfolio': return () => onPatch('portfolio', { enabled: !cfg.portfolio.enabled });
-    case 'whatsapp':  return () => onPatch('whatsapp',  { enabled: !cfg.whatsapp.enabled });
-    default:          return undefined;
+    case 'whatsapp':    return () => onPatch('whatsapp',    { enabled: !cfg.whatsapp.enabled });
+    case 'socialmedia': return () => onPatch('socialmedia', { enabled: !cfg.socialmedia.enabled });
+    default:            return undefined;
   }
 }
 
@@ -171,11 +176,11 @@ function SkillCard({ Icon, color, iconBg, title, badge, children }: {
 function AgentForm({ id, cfg, onPatch, onVerifyWeather, onConnectGoogle, onDisconnectGoogle,
   onVerifyGitHub, onDisconnectGitHub, onVerifyNews, onVerifySmartHome,
   onConnectPortfolio, onDisconnectPortfolio, onRefreshPortfolio,
-  onVerifyWhatsApp, onCheckTunnel, onStartTunnel, onStopTunnel,
+  onVerifyWhatsApp, onVerifySocialMedia, onConnectYoutube, onCheckTunnel, onStartTunnel, onStopTunnel,
 }: Pick<Props, 'cfg' | 'onPatch' | 'onVerifyWeather' | 'onConnectGoogle' | 'onDisconnectGoogle'
   | 'onVerifyGitHub' | 'onDisconnectGitHub' | 'onVerifyNews' | 'onVerifySmartHome'
   | 'onConnectPortfolio' | 'onDisconnectPortfolio' | 'onRefreshPortfolio'
-  | 'onVerifyWhatsApp' | 'onCheckTunnel' | 'onStartTunnel' | 'onStopTunnel'> & { id: string }) {
+  | 'onVerifyWhatsApp' | 'onVerifySocialMedia' | 'onConnectYoutube' | 'onCheckTunnel' | 'onStartTunnel' | 'onStopTunnel'> & { id: string }) {
   const m = META[id];
   switch (id) {
     case 'system':    return <SystemSettings />;
@@ -186,7 +191,8 @@ function AgentForm({ id, cfg, onPatch, onVerifyWeather, onConnectGoogle, onDisco
     case 'news':      return <NewsSettings config={cfg.news} onPatch={p => onPatch('news', p)} onVerify={onVerifyNews} />;
     case 'smarthome': return <SmartHomeSettings config={cfg.smarthome} onPatch={p => onPatch('smarthome', p)} onVerify={onVerifySmartHome} />;
     case 'portfolio': return <PortfolioSettings config={cfg.portfolio} onPatch={p => onPatch('portfolio', p)} onConnect={onConnectPortfolio} onDisconnect={onDisconnectPortfolio} onRefresh={onRefreshPortfolio} />;
-    case 'whatsapp':  return <WhatsappSettings config={cfg.whatsapp} onPatch={p => onPatch('whatsapp', p)} onVerify={onVerifyWhatsApp} onCheckTunnel={onCheckTunnel} onStartTunnel={onStartTunnel} onStopTunnel={onStopTunnel} />;
+    case 'whatsapp':    return <WhatsappSettings config={cfg.whatsapp} onPatch={p => onPatch('whatsapp', p)} onVerify={onVerifyWhatsApp} onCheckTunnel={onCheckTunnel} onStartTunnel={onStartTunnel} onStopTunnel={onStopTunnel} />;
+    case 'socialmedia': return <SocialMediaSettings config={cfg.socialmedia} onPatch={p => onPatch('socialmedia', p)} onVerify={onVerifySocialMedia} onConnectYoutube={onConnectYoutube} />;
     case 'websearch':
       return (
         <SkillCard Icon={Globe} color={m.color} iconBg={m.iconBg} title="Web Search" badge="Always Active">
@@ -390,6 +396,8 @@ interface Props {
   onDisconnectPortfolio: () => void;
   onRefreshPortfolio:    () => void;
   onVerifyWhatsApp:      () => void;
+  onVerifySocialMedia:   () => void;
+  onConnectYoutube:      (loginHint?: string) => Promise<YouTubeDiscovery | null>;
   onCheckTunnel:         () => Promise<boolean>;
   onStartTunnel:         () => void;
   onStopTunnel:          () => void;
@@ -524,6 +532,8 @@ export function AgentConfigModal(props: Props) {
                 onDisconnectPortfolio={props.onDisconnectPortfolio}
                 onRefreshPortfolio={props.onRefreshPortfolio}
                 onVerifyWhatsApp={props.onVerifyWhatsApp}
+                onVerifySocialMedia={props.onVerifySocialMedia}
+                onConnectYoutube={props.onConnectYoutube}
                 onCheckTunnel={props.onCheckTunnel}
                 onStartTunnel={props.onStartTunnel}
                 onStopTunnel={props.onStopTunnel}

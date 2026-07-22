@@ -23,6 +23,9 @@ import {
   verifyNews,
   connectPortfolio,
   refreshPortfolioToken,
+  verifySocialMedia,
+  connectYouTubeAccount,
+  refreshYouTubeAccounts,
 } from './agentVerify';
 
 export type ConnectionStatus = 'idle' | 'verifying' | 'connected' | 'error';
@@ -43,6 +46,7 @@ export interface WeatherCreds {
   defaultCity: string;
   status: ConnectionStatus;
   info: string;
+  notificationsEnabled: boolean;
 }
 
 export interface GoogleCreds {
@@ -59,6 +63,7 @@ export interface GoogleCreds {
   status: ConnectionStatus;
   info: string;
   emailNotificationsEnabled: boolean;
+  calendarNotificationsEnabled: boolean;
 }
 
 export interface GitHubCreds {
@@ -67,6 +72,7 @@ export interface GitHubCreds {
   username: string;
   status: ConnectionStatus;
   info: string;
+  notificationsEnabled: boolean;
 }
 
 export interface StockCreds {
@@ -76,6 +82,7 @@ export interface StockCreds {
   spreadsheetName: string;
   status: ConnectionStatus;
   info: string;
+  notificationsEnabled: boolean;
 }
 
 export interface NewsCreds {
@@ -100,49 +107,82 @@ export interface SmartHomeCreds {
 }
 
 export interface PortfolioCreds {
-  enabled:          boolean;
-  endpoint:         string;
-  clientId:         string;
-  clientSecret:     string;
+  enabled:              boolean;
+  endpoint:             string;
+  clientId:             string;
+  clientSecret:         string;
   /** Manual override — skip auto-discovery when set */
-  authEndpoint:     string;
-  tokenEndpoint:    string;
-  accessToken:      string;
-  refreshToken:     string;
-  tokenExpiresAt:   number;
-  connectedAccount: string;
-  status:           ConnectionStatus;
-  info:             string;
+  authEndpoint:         string;
+  tokenEndpoint:        string;
+  accessToken:          string;
+  refreshToken:         string;
+  tokenExpiresAt:       number;
+  connectedAccount:     string;
+  status:               ConnectionStatus;
+  info:                 string;
+  notificationsEnabled: boolean;
 }
 
 export interface WhatsAppCreds {
-  enabled:            boolean;
-  phoneNumberId:      string;
-  accessToken:        string;
-  webhookVerifyToken: string;
-  contacts:           string;
-  status:             ConnectionStatus;
-  info:               string;
-  tunnelProvider: TunnelProvider;
-  customDomain:   string;
+  enabled:              boolean;
+  phoneNumberId:        string;
+  accessToken:          string;
+  webhookVerifyToken:   string;
+  contacts:             string;
+  status:               ConnectionStatus;
+  info:                 string;
+  tunnelProvider:       TunnelProvider;
+  customDomain:         string;
   /** Runtime-only — not persisted */
-  tunnelStatus:   TunnelStatus;
-  tunnelInfo:     string;
-  callbackUrl:    string;
+  tunnelStatus:         TunnelStatus;
+  tunnelInfo:           string;
+  callbackUrl:          string;
   /** Domain pre-configured in server .env (CLOUDFLARE_DOMAIN) — read-only */
-  envDomain:      string;
+  envDomain:            string;
+  notificationsEnabled: boolean;
+}
+
+export interface SocialAccount {
+  id:                   string;
+  platform:             'youtube' | 'instagram';
+  label:                string;
+  token:                string;     // YouTube: OAuth access token; Instagram: long-lived token
+  channelId:            string;
+  enabled:              boolean;
+  notificationsEnabled: boolean;
+  // YouTube OAuth only — empty/zero for Instagram
+  refreshToken:         string;
+  tokenExpiresAt:       number;
+  googleEmail:          string;     // which Google account owns this channel
+}
+
+export interface SocialMediaCreds {
+  accounts:             SocialAccount[];
+  enabled:              boolean;
+  status:               ConnectionStatus;
+  info:                 string;
+  notificationsEnabled: boolean;
+  // Shared Google OAuth app credentials for YouTube connections
+  youtubeClientId:      string;
+  youtubeClientSecret:  string;
+}
+
+export interface NotesCreds {
+  notificationsEnabled: boolean;
 }
 
 export interface AgentConfig {
-  system:     SystemConfig;
-  weather:    WeatherCreds;
-  google:     GoogleCreds;
-  github:     GitHubCreds;
-  stock:      StockCreds;
-  news:       NewsCreds;
-  smarthome:  SmartHomeCreds;
-  portfolio:  PortfolioCreds;
-  whatsapp:   WhatsAppCreds;
+  system:       SystemConfig;
+  weather:      WeatherCreds;
+  google:       GoogleCreds;
+  github:       GitHubCreds;
+  stock:        StockCreds;
+  news:         NewsCreds;
+  smarthome:    SmartHomeCreds;
+  portfolio:    PortfolioCreds;
+  whatsapp:     WhatsAppCreds;
+  socialmedia:  SocialMediaCreds;
+  notes:        NotesCreds;
 }
 
 /* ── Defaults — NO real tokens here ─────────────────────────────── */
@@ -168,6 +208,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     defaultCity: '',
     status: 'idle',
     info: '',
+    notificationsEnabled: false,
   },
   google: {
     calendarEnabled: false,
@@ -183,6 +224,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     status: 'idle',
     info: '',
     emailNotificationsEnabled: false,
+    calendarNotificationsEnabled: false,
   },
   github: {
     enabled: false,
@@ -190,6 +232,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     username: '',
     status: 'idle',
     info: '',
+    notificationsEnabled: false,
   },
   stock: {
     enabled: false,
@@ -198,6 +241,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     spreadsheetName: '',
     status: 'connected',
     info: 'Yahoo Finance (free, no key required)',
+    notificationsEnabled: false,
   },
   news: {
     enabled: false,
@@ -210,33 +254,47 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     notificationsEnabled: false,
   },
   portfolio: {
-    enabled:          false,
-    endpoint:         'https://mcp.indmoney.com/mcp',
-    clientId:         '',
-    clientSecret:     '',
-    authEndpoint:     '',
-    tokenEndpoint:    '',
-    accessToken:      '',
-    refreshToken:     '',
-    tokenExpiresAt:   0,
-    connectedAccount: '',
-    status:           'idle',
-    info:             '',
+    enabled:              false,
+    endpoint:             'https://mcp.indmoney.com/mcp',
+    clientId:             '',
+    clientSecret:         '',
+    authEndpoint:         '',
+    tokenEndpoint:        '',
+    accessToken:          '',
+    refreshToken:         '',
+    tokenExpiresAt:       0,
+    connectedAccount:     '',
+    status:               'idle',
+    info:                 '',
+    notificationsEnabled: false,
   },
   whatsapp: {
-    enabled:            false,
-    phoneNumberId:      '',
-    accessToken:        '',
-    webhookVerifyToken: 'robo-whatsapp-verify',
-    contacts:           '',
-    status:             'idle',
-    info:               '',
-    tunnelProvider: 'none',
-    customDomain:   '',
-    tunnelStatus:   'idle',
-    tunnelInfo:     '',
-    callbackUrl:    '',
-    envDomain:      '',
+    enabled:              false,
+    phoneNumberId:        '',
+    accessToken:          '',
+    webhookVerifyToken:   'robo-whatsapp-verify',
+    contacts:             '',
+    status:               'idle',
+    info:                 '',
+    tunnelProvider:       'none',
+    customDomain:         '',
+    tunnelStatus:         'idle',
+    tunnelInfo:           '',
+    callbackUrl:          '',
+    envDomain:            '',
+    notificationsEnabled: false,
+  },
+  socialmedia: {
+    accounts:             [],
+    enabled:              false,
+    status:               'idle',
+    info:                 '',
+    notificationsEnabled: true,
+    youtubeClientId:      '',
+    youtubeClientSecret:  '',
+  },
+  notes: {
+    notificationsEnabled: true,
   },
 };
 
@@ -244,14 +302,16 @@ const STORAGE_KEY = 'robo-agent-config';
 
 function toPersist(cfg: AgentConfig): AgentConfig {
   return {
-    system:    { ...cfg.system },
-    weather:   { ...cfg.weather,   status: 'idle', info: '' },
-    google:    { ...cfg.google,    status: 'idle', info: '' },
-    github:    { ...cfg.github,    status: 'idle', info: '' },
-    stock:     { ...cfg.stock,     status: 'idle', info: '' },
-    news:      { ...cfg.news,      status: 'idle', info: '' },
-    smarthome: { ...cfg.smarthome, status: 'idle', info: '' },
-    portfolio: { ...cfg.portfolio, status: 'idle', info: '', tokenExpiresAt: cfg.portfolio.tokenExpiresAt },
+    system:      { ...cfg.system },
+    weather:     { ...cfg.weather,      status: 'idle', info: '' },
+    google:      { ...cfg.google,       status: 'idle', info: '' },
+    github:      { ...cfg.github,       status: 'idle', info: '' },
+    stock:       { ...cfg.stock,        status: 'idle', info: '' },
+    news:        { ...cfg.news,         status: 'idle', info: '' },
+    smarthome:   { ...cfg.smarthome,    status: 'idle', info: '' },
+    portfolio:   { ...cfg.portfolio,    status: 'idle', info: '', tokenExpiresAt: cfg.portfolio.tokenExpiresAt },
+    socialmedia: { ...cfg.socialmedia,  status: 'idle', info: '' },
+    notes:       { ...cfg.notes },
     whatsapp:  {
       ...cfg.whatsapp,
       status:       'idle',
@@ -270,14 +330,16 @@ function load(): AgentConfig {
     if (!raw) return DEFAULT_AGENT_CONFIG;
     const parsed = JSON.parse(raw) as Partial<AgentConfig>;
     const cfg: AgentConfig = {
-      system:    { ...DEFAULT_AGENT_CONFIG.system,    ...parsed.system    },
-      weather:   { ...DEFAULT_AGENT_CONFIG.weather,   ...parsed.weather   },
-      google:    { ...DEFAULT_AGENT_CONFIG.google,    ...parsed.google    },
-      github:    { ...DEFAULT_AGENT_CONFIG.github,    ...parsed.github    },
-      stock:     { ...DEFAULT_AGENT_CONFIG.stock,     ...parsed.stock     },
-      news:      { ...DEFAULT_AGENT_CONFIG.news,      ...parsed.news      },
-      smarthome: { ...DEFAULT_AGENT_CONFIG.smarthome, ...parsed.smarthome },
-      portfolio: { ...DEFAULT_AGENT_CONFIG.portfolio, ...parsed.portfolio },
+      system:      { ...DEFAULT_AGENT_CONFIG.system,      ...parsed.system      },
+      weather:     { ...DEFAULT_AGENT_CONFIG.weather,     ...parsed.weather     },
+      google:      { ...DEFAULT_AGENT_CONFIG.google,      ...parsed.google      },
+      github:      { ...DEFAULT_AGENT_CONFIG.github,      ...parsed.github      },
+      stock:       { ...DEFAULT_AGENT_CONFIG.stock,       ...parsed.stock       },
+      news:        { ...DEFAULT_AGENT_CONFIG.news,        ...parsed.news        },
+      smarthome:   { ...DEFAULT_AGENT_CONFIG.smarthome,   ...parsed.smarthome   },
+      portfolio:   { ...DEFAULT_AGENT_CONFIG.portfolio,   ...parsed.portfolio   },
+      socialmedia: { ...DEFAULT_AGENT_CONFIG.socialmedia, ...parsed.socialmedia },
+      notes:       { ...DEFAULT_AGENT_CONFIG.notes,       ...parsed.notes       },
       whatsapp: {
         ...DEFAULT_AGENT_CONFIG.whatsapp,
         ...(parsed as any).whatsapp,
@@ -300,6 +362,7 @@ function load(): AgentConfig {
     if (cfg.smarthome.token)              cfg.smarthome.status = 'connected';
     if (cfg.portfolio.connectedAccount)   cfg.portfolio.status = 'connected';
     if (cfg.whatsapp.phoneNumberId)  cfg.whatsapp.status  = 'connected';
+    if (cfg.socialmedia.accounts.some((a) => a.enabled)) cfg.socialmedia.status = 'connected';
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
     return cfg;
@@ -349,11 +412,26 @@ export function useAgentConfig() {
     return () => clearInterval(id);
   }, [patch]); // patch is stable
 
+  // Refresh YouTube OAuth tokens before they expire (1-hour lifetime)
+  useEffect(() => {
+    const tryRefreshYouTube = () => {
+      const sm = configRef.current.socialmedia;
+      const needsRefresh = sm.accounts.some(
+        (a) => a.platform === 'youtube' && a.refreshToken &&
+               (!a.token || (a.tokenExpiresAt > 0 && Date.now() >= a.tokenExpiresAt - 5 * 60 * 1000)),
+      );
+      if (needsRefresh) refreshYouTubeAccounts(sm, patch);
+    };
+    tryRefreshYouTube();
+    const id = setInterval(tryRefreshYouTube, 50 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [patch]);
+
   const registeredAgentIds = useMemo<string[]>(() => {
     const ids: string[] = ['notes']; // always-on built-in skill, no credentials required
     if (config.system.enabled)  ids.push('system');
     if (config.weather.enabled) ids.push('weather');
-    if (config.google.connectedEmail && config.google.accessToken) {
+    if (config.google.connectedEmail) {
       if (config.google.calendarEnabled && config.google.scopes.includes('calendar')) ids.push('calendar');
       if (config.google.emailEnabled    && config.google.scopes.includes('gmail'))    ids.push('email');
     }
@@ -363,11 +441,12 @@ export function useAgentConfig() {
     if (config.smarthome.enabled && config.smarthome.token)            ids.push('smarthome');
     if (config.portfolio.enabled && config.portfolio.connectedAccount) ids.push('portfolio');
     if (config.whatsapp.enabled && config.whatsapp.phoneNumberId) ids.push('whatsapp');
+    if (config.socialmedia.enabled && config.socialmedia.accounts.some((a) => a.enabled)) ids.push('socialmedia');
     return ids;
   }, [
     config.system.enabled,
     config.weather.enabled,
-    config.google.connectedEmail, config.google.accessToken,
+    config.google.connectedEmail,
     config.google.calendarEnabled, config.google.emailEnabled, config.google.scopes,
     config.github.enabled,        config.github.username,
     config.stock.enabled,
@@ -375,6 +454,7 @@ export function useAgentConfig() {
     config.smarthome.enabled, config.smarthome.token,
     config.portfolio.enabled, config.portfolio.connectedAccount,
     config.whatsapp.enabled,  config.whatsapp.phoneNumberId,
+    config.socialmedia.enabled, config.socialmedia.accounts,
   ]);
 
   const disconnectGoogle = useCallback(() => {
@@ -497,6 +577,8 @@ export function useAgentConfig() {
     disconnectPortfolio,
     refreshPortfolioToken:  () => refreshPortfolioToken(config.portfolio, patch),
     verifyWhatsApp,
+    verifySocialMedia:      () => verifySocialMedia(config.socialmedia, patch),
+    connectYouTube:         (loginHint?: string) => connectYouTubeAccount(config.socialmedia, patch, loginHint),
     checkTunnelStatus,
     startTunnel,
     stopTunnel,

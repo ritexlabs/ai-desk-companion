@@ -156,6 +156,19 @@ class GatewayClient:
         except Exception:
             return False
 
+    async def update_socialmedia_session(self, accounts_json: str) -> bool:
+        """Push per-session social media accounts to the gateway (in-memory only)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/socialmedia',
+                    json={'accounts': accounts_json},
+                    headers=self._headers(),
+                )
+                return r.is_success and r.json().get('configured', False)
+        except Exception:
+            return False
+
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.post(

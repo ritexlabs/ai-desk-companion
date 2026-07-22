@@ -26,3 +26,15 @@ export type TranscriptTurn = {
   timestamp: string;
   agentId?: string;
 };
+
+export type NotificationSeverity = 'info' | 'warning' | 'critical';
+
+export type AgentNotification = {
+  id:           string;
+  conditionKey: string;   // dedup key, e.g. "battery_low", "new_email"
+  agentId:      string;
+  agentLabel:   string;
+  message:      string;
+  severity:     NotificationSeverity;
+  timestamp:    number;
+};

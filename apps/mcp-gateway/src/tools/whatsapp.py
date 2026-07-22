@@ -304,3 +304,7 @@ class WhatsAppTool(BaseTool):
             if e.response.status_code in (401, 403):
                 raise ToolAuthError('WhatsApp access token expired.') from e
             raise RuntimeError(f'Could not send WhatsApp message. {detail or f"API error {e.response.status_code}"}') from e
+
+    async def startup(self) -> None:
+        if not _MSG_FILE.exists():
+            _MSG_FILE.write_text('[]')

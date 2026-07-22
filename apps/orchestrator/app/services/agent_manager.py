@@ -5,6 +5,7 @@ import json
 import logging
 
 from app.agents.registry import AGENTS
+from app.models.agent_message import AgentMessage
 from app.models.contracts import AgentHealth, AgentRequest, AgentResponse
 from app.core.config import settings
 
@@ -64,6 +65,7 @@ class AgentManager:
         self._session_enabled_agents: list[str] = []
         self._session_calling_name:   str       = 'Master'
         self._session_assistant_name: str       = 'Robo'
+        self._session_language:       str       = 'en'
 
     @property
     def agents(self):
@@ -82,17 +84,31 @@ class AgentManager:
         enabled_agents: list[str] | None = None,
         calling_name: str = 'Master',
         assistant_name: str = 'Robo',
+        language: str = 'en',
     ) -> None:
         self._session_llm_config    = llm_config      or {}
         self._session_agent_config  = agent_config    or {}
         self._session_calling_name  = calling_name    or 'Master'
         self._session_assistant_name = assistant_name or 'Robo'
+        self._session_language       = language        or 'en'
         agents = list(enabled_agents or [])
         # Auto-add built-in skills and general AI if not already present
         for always_on in ('websearch', 'calculator', 'memory', 'briefing', 'general'):
             if always_on not in agents:
                 agents.append(always_on)
         self._session_enabled_agents = agents
+
+    def update_language(self, language: str) -> None:
+        """Called by ws.py after each user turn to track detected language."""
+        self._session_language = language
+
+    @property
+    def session_language(self) -> str:
+        return self._session_language
+
+    @property
+    def enabled_agents(self) -> list[str]:
+        return list(self._session_enabled_agents)
 
     def clear_session(self) -> None:
         """Zero out session credentials. Called on stop_session."""
@@ -101,6 +117,9 @@ class AgentManager:
         self._session_enabled_agents = []
         self._session_calling_name   = 'Master'
         self._session_assistant_name = 'Robo'
+        self._session_language       = 'en'
+        from app.services.cache import agent_cache
+        agent_cache.clear()
 
     async def initialize_enabled_agents(self) -> None:
         await asyncio.gather(*(
@@ -138,26 +157,59 @@ class AgentManager:
         return await agent.handle(enriched)
 
     async def handle_as_tool(self, fn_name: str, query: str) -> str:
+        from app.services.cache import agent_cache
+        agent_id = fn_name.split('__')[0] if '__' in fn_name else fn_name
+        cached = agent_cache.get(agent_id, query)
+        if cached is not None:
+            return cached
+
+        result: str
         if '__' in fn_name:
             # Gateway-namespaced tool call (e.g. indmoney__query_portfolio).
             # No credentials forwarded — gateway reads them from its own .env.
             from app.dependencies import gateway_client
             try:
-                result = await gateway_client.call_tool(fn_name, {'query': query})
-                if isinstance(result, str):
-                    return result
-                return json.dumps(result) if result is not None else 'No data available.'
+                raw = await gateway_client.call_tool(fn_name, {'query': query})
+                if isinstance(raw, str):
+                    result = raw
+                else:
+                    result = json.dumps(raw) if raw is not None else 'No data available.'
             except PermissionError as exc:
                 return str(exc)
             except Exception as exc:
                 logger.warning('Gateway tool call %s failed: %s', fn_name, exc)
                 return f'Tool call failed: {str(exc)[:100]}'
+        else:
+            # Local agent call
+            if fn_name not in self._agents:
+                return f'Unknown agent: {fn_name}'
+            response = await self.handle(fn_name, AgentRequest(text=query))
+            result = response.text
 
-        # Local agent call
-        if fn_name not in self._agents:
-            return f'Unknown agent: {fn_name}'
-        response = await self.handle(fn_name, AgentRequest(text=query))
-        return response.text
+        if result and isinstance(result, str) and not result.startswith('Tool call failed'):
+            agent_cache.set(agent_id, query, result)
+        return result
+
+    async def call_agent_from_agent(self, msg: AgentMessage) -> str:
+        """Route an AgentMessage through the orchestrator.
+
+        Checks cache first; sets cache on success.
+        Gateway tools: delegated to handle_as_tool().
+        Local agents: delegated to handle_as_tool().
+        """
+        from app.services.cache import agent_cache
+        agent_id = msg.tool_name.split('__')[0] if '__' in msg.tool_name else msg.tool_name
+        query = msg.arguments.get('query', '')
+        cached = agent_cache.get(agent_id, query)
+        if cached is not None:
+            return cached
+        result = await asyncio.wait_for(
+            self.handle_as_tool(msg.tool_name, query),
+            timeout=msg.timeout,
+        )
+        if result and not result.startswith('Tool call failed'):
+            agent_cache.set(agent_id, query, result)
+        return result
 
     async def _fetch_gateway_tools(self) -> dict:
         """Fetch tools from the gateway and convert to tool_meta format for the LLM."""
@@ -194,6 +246,7 @@ class AgentManager:
                 self.handle_as_tool,
                 assistant_name=self._session_assistant_name,
                 gateway_tools=gateway_tools if gateway_tools else None,
+                language=self._session_language,
             )
 
         from app.services.router import _keyword_route

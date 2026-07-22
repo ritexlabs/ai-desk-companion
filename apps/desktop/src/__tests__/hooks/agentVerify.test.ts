@@ -32,7 +32,7 @@ describe('verifyWeather', () => {
 
   const base: AgentConfig['weather'] = {
     enabled: true, provider: 'openweathermap',
-    apiKey: '', defaultCity: '', status: 'idle', info: '',
+    apiKey: '', defaultCity: '', status: 'idle', info: '', notificationsEnabled: false,
   };
 
   it('does nothing when apiKey is empty', async () => {
@@ -101,7 +101,7 @@ describe('verifyGitHub', () => {
 
   const base: AgentConfig['github'] = {
     enabled: true, personalAccessToken: '',
-    username: '', status: 'idle', info: '',
+    username: '', status: 'idle', info: '', notificationsEnabled: false,
   };
 
   it('does nothing when PAT is empty', async () => {

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import logging
+import re
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_log = logging.getLogger(__name__)
 
 
 class GatewaySettings(BaseSettings):
@@ -88,6 +94,30 @@ class GatewaySettings(BaseSettings):
     # if your portfolio is not on the first sheet.
     mystocks_range:           str = 'A:Z'
 
+    # ── Dhan Broker (MCP at https://mcp.dhan.co/mcp) ─────────────────────────
+    # Authentication is via Dhan's OAuth flow — no manual token entry required.
+    # These are populated automatically by the /auth/dhan OAuth callback.
+    dhan_oauth_client_id:     str   = ''    # dynamic client-registration ID
+    dhan_oauth_client_secret: str   = ''    # dynamic client-registration secret
+    dhan_access_token:        str   = ''    # OAuth access token (set by callback)
+    dhan_refresh_token:       str   = ''    # OAuth refresh token (set by callback)
+    dhan_token_expires_at:    float = 0.0   # epoch seconds
+    # Set to true only when the user explicitly enables trading from the UI.
+    # Never default to true — live orders are executed immediately.
+    dhan_trade_enabled:       bool  = False
+
+    # ── Zerodha Broker (MCP at https://mcp.kite.trade/mcp) ───────────────────
+    # Authentication is via Zerodha's Kite OAuth flow — no manual token entry required.
+    # These are populated automatically by the /auth/zerodha OAuth callback.
+    zerodha_oauth_client_id:     str   = ''    # dynamic client-registration ID
+    zerodha_oauth_client_secret: str   = ''    # dynamic client-registration secret
+    zerodha_access_token:        str   = ''    # OAuth access token (set by callback)
+    zerodha_refresh_token:       str   = ''    # OAuth refresh token (set by callback)
+    zerodha_token_expires_at:    float = 0.0   # epoch seconds
+    # Set to true only when the user explicitly enables trading from the UI.
+    # Never default to true — live orders are executed immediately.
+    zerodha_trade_enabled:       bool  = False
+
     # ── Social Media ──────────────────────────────────────────────────────────
     # JSON array of account objects — set per-session via PUT /session/socialmedia.
     # Schema: [{"id":"..","platform":"youtube"|"instagram","label":"..","token":"..","channelId":"..","enabled":true}]
@@ -122,8 +152,37 @@ class GatewaySettings(BaseSettings):
     def is_mystocks_configured(self) -> bool:
         return bool(self.mystocks_spreadsheet_id and self.google_access_token)
 
+    def is_dhan_configured(self) -> bool:
+        return bool(self.dhan_access_token)
+
+    def is_zerodha_configured(self) -> bool:
+        return bool(self.zerodha_access_token)
+
     def auth_enabled(self) -> bool:
         return bool(self.gateway_api_token)
+
+    def persist_to_env(self, updates: dict[str, str]) -> None:
+        """Write key=value pairs into the .env file, creating or updating entries."""
+        env_path = Path('.env')
+        try:
+            text = env_path.read_text(encoding='utf-8') if env_path.exists() else ''
+        except OSError:
+            _log.warning('persist_to_env: could not read .env')
+            return
+        lines = text.splitlines(keepends=True)
+        for key, val in updates.items():
+            upper = key.upper()
+            pattern = re.compile(rf'^#?\s*{re.escape(upper)}\s*=.*$', re.MULTILINE)
+            new_line = f'{upper}={val}\n'
+            if pattern.search(text):
+                text = pattern.sub(new_line.rstrip('\n'), text)
+            else:
+                text = text.rstrip('\n') + f'\n{new_line}'
+            lines = text.splitlines(keepends=True)
+        try:
+            env_path.write_text(''.join(lines) if lines else text, encoding='utf-8')
+        except OSError:
+            _log.warning('persist_to_env: could not write .env')
 
 
 settings = GatewaySettings()

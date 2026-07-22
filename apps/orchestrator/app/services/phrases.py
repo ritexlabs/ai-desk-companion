@@ -40,18 +40,40 @@ _EN: dict[str, list[str]] = {
     ],
     'greeting': [
         '{tod}, {name}, wonderful to have you back.',
-        '{tod}, {name}, your systems are all online and ready.',
-        '{tod}, {name}, all agents are standing by for your command.',
         "{tod}, {name}, I've been waiting for you.",
-        '{tod}, {name}, ready to assist you at full capacity.',
-        "{tod}, {name}, it's great to have you back online.",
-        '{tod}, {name}, everything is looking good on my end.',
-        '{tod}, {name}, fully operational and at your command.',
+        "{tod}, {name}, it's great to have you back.",
+        '{tod}, {name}, welcome back.',
         "{tod}, {name}, let's make this a productive session.",
-        '{tod}, {name}, your personal AI is fired up and ready.',
-        '{tod}, {name}, running at peak performance, ready when you are.',
-        '{tod}, {name}, all systems nominal, awaiting your instructions.',
-        '{tod}, {name}, I have everything ready and waiting for you.',
+        '{tod}, {name}, always a pleasure.',
+        '{tod}, {name}, glad you are here.',
+        '{tod}, {name}, good to see you again.',
+        '{tod}, {name}, great to have you here.',
+    ],
+    'assembling': [
+        'Assembling all agents — please stand by.',
+        'Initialising agent network — one moment.',
+        'Bringing all modules online — standby.',
+        'Activating your command centre — just a moment.',
+        'Spinning up the full agent matrix — hold on.',
+        'Waking up all agents — this will only take a moment.',
+        'Loading all systems — standby while I assemble the team.',
+        'Agent initialisation in progress — please hold.',
+    ],
+    'boot_ready': [
+        "All agents are online — I'm here to answer all your questions.",
+        'Systems fully assembled — what can I do for you?',
+        "All modules are live and standing by — I'm all ears.",
+        'Agent network is complete — ready for your command.',
+        'Everything is online and operational — ask me anything.',
+        "All agents assembled and ready — what's on your mind?",
+        "Your full team is online — I'm ready when you are.",
+    ],
+    'broker_connected': [
+        'Your {broker} stock broker is now connected.',
+        '{broker} trading account confirmed online.',
+        'Your {broker} broker account is live and ready.',
+        '{broker} broker link established — your account is active.',
+        'Connected to your {broker} trading account.',
     ],
     'farewell': [
         'Goodbye! Have a wonderful day.',
@@ -120,8 +142,26 @@ _LLM_PROMPTS: dict[str, str] = {
     ),
     'greeting': (
         'You are {assistant_name}, a warm AI voice assistant. '
-        'Generate exactly ONE natural greeting for {name} (time of day: {tod}). '
-        '10-16 words, spoken English, no markdown.'
+        'Generate exactly ONE natural greeting for {name} at {tod}. '
+        '8-14 words, spoken English, no markdown. '
+        'Do NOT mention systems, agents, or readiness — just a warm personal welcome.'
+    ),
+    'assembling': (
+        'You are {assistant_name}, a futuristic AI voice assistant. '
+        'Generate exactly ONE short phrase (8-14 words) telling {name} that all agents are now '
+        'starting up or assembling. Warm, natural, slightly sci-fi tone. Plain text only. No markdown.'
+    ),
+    'boot_ready': (
+        'You are {assistant_name}, a warm futuristic AI. '
+        '{total_online} of {total} agents are now online and assembled. '
+        'Generate exactly ONE sentence (10-18 words) telling {name} that everything is online '
+        'and you are ready to answer their questions. Warm, inviting, slightly sci-fi. '
+        'Plain text only. No markdown.'
+    ),
+    'broker_connected': (
+        'You are {assistant_name}, a warm futuristic AI. '
+        'Generate exactly ONE sentence (8-14 words) announcing that the {broker} stock broker '
+        'account is now connected and ready. Natural, slightly sci-fi. Plain text only. No markdown.'
     ),
     'farewell': (
         'You are {assistant_name}, a warm AI voice assistant saying goodbye to {name}. '

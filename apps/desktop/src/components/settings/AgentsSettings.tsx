@@ -273,6 +273,10 @@ interface Props {
   onConnectPortfolio:    () => void;
   onDisconnectPortfolio: () => void;
   onRefreshPortfolio:    () => void;
+  onConnectDhan:         () => void;
+  onDisconnectDhan:      () => void;
+  onConnectZerodha:      () => void;
+  onDisconnectZerodha:   () => void;
   onVerifyWhatsApp:      () => void;
   onVerifySocialMedia:   () => void;
   onConnectYoutube:      (loginHint?: string) => Promise<YouTubeDiscovery | null>;
@@ -300,7 +304,7 @@ function renderForm(agentId: string, props: Props): React.ReactNode {
     case 'github':
       return <GithubSettings config={config.github} onPatch={(p) => onPatch('github', p)} onVerify={props.onVerifyGitHub} onDisconnect={props.onDisconnectGitHub} />;
     case 'stock':
-      return <StockSettings config={config.stock} onPatch={(p) => onPatch('stock', p)} googleToken={config.google.accessToken} />;
+      return <StockSettings config={config.stock} onPatch={(p) => onPatch('stock', p)} googleToken={config.google.accessToken} dhanConfig={config.dhan} onDhanPatch={(p) => onPatch('dhan', p)} onDhanConnect={props.onConnectDhan} onDhanDisconnect={props.onDisconnectDhan} zerodhaConfig={config.zerodha} onZerodhaPatch={(p) => onPatch('zerodha', p)} onZerodhaConnect={props.onConnectZerodha} onZerodhaDisconnect={props.onDisconnectZerodha} />;
     case 'news':
       return <NewsSettings config={config.news} onPatch={(p) => onPatch('news', p)} onVerify={props.onVerifyNews} />;
     case 'smarthome':

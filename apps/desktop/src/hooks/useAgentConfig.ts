@@ -85,6 +85,20 @@ export interface StockCreds {
   notificationsEnabled: boolean;
 }
 
+export interface DhanCreds {
+  enabled:      boolean;
+  tradeEnabled: boolean;
+  status:       ConnectionStatus;
+  info:         string;
+}
+
+export interface ZerodhaCreds {
+  enabled:      boolean;
+  tradeEnabled: boolean;
+  status:       ConnectionStatus;
+  info:         string;
+}
+
 export interface NewsCreds {
   enabled: boolean;
   apiKey: string;
@@ -177,6 +191,8 @@ export interface AgentConfig {
   google:       GoogleCreds;
   github:       GitHubCreds;
   stock:        StockCreds;
+  dhan:         DhanCreds;
+  zerodha:      ZerodhaCreds;
   news:         NewsCreds;
   smarthome:    SmartHomeCreds;
   portfolio:    PortfolioCreds;
@@ -243,6 +259,18 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     info: 'Yahoo Finance (free, no key required)',
     notificationsEnabled: false,
   },
+  dhan: {
+    enabled:      false,
+    tradeEnabled: false,
+    status:       'idle',
+    info:         '',
+  },
+  zerodha: {
+    enabled:      false,
+    tradeEnabled: false,
+    status:       'idle',
+    info:         '',
+  },
   news: {
     enabled: false,
     apiKey: '',
@@ -307,6 +335,8 @@ function toPersist(cfg: AgentConfig): AgentConfig {
     google:      { ...cfg.google,       status: 'idle', info: '' },
     github:      { ...cfg.github,       status: 'idle', info: '' },
     stock:       { ...cfg.stock,        status: 'idle', info: '' },
+    dhan:        { ...cfg.dhan,         status: 'idle', info: '' },
+    zerodha:     { ...cfg.zerodha,      status: 'idle', info: '' },
     news:        { ...cfg.news,         status: 'idle', info: '' },
     smarthome:   { ...cfg.smarthome,    status: 'idle', info: '' },
     portfolio:   { ...cfg.portfolio,    status: 'idle', info: '', tokenExpiresAt: cfg.portfolio.tokenExpiresAt },
@@ -335,6 +365,8 @@ function load(): AgentConfig {
       google:      { ...DEFAULT_AGENT_CONFIG.google,      ...parsed.google      },
       github:      { ...DEFAULT_AGENT_CONFIG.github,      ...parsed.github      },
       stock:       { ...DEFAULT_AGENT_CONFIG.stock,       ...parsed.stock       },
+      dhan:        { ...DEFAULT_AGENT_CONFIG.dhan,        ...parsed.dhan        },
+      zerodha:     { ...DEFAULT_AGENT_CONFIG.zerodha,     ...parsed.zerodha     },
       news:        { ...DEFAULT_AGENT_CONFIG.news,        ...parsed.news        },
       smarthome:   { ...DEFAULT_AGENT_CONFIG.smarthome,   ...parsed.smarthome   },
       portfolio:   { ...DEFAULT_AGENT_CONFIG.portfolio,   ...parsed.portfolio   },
@@ -365,6 +397,12 @@ function load(): AgentConfig {
     if (cfg.socialmedia.accounts.some((a) => a.enabled)) cfg.socialmedia.status = 'connected';
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
+    if (cfg.dhan.status === 'connected') {
+      cfg.dhan.info = cfg.dhan.info || 'Dhan broker connected';
+    }
+    if (cfg.zerodha.status === 'connected') {
+      cfg.zerodha.info = cfg.zerodha.info || 'Zerodha broker connected';
+    }
     return cfg;
   } catch {
     return DEFAULT_AGENT_CONFIG;
@@ -561,6 +599,82 @@ export function useAgentConfig() {
     });
   }, [patch]);
 
+  const connectDhan = useCallback(() => {
+    const gwBase = 'http://localhost:8788';
+    const popup = window.open(`${gwBase}/auth/dhan`, 'dhan-oauth', 'width=520,height=680');
+    patch('dhan', { status: 'verifying', info: 'Waiting for Dhan login…' });
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch(`${gwBase}/api/dhan/status`);
+        const d = await r.json();
+        if (d.connected) {
+          clearInterval(poll);
+          patch('dhan', { status: 'connected', info: 'Dhan broker connected' });
+          popup?.close();
+        }
+      } catch { /* gateway not yet ready */ }
+    }, 1500);
+    // Stop polling when popup closes
+    const watchClose = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(poll);
+        clearInterval(watchClose);
+        // Do one final check
+        fetch(`${gwBase}/api/dhan/status`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.connected) patch('dhan', { status: 'connected', info: 'Dhan broker connected' });
+            else if (config.dhan.status === 'verifying') patch('dhan', { status: 'idle', info: '' });
+          })
+          .catch(() => {});
+      }
+    }, 500);
+  }, [patch, config.dhan.status]);
+
+  const disconnectDhan = useCallback(async () => {
+    try {
+      await fetch('http://localhost:8788/auth/dhan/token', { method: 'DELETE' });
+    } catch {}
+    patch('dhan', { status: 'idle', info: '' });
+  }, [patch]);
+
+  const connectZerodha = useCallback(() => {
+    const gwBase = 'http://localhost:8788';
+    const popup = window.open(`${gwBase}/auth/zerodha`, 'zerodha-oauth', 'width=520,height=680');
+    patch('zerodha', { status: 'verifying', info: 'Waiting for Zerodha login…' });
+    const poll = setInterval(async () => {
+      try {
+        const r = await fetch(`${gwBase}/api/zerodha/status`);
+        const d = await r.json();
+        if (d.connected) {
+          clearInterval(poll);
+          patch('zerodha', { status: 'connected', info: 'Zerodha broker connected' });
+          popup?.close();
+        }
+      } catch { /* gateway not yet ready */ }
+    }, 1500);
+    const watchClose = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(poll);
+        clearInterval(watchClose);
+        fetch(`${gwBase}/api/zerodha/status`)
+          .then(r => r.json())
+          .then(d => {
+            if (d.connected) patch('zerodha', { status: 'connected', info: 'Zerodha broker connected' });
+            else if (config.zerodha.status === 'verifying') patch('zerodha', { status: 'idle', info: '' });
+          })
+          .catch(() => {});
+      }
+    }, 500);
+  }, [patch, config.zerodha.status]);
+
+  const disconnectZerodha = useCallback(async () => {
+    try {
+      await fetch('http://localhost:8788/auth/zerodha/token', { method: 'DELETE' });
+    } catch {}
+    patch('zerodha', { status: 'idle', info: '' });
+  }, [patch]);
+
   return {
     config,
     patch,
@@ -576,6 +690,10 @@ export function useAgentConfig() {
     connectPortfolio:       () => connectPortfolio(config.portfolio, patch),
     disconnectPortfolio,
     refreshPortfolioToken:  () => refreshPortfolioToken(config.portfolio, patch),
+    connectDhan,
+    disconnectDhan,
+    connectZerodha,
+    disconnectZerodha,
     verifyWhatsApp,
     verifySocialMedia:      () => verifySocialMedia(config.socialmedia, patch),
     connectYouTube:         (loginHint?: string) => connectYouTubeAccount(config.socialmedia, patch, loginHint),

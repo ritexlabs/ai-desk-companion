@@ -1,6 +1,9 @@
 # ── Claude Code ────────────────────────────────────────────────────────────────
-CLAUDE.md
-.claude/
+# Project-level Claude config (skills, agents, settings) IS committed — shared with all contributors.
+# Personal/ephemeral Claude state is excluded.
+.claude/projects/       # per-project memory (personal, machine-specific)
+.claude/todos/          # in-session todo state (ephemeral)
+.claude/cache/          # prompt cache (ephemeral)
 
 # ── Secrets — never commit these ──────────────────────────────────────────────
 .env

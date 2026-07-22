@@ -53,7 +53,7 @@ export function HoloChat({ transcript, aiName, className }: HoloChatProps) {
   return (
     <div className={
       className ??
-      'flex-1 min-h-0 overflow-y-auto border-t border-white/6 bg-black/15 backdrop-blur-sm px-3 py-2 space-y-0.5 scrollbar-thin holo-terminal'
+      'flex-1 min-h-0 overflow-y-auto border-t border-white/6 bg-black/15 backdrop-blur-sm px-3 py-2 space-y-0.5 scrollbar-thin holo-terminal select-text cursor-text'
     }>
       <AnimatePresence initial={false}>
         {transcript.map((turn, i) => {

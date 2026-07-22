@@ -169,6 +169,32 @@ class GatewayClient:
         except Exception:
             return False
 
+    async def update_dhan_session(self, trade_enabled: bool = False) -> bool:
+        """Push Dhan trade-mode flag to the gateway (OAuth token lives in gateway)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/dhan',
+                    json={'trade_enabled': trade_enabled},
+                    headers=self._headers(),
+                )
+                return r.is_success
+        except Exception:
+            return False
+
+    async def update_zerodha_session(self, trade_enabled: bool = False) -> bool:
+        """Push Zerodha trade-mode flag to the gateway (OAuth token lives in gateway)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                r = await client.put(
+                    f'{self._base}/session/zerodha',
+                    json={'trade_enabled': trade_enabled},
+                    headers=self._headers(),
+                )
+                return r.is_success
+        except Exception:
+            return False
+
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             r = await client.post(

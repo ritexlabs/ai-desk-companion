@@ -179,6 +179,10 @@ export default function App() {
     connectPortfolio,
     disconnectPortfolio,
     refreshPortfolioToken,
+    connectDhan,
+    disconnectDhan,
+    connectZerodha,
+    disconnectZerodha,
     verifyWhatsApp,
     verifySocialMedia,
     connectYouTube,
@@ -1277,9 +1281,11 @@ export default function App() {
                   value={rt.command}
                   onChange={(e) => rt.setCommand(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && rt.command.trim()) {
+                    if (e.key === 'Enter') {
+                      const txt = rt.command.trim();
+                      if (!txt) return;
                       if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
-                      else rt.ask();
+                      else rt.ask(txt);
                     }
                   }}
                   placeholder={
@@ -1291,9 +1297,10 @@ export default function App() {
                 />
                 <motion.button
                   onClick={() => {
-                    if (!rt.command.trim()) return;
+                    const txt = rt.command.trim();
+                    if (!txt) return;
                     if (!isActive || rt.phase === 'booting') rt.triggerWakeWord();
-                    else rt.ask();
+                    else rt.ask(txt);
                   }}
                   disabled={!rt.command.trim()}
                   whileHover={{ scale: 1.06 }}
@@ -1504,6 +1511,9 @@ export default function App() {
           <StocksPortfolio
             spreadsheetId={agentConfig.stock.spreadsheetId}
             googleToken={agentConfig.google.accessToken}
+            dhanEnabled={agentConfig.dhan.enabled}
+            tradeEnabled={agentConfig.dhan.tradeEnabled}
+            zerodhaEnabled={agentConfig.zerodha?.enabled}
             onClose={() => setStocksPortfolioOpen(false)}
           />
         )}
@@ -1556,6 +1566,10 @@ export default function App() {
             onConnectPortfolio={connectPortfolio}
             onDisconnectPortfolio={disconnectPortfolio}
             onRefreshPortfolio={refreshPortfolioToken}
+            onConnectDhan={connectDhan}
+            onDisconnectDhan={disconnectDhan}
+            onConnectZerodha={connectZerodha}
+            onDisconnectZerodha={disconnectZerodha}
             onVerifyWhatsApp={verifyWhatsApp}
             onVerifySocialMedia={verifySocialMedia}
             onConnectYoutube={connectYouTube}

@@ -361,12 +361,23 @@ _procs: list[subprocess.Popen] = []
 _lock  = threading.Lock()
 _shutdown_done = False
 
+_SHUTDOWN_NOISE = (
+    'npm error Lifecycle script',
+    'npm error code 143',
+    'npm error code 130',
+    'npm error path',
+    'npm error workspace',
+    'npm error location',
+    'npm error command failed',
+    'npm error command sh',
+)
+
 def _stream(proc: subprocess.Popen, tag: str) -> None:
     try:
         assert proc.stdout is not None
         for raw in iter(proc.stdout.readline, b''):
             line = raw.decode(errors='replace').rstrip('\n\r')
-            if line:
+            if line and not (_shutdown_done and any(n in line for n in _SHUTDOWN_NOISE)):
                 print(f'  {tag}{dim(line)}', flush=True)
     except Exception:
         pass
@@ -616,7 +627,7 @@ def cmd_start() -> None:
 
     # Launch gateway first — orchestrator health-checks it on boot
     gw_proc = _start_gateway()
-    if _wait_for_port(GATEWAY_PORT, timeout=20):
+    if _wait_for_port(GATEWAY_PORT, timeout=30):
         ok(f'MCP Gateway ready    {cyan(f"http://localhost:{GATEWAY_PORT}")}')
     else:
         warn('MCP Gateway did not start in time — orchestrator will retry.')

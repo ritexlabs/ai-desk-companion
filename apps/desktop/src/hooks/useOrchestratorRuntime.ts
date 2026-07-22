@@ -745,10 +745,19 @@ export function useOrchestratorRuntime(
 
   /* ── ask ────────────────────────────────────────────────────────── */
   const ask = useCallback(async (input?: string) => {
-    // Prevent starting a new listen session while one is already running
+    // Block only when no explicit text AND already listening (prevents double-listen)
     if (!input && phaseRef.current === 'listening') return;
 
     let text = (input ?? command).trim();
+
+    // Typed command arrived while mic was open — stop it and unblock server-STT
+    if (input && phaseRef.current === 'listening') {
+      stopListening();
+      if (pendingTranscriptRef.current) {
+        pendingTranscriptRef.current('');
+        pendingTranscriptRef.current = null;
+      }
+    }
 
     if (!text) {
       setPhase('listening');
@@ -859,7 +868,7 @@ export function useOrchestratorRuntime(
       setActiveAgentId(null);
       setPhase('ready');
     }
-  }, [command, speak, listenOnce, appendTurn, sttSupported, wsSend, recordAndTranscribeViaServer, sleepPattern]);
+  }, [command, speak, listenOnce, stopListening, appendTurn, sttSupported, wsSend, recordAndTranscribeViaServer, sleepPattern]);
 
   useEffect(() => { askRef.current = ask; }, [ask]);
 

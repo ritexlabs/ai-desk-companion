@@ -49,6 +49,8 @@ _GATEWAY_AGENT_MAP: dict[str, str] = {
     'smarthome':   'smarthome',
     'whatsapp':    'whatsapp',
     'socialmedia': 'socialmedia',
+    'dhan':        'dhan',
+    'zerodha':     'zerodha',
 }
 
 # Per-session credentials stored so reload_agent can re-push to the gateway
@@ -80,6 +82,9 @@ _session_portfolio_expires_at:    int = 0
 
 _session_socialmedia_accounts: str = ''
 
+_session_dhan_trade_enabled:    bool = False
+_session_zerodha_trade_enabled: bool = False
+
 # Human-readable labels for gateway-served agents (used in boot messages)
 _GATEWAY_LABELS: dict[str, str] = {
     'weather':     'Weather',
@@ -93,6 +98,8 @@ _GATEWAY_LABELS: dict[str, str] = {
     'smarthome':   'Smart Home',
     'whatsapp':    'WhatsApp',
     'socialmedia': 'Social Media',
+    'dhan':        'Dhan Broker',
+    'zerodha':     'Zerodha Broker',
 }
 
 # Per-agent boot call: (gateway tool name, arguments)
@@ -107,6 +114,8 @@ _GW_BOOT_CALLS: dict[str, tuple[str, dict]] = {
     'portfolio': ('indmoney__query_portfolio',       {'query': 'portfolio overview'}),
     'smarthome': ('smarthome__system_overview',      {}),
     'whatsapp':  ('whatsapp__get_status',            {}),
+    'dhan':      ('dhan__query_dhan',                {'query': 'portfolio overview'}),
+    'zerodha':   ('zerodha__query_zerodha',          {'query': 'portfolio overview'}),
 }
 
 # Strips "Foo agent: " / "Foo summary: " prefixes agents sometimes prepend
@@ -286,6 +295,40 @@ def _snip_whatsapp(raw: str) -> str:
     # "Connected — +91... (Name). N messages received this session."
     return str(raw).split('.')[0][:65]
 
+def _snip_dhan(raw: str) -> str:
+    import json as _json
+    text = str(raw).strip()
+    data = None
+    if text.startswith(('{', '[')):
+        try:
+            data = _json.loads(text)
+        except Exception:
+            pass
+    if data is not None:
+        pct = _extract_pnl_pct(data)
+        if pct is not None:
+            sign = '+' if pct >= 0 else ''
+            return f'Dhan portfolio {sign}{pct:.1f}% overall'
+        return ''
+    return text.split('.')[0][:55] if text and not is_agent_error(text) else ''
+
+def _snip_zerodha(raw: str) -> str:
+    import json as _json
+    text = str(raw).strip()
+    data = None
+    if text.startswith(('{', '[')):
+        try:
+            data = _json.loads(text)
+        except Exception:
+            pass
+    if data is not None:
+        pct = _extract_pnl_pct(data)
+        if pct is not None:
+            sign = '+' if pct >= 0 else ''
+            return f'Zerodha portfolio {sign}{pct:.1f}% overall'
+        return ''
+    return text.split('.')[0][:55] if text and not is_agent_error(text) else ''
+
 def _snip_socialmedia(raw: str) -> str:
     # raw is "; "-joined channel summaries, e.g. "MyChannel: 3 new videos, 1.2K views; MyIG: 2 new posts"
     # Empty string means no activity — return empty to skip announcement
@@ -307,6 +350,8 @@ _GW_SNIP_FN: dict[str, Callable[[str], str]] = {
     'smarthome':   _snip_smarthome,
     'whatsapp':    _snip_whatsapp,
     'socialmedia': _snip_socialmedia,
+    'dhan':        _snip_dhan,
+    'zerodha':     _snip_zerodha,
 }
 
 
@@ -502,6 +547,10 @@ async def reload_agent(agent_id: str) -> tuple[str, str]:
             )
         if agent_id == 'socialmedia' and _session_socialmedia_accounts:
             await gateway_client.update_socialmedia_session(_session_socialmedia_accounts)
+        if agent_id == 'dhan' and _session_dhan_trade_enabled:
+            await gateway_client.update_dhan_session(_session_dhan_trade_enabled)
+        if agent_id == 'zerodha' and _session_zerodha_trade_enabled:
+            await gateway_client.update_zerodha_session(_session_zerodha_trade_enabled)
         ok, snippet = await _fetch_boot_snippet(agent_id)
         if ok:
             phrase = await phrase_engine.generate('agent_online', {'label': label})
@@ -560,6 +609,8 @@ async def boot_sequence(
     global _session_portfolio_client_id, _session_portfolio_client_secret
     global _session_portfolio_access_token, _session_portfolio_refresh_token, _session_portfolio_expires_at
     global _session_socialmedia_accounts
+    global _session_dhan_trade_enabled
+    global _session_zerodha_trade_enabled
     ac = agent_config if agent_config else {}
 
     # Google
@@ -650,6 +701,22 @@ async def boot_sequence(
             gateway_client.update_socialmedia_session(_session_socialmedia_accounts)
         )
 
+    # Dhan Broker — OAuth token is stored in gateway; only push trade_enabled
+    dh = ac.get('dhan', {})
+    _session_dhan_trade_enabled = bool(dh.get('trade_enabled', False))
+    if 'stock' in registered_agents and _session_dhan_trade_enabled:
+        asyncio.create_task(
+            gateway_client.update_dhan_session(_session_dhan_trade_enabled)
+        )
+
+    # Zerodha Broker — OAuth token is stored in gateway; only push trade_enabled
+    zr = ac.get('zerodha', {})
+    _session_zerodha_trade_enabled = bool(zr.get('trade_enabled', False))
+    if 'stock' in registered_agents and _session_zerodha_trade_enabled:
+        asyncio.create_task(
+            gateway_client.update_zerodha_session(_session_zerodha_trade_enabled)
+        )
+
     await send_fn('session_config', {
         'tts_provider':      settings_label(tts),
         'stt_provider':      settings_label(stt),
@@ -659,14 +726,24 @@ async def boot_sequence(
     await send_fn('phase_changed', {'phase': 'wake_detected'})
     await send_fn('phase_changed', {'phase': 'booting'})
 
-    greeting_msg  = await phrase_engine.generate('greeting', {'tod': _time_of_day(), 'name': calling_name, 'assistant_name': assistant_name})
-    greeting_task = asyncio.create_task(speak_fn('boot_status', greeting_msg, None, tts))
-    init_task     = asyncio.create_task(agent_manager.initialize_enabled_agents())
+    # Start agent init in background immediately so it runs while we speak
+    init_task = asyncio.create_task(agent_manager.initialize_enabled_agents())
 
-    _tasks_to_gather = [greeting_task, init_task]
+    # Generate both phrases concurrently (LLM / static)
+    greeting_msg, assembling_msg = await asyncio.gather(
+        phrase_engine.generate('greeting',   {'tod': _time_of_day(), 'name': calling_name, 'assistant_name': assistant_name}),
+        phrase_engine.generate('assembling', {'name': calling_name, 'assistant_name': assistant_name}),
+    )
+
+    # Speak greeting then assembling sequentially; init runs in the background during this
+    await speak_fn('boot_status', greeting_msg,   None, tts)
+    await speak_fn('boot_status', assembling_msg, None, tts)
+
+    # Now wait for init (and smarthome cred push) to complete before agent checks
+    _init_waitlist: list = [init_task]
     if _sh_push_task:
-        _tasks_to_gather.append(_sh_push_task)
-    await asyncio.gather(*_tasks_to_gather)
+        _init_waitlist.append(_sh_push_task)
+    await asyncio.gather(*_init_waitlist)
 
     skill_ids = set(_ALWAYS_ON_SKILLS)
 
@@ -679,19 +756,22 @@ async def boot_sequence(
     for agent_id in registered_agents:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'starting'})
 
-    # Check gateway health once and discover tools
+    # Check gateway health — retry up to 3× (gateway may still be in lifespan startup)
     gw_ok = False
     gw_tool_count = 0
     gw_namespace_count = 0
-    try:
-        gw_health = await gateway_client.health()
-        gw_ok = gw_health.get('status') == 'ok'
-        if gw_ok:
-            gw_tools = await gateway_client.list_tools()
-            gw_tool_count = len(gw_tools)
-            gw_namespace_count = len({t.get('namespace', t['name'].split('__')[0]) for t in gw_tools if isinstance(t, dict)})
-    except Exception:
-        pass
+    for _attempt in range(3):
+        try:
+            gw_health = await gateway_client.health()
+            gw_ok = gw_health.get('status') == 'ok'
+            if gw_ok:
+                gw_tools = await gateway_client.list_tools()
+                gw_tool_count = len(gw_tools)
+                gw_namespace_count = len({t.get('namespace', t['name'].split('__')[0]) for t in gw_tools if isinstance(t, dict)})
+            break
+        except Exception:
+            if _attempt < 2:
+                await asyncio.sleep(2)  # gateway may still be finishing lifespan init
 
     # ── Gateway-served agents ─────────────────────────────────────────────────
     gw_online = 0
@@ -831,12 +911,17 @@ async def boot_sequence(
     for agent_id in silent_skills:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
 
-    # Final summary
+    # Final ready announcement — all agents assembled, open for questions
     total_online = gw_online + local_online
     total_configured = len(gateway_ids) + len(local_ids)
     await speak_fn(
         'boot_status',
-        await phrase_engine.generate('boot_summary', {'total_online': total_online, 'total': total_configured, 'plural': 's' if total_configured != 1 else ''}),
+        await phrase_engine.generate('boot_ready', {
+            'total_online':   total_online,
+            'total':          total_configured,
+            'name':           calling_name,
+            'assistant_name': assistant_name,
+        }),
         None,
         agent_tts(tts, 'general', agent_voices),
     )

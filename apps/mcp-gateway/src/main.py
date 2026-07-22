@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config.settings import settings
+from src.routers.dhan import router as dhan_router
+from src.routers.zerodha import router as zerodha_router
 from src.routers.portfolio import router as portfolio_router
 from src.routers.system import router as system_router
 from src.routers.tunnel import router as tunnel_router
@@ -108,6 +110,8 @@ def _register_tools() -> None:
     from src.tools.smarthome   import SmartHomeTool
     from src.tools.whatsapp    import WhatsAppTool
     from src.tools.socialmedia import SocialMediaTool
+    from src.tools.dhan        import DhanTool
+    from src.tools.zerodha     import ZerodhaTool
 
     registry.register(WeatherTool())
     registry.register(StocksTool())
@@ -119,6 +123,8 @@ def _register_tools() -> None:
     registry.register(SmartHomeTool())
     registry.register(WhatsAppTool())
     registry.register(SocialMediaTool())
+    registry.register(DhanTool())
+    registry.register(ZerodhaTool())
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -138,7 +144,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=['http://localhost:5173', 'http://localhost:4173', 'http://localhost:8787', 'tauri://localhost'],
     allow_credentials=True,
-    allow_methods=['GET', 'POST', 'DELETE'],
+    allow_methods=['GET', 'POST', 'PUT', 'DELETE'],
     allow_headers=['Authorization', 'Content-Type'],
 )
 
@@ -166,6 +172,16 @@ _AUTH_EXEMPT = {
     '/auth/indmoney', '/auth/indmoney/callback',
     '/api/portfolio/status',
     '/api/portfolio/data',
+    '/auth/dhan', '/auth/dhan/callback',
+    '/api/dhan/status',
+    '/api/dhan/holdings',
+    '/api/dhan/option-chain',
+    '/api/dhan/orders',
+    '/auth/zerodha', '/auth/zerodha/callback',
+    '/api/zerodha/status',
+    '/api/zerodha/holdings',
+    '/api/zerodha/positions',
+    '/api/zerodha/orders',
 }
 
 
@@ -186,6 +202,8 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(_BearerAuthMiddleware)
 
+app.include_router(dhan_router)
+app.include_router(zerodha_router)
 app.include_router(portfolio_router)
 app.include_router(system_router)
 app.include_router(tunnel_router)
@@ -384,6 +402,28 @@ async def update_portfolio_session(body: PortfolioSessionRequest) -> dict:
         })
     configured = bool(settings.indmoney_oauth_token)
     return {'ok': True, 'configured': configured}
+
+
+class DhanSessionRequest(BaseModel):
+    trade_enabled: bool = False
+
+
+@app.put('/session/dhan')
+async def update_dhan_session(body: DhanSessionRequest) -> dict:
+    """Accept per-session Dhan trade-mode flag from the orchestrator or UI."""
+    settings.dhan_trade_enabled = body.trade_enabled
+    return {'ok': True, 'configured': bool(settings.dhan_access_token)}
+
+
+class ZerodhaSessionRequest(BaseModel):
+    trade_enabled: bool = False
+
+
+@app.put('/session/zerodha')
+async def update_zerodha_session(body: ZerodhaSessionRequest) -> dict:
+    """Accept per-session Zerodha trade-mode flag from the orchestrator or UI."""
+    settings.zerodha_trade_enabled = body.trade_enabled
+    return {'ok': True, 'configured': bool(settings.zerodha_access_token)}
 
 
 # ── WhatsApp webhook ──────────────────────────────────────────────────────────

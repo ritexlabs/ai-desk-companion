@@ -176,10 +176,14 @@ function SkillCard({ Icon, color, iconBg, title, badge, children }: {
 function AgentForm({ id, cfg, onPatch, onVerifyWeather, onConnectGoogle, onDisconnectGoogle,
   onVerifyGitHub, onDisconnectGitHub, onVerifyNews, onVerifySmartHome,
   onConnectPortfolio, onDisconnectPortfolio, onRefreshPortfolio,
+  onConnectDhan, onDisconnectDhan,
+  onConnectZerodha, onDisconnectZerodha,
   onVerifyWhatsApp, onVerifySocialMedia, onConnectYoutube, onCheckTunnel, onStartTunnel, onStopTunnel,
 }: Pick<Props, 'cfg' | 'onPatch' | 'onVerifyWeather' | 'onConnectGoogle' | 'onDisconnectGoogle'
   | 'onVerifyGitHub' | 'onDisconnectGitHub' | 'onVerifyNews' | 'onVerifySmartHome'
   | 'onConnectPortfolio' | 'onDisconnectPortfolio' | 'onRefreshPortfolio'
+  | 'onConnectDhan' | 'onDisconnectDhan'
+  | 'onConnectZerodha' | 'onDisconnectZerodha'
   | 'onVerifyWhatsApp' | 'onVerifySocialMedia' | 'onConnectYoutube' | 'onCheckTunnel' | 'onStartTunnel' | 'onStopTunnel'> & { id: string }) {
   const m = META[id];
   switch (id) {
@@ -187,7 +191,7 @@ function AgentForm({ id, cfg, onPatch, onVerifyWeather, onConnectGoogle, onDisco
     case 'weather':   return <WeatherSettings config={cfg.weather} onPatch={p => onPatch('weather', p)} onVerify={onVerifyWeather} />;
     case 'google':    return <GoogleSettings config={cfg.google} onPatch={p => onPatch('google', p)} onConnect={onConnectGoogle} onDisconnect={onDisconnectGoogle} />;
     case 'github':    return <GithubSettings config={cfg.github} onPatch={p => onPatch('github', p)} onVerify={onVerifyGitHub} onDisconnect={onDisconnectGitHub} />;
-    case 'stock':     return <StockSettings config={cfg.stock} onPatch={p => onPatch('stock', p)} googleToken={cfg.google.accessToken} />;
+    case 'stock':     return <StockSettings config={cfg.stock} onPatch={p => onPatch('stock', p)} googleToken={cfg.google.accessToken} dhanConfig={cfg.dhan} onDhanPatch={p => onPatch('dhan', p)} onDhanConnect={onConnectDhan} onDhanDisconnect={onDisconnectDhan} zerodhaConfig={cfg.zerodha} onZerodhaPatch={p => onPatch('zerodha', p)} onZerodhaConnect={onConnectZerodha} onZerodhaDisconnect={onDisconnectZerodha} />;
     case 'news':      return <NewsSettings config={cfg.news} onPatch={p => onPatch('news', p)} onVerify={onVerifyNews} />;
     case 'smarthome': return <SmartHomeSettings config={cfg.smarthome} onPatch={p => onPatch('smarthome', p)} onVerify={onVerifySmartHome} />;
     case 'portfolio': return <PortfolioSettings config={cfg.portfolio} onPatch={p => onPatch('portfolio', p)} onConnect={onConnectPortfolio} onDisconnect={onDisconnectPortfolio} onRefresh={onRefreshPortfolio} />;
@@ -395,6 +399,10 @@ interface Props {
   onConnectPortfolio:    () => void;
   onDisconnectPortfolio: () => void;
   onRefreshPortfolio:    () => void;
+  onConnectDhan:         () => void;
+  onDisconnectDhan:      () => void;
+  onConnectZerodha:      () => void;
+  onDisconnectZerodha:   () => void;
   onVerifyWhatsApp:      () => void;
   onVerifySocialMedia:   () => void;
   onConnectYoutube:      (loginHint?: string) => Promise<YouTubeDiscovery | null>;
@@ -531,6 +539,10 @@ export function AgentConfigModal(props: Props) {
                 onConnectPortfolio={props.onConnectPortfolio}
                 onDisconnectPortfolio={props.onDisconnectPortfolio}
                 onRefreshPortfolio={props.onRefreshPortfolio}
+                onConnectDhan={props.onConnectDhan}
+                onDisconnectDhan={props.onDisconnectDhan}
+                onConnectZerodha={props.onConnectZerodha}
+                onDisconnectZerodha={props.onDisconnectZerodha}
                 onVerifyWhatsApp={props.onVerifyWhatsApp}
                 onVerifySocialMedia={props.onVerifySocialMedia}
                 onConnectYoutube={props.onConnectYoutube}

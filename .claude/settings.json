@@ -6,7 +6,9 @@
       "Bash(python3 -m py_compile apps/mcp-gateway/src/routers/dhan.py)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('ok:', d.get\\('ok'\\)\\); data=d.get\\('data',[]\\); print\\('type:', type\\(data\\).__name__\\); print\\('count:', len\\(data\\) if isinstance\\(data, list\\) else 'N/A'\\); print\\('first:', json.dumps\\(data[0], ensure_ascii=False\\) if isinstance\\(data, list\\) and data else data[:200] if isinstance\\(data,str\\) else data\\)\")",
       "Bash(.venv/bin/python3 -c \"import yfinance as yf; print\\(yf.__version__\\)\")",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8788/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173)"
     ],
     "additionalDirectories": []
   }

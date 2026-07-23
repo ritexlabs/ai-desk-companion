@@ -210,7 +210,7 @@ def _snip_email(raw: str) -> str:
 
 def _snip_system(raw: str) -> str:
     cpu       = re.search(r'CPU usage:\s*([\d.]+)%', raw)
-    ram_used  = re.search(r'RAM:\s*([\d.]+ GB) used / ([\d.]+ GB) total \((\d+)%', raw)
+    ram_used  = re.search(r'RAM:\s*([\d.]+ GB) used / ([\d.]+ GB) total \(([\d.]+)%', raw)
     load      = re.search(r'Load average:\s*([\d.]+)', raw)
     parts = []
     if cpu:

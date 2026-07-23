@@ -15,6 +15,7 @@ from app.api.routes.stocks import router as stocks_router
 from app.api.routes.agent_data import router as agent_data_router
 from app.api.routes.whatsapp import router as whatsapp_router
 from app.api.routes.notes import router as notes_router
+from app.api.routes.notifications import router as notifications_router
 from app.api.ws import router as ws_router, broadcast
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -96,6 +97,7 @@ app.include_router(stocks_router)
 app.include_router(agent_data_router)
 app.include_router(whatsapp_router)
 app.include_router(notes_router)
+app.include_router(notifications_router)
 app.include_router(ws_router)
 
 

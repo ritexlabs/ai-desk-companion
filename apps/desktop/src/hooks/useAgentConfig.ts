@@ -206,7 +206,7 @@ export interface AgentConfig {
 const DEFAULT_AGENT_CONFIG: AgentConfig = {
   system: {
     enabled: true,
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   smarthome: {
     enabled:  false,
@@ -215,7 +215,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     token:    '',
     status:   'idle',
     info:     '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   weather: {
     enabled: false,
@@ -224,7 +224,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     defaultCity: '',
     status: 'idle',
     info: '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   google: {
     calendarEnabled: false,
@@ -239,8 +239,8 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     scopes: ['calendar', 'gmail', 'drive'],
     status: 'idle',
     info: '',
-    emailNotificationsEnabled: false,
-    calendarNotificationsEnabled: false,
+    emailNotificationsEnabled: true,
+    calendarNotificationsEnabled: true,
   },
   github: {
     enabled: false,
@@ -248,7 +248,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     username: '',
     status: 'idle',
     info: '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   stock: {
     enabled: false,
@@ -257,7 +257,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     spreadsheetName: '',
     status: 'connected',
     info: 'Yahoo Finance (free, no key required)',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   dhan: {
     enabled:      false,
@@ -279,7 +279,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     city: '',
     status: 'idle',
     info: '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   portfolio: {
     enabled:              false,
@@ -294,7 +294,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     connectedAccount:     '',
     status:               'idle',
     info:                 '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   whatsapp: {
     enabled:              false,
@@ -310,7 +310,7 @@ const DEFAULT_AGENT_CONFIG: AgentConfig = {
     tunnelInfo:           '',
     callbackUrl:          '',
     envDomain:            '',
-    notificationsEnabled: false,
+    notificationsEnabled: true,
   },
   socialmedia: {
     accounts:             [],
@@ -353,6 +353,8 @@ function toPersist(cfg: AgentConfig): AgentConfig {
     },
   };
 }
+
+const NOTIF_MIGRATION_KEY = 'robo-notif-migrated-v2';
 
 function load(): AgentConfig {
   try {
@@ -397,6 +399,22 @@ function load(): AgentConfig {
     if (cfg.socialmedia.accounts.some((a) => a.enabled)) cfg.socialmedia.status = 'connected';
     cfg.stock.status = 'connected';
     cfg.stock.info   = 'Yahoo Finance (free, no key required)';
+
+    // One-time migration: enable notifications for users who had the old false defaults
+    if (!localStorage.getItem(NOTIF_MIGRATION_KEY)) {
+      cfg.system.notificationsEnabled              = true;
+      cfg.smarthome.notificationsEnabled           = true;
+      cfg.weather.notificationsEnabled             = true;
+      cfg.google.emailNotificationsEnabled         = true;
+      cfg.google.calendarNotificationsEnabled      = true;
+      cfg.github.notificationsEnabled              = true;
+      cfg.stock.notificationsEnabled               = true;
+      cfg.news.notificationsEnabled                = true;
+      cfg.portfolio.notificationsEnabled           = true;
+      cfg.whatsapp.notificationsEnabled            = true;
+      localStorage.setItem(NOTIF_MIGRATION_KEY, '1');
+    }
+
     if (cfg.dhan.status === 'connected') {
       cfg.dhan.info = cfg.dhan.info || 'Dhan broker connected';
     }

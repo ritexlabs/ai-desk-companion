@@ -174,8 +174,10 @@ export function WhatsAppDashboard({ onClose, onVoice }: Props) {
   const [sending, setSending]         = useState(false);
   const [sendStatus, setSendStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [newMode, setNewMode]       = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const msgInputRef = useRef<HTMLTextAreaElement>(null);
+  const bottomRef    = useRef<HTMLDivElement>(null);
+  const msgInputRef  = useRef<HTMLTextAreaElement>(null);
+  const knownIds     = useRef<Set<string>>(new Set());
+  const firstLoad    = useRef(true);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -201,6 +203,33 @@ export function WhatsAppDashboard({ onClose, onVoice }: Props) {
           ...c,
           messages: [...c.messages].sort((a, b) => a.timestamp - b.timestamp),
         }));
+
+        // Detect new incoming messages and fire browser notifications
+        if (!firstLoad.current) {
+          for (const conv of list) {
+            for (const msg of conv.messages) {
+              if (msg.direction !== 'incoming') continue;
+              const uid = msg.wa_message_id || `${msg.from_phone}_${msg.timestamp}`;
+              if (!knownIds.current.has(uid)) {
+                if ('Notification' in window && Notification.permission === 'granted') {
+                  new Notification(`WhatsApp: ${msg.from_name || msg.from_phone}`, {
+                    body: msg.body.slice(0, 120),
+                    tag:  uid,
+                  });
+                }
+              }
+            }
+          }
+        }
+        // Register all current message IDs so next poll can diff
+        for (const conv of list) {
+          for (const msg of conv.messages) {
+            const uid = msg.wa_message_id || `${msg.from_phone}_${msg.timestamp}`;
+            knownIds.current.add(uid);
+          }
+        }
+        firstLoad.current = false;
+
         setConvs(list);
         if (!selected && list.length > 0) setSelected(list[0].phone);
       } else {
@@ -214,7 +243,19 @@ export function WhatsAppDashboard({ onClose, onVoice }: Props) {
     }
   }, [selected]);
 
-  useEffect(() => { load(); }, []);
+  // Initial load + request notification permission
+  useEffect(() => {
+    load();
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  // Auto-refresh every 15 s while the dashboard is open
+  useEffect(() => {
+    const id = setInterval(() => load(true), 15_000);
+    return () => clearInterval(id);
+  }, [load]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -238,7 +279,7 @@ export function WhatsAppDashboard({ onClose, onVoice }: Props) {
   };
 
   const handleSend = async () => {
-    const to  = composeTo.trim();
+    const to  = newMode ? composeTo.trim() : (selected ?? '');
     const msg = composeMsg.trim();
     if (!to || !msg) return;
     setSending(true);

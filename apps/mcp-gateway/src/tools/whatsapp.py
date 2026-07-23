@@ -259,9 +259,10 @@ class WhatsAppTool(BaseTool):
         display   = to_raw
 
         if not to_number:
-            return (
-                f"I don't have a number for '{to_raw}'. "
-                "Add them to WHATSAPP_CONTACTS in the gateway .env file."
+            raise RuntimeError(
+                f"Cannot resolve '{to_raw}' to a phone number. "
+                "Use an E.164 number (e.g. +919876543210) or add the contact to "
+                "WHATSAPP_CONTACTS in the gateway .env file."
             )
 
         try:

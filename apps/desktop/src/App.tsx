@@ -50,6 +50,7 @@ import { useVoiceProviderConfig } from './hooks/useVoiceProviderConfig';
 import type { RuntimePhase, AgentNotification, NotificationSeverity } from './types/runtime';
 import { useOrchSystemStats } from './hooks/useOrchSystemStats';
 import { useProactiveNotifications } from './hooks/useProactiveNotifications';
+import { useNotificationPoller }      from './hooks/useNotificationPoller';
 import { useAgentVoiceConfig } from './hooks/useAgentVoiceConfig';
 import { AgentNotificationPanel } from './components/AgentNotificationPanel';
 import { AGENT_PALETTE } from './lib/agentPalette';
@@ -463,6 +464,9 @@ export default function App() {
       .then(d => { if (d.ok && d.pnl_pct != null) setPortfolioPnlPct(d.pnl_pct); })
       .catch(() => {});
   }, [rt.agents, agentConfig.portfolio.accessToken]);
+
+  // Periodic notification polling for all enabled agents
+  useNotificationPoller(agentConfig, rt.proactiveAsk, rt.pushNotification, rt.wsConnected);
 
   // Auto-reload calendar + email agents when Google token is freshly provided
   const prevGoogleTokenRef = useRef('');

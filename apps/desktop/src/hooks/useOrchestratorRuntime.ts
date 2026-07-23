@@ -53,6 +53,7 @@ interface TTSItem {
   agentStatus?: AgentDefinition['status'];
   audio_b64?: string;
   audio_format?: string;
+  onDone?: () => void | Promise<void>;
 }
 
 /* ── Orchestrator capabilities (reported on connect) ────────────── */
@@ -212,6 +213,7 @@ export function useOrchestratorRuntime(
       } else {
         await speak(item.text, item.agentId);
       }
+      if (item.onDone) await item.onDone();
     }
 
     ttsActiveRef.current = false;
@@ -942,6 +944,44 @@ export function useOrchestratorRuntime(
     if (canSpeak) enqueueTTS({ text, agentId });
   }, [appendTurn, enqueueTTS]);
 
+  /**
+   * proactiveAsk — speak a question, listen 5 s for yes/no, then act.
+   *
+   * Runs only in standby/sleep so it never interrupts an active session.
+   * On "yes": sends the follow-up query to the backend as a text command.
+   * On timeout / "no": silently dismisses.
+   */
+  const proactiveAsk = useCallback((
+    question: string,
+    agentId:  string,
+    followUp: string,
+  ) => {
+    const cur = phaseRef.current;
+    if (cur !== 'standby' && cur !== 'sleep') return;
+    appendTurn('assistant', question, agentId);
+    enqueueTTS({
+      text:    question,
+      agentId,
+      onDone:  async () => {
+        if (!voiceEnabledRef.current || !sttSupported) return;
+        // Park phase to block the wake-word loop while we listen
+        const saved = phaseRef.current as RuntimePhase;
+        if (saved !== 'standby' && saved !== 'sleep') return;
+        setPhase('listening');
+        await pause(150); // let React commit the phase change + stop wake-word STT
+        try {
+          const reply = await listenOnce(5000);
+          if (/\b(yes|yeah|sure|ok|okay|read|go|do it|please|tell me|of course)\b/i.test(reply)) {
+            appendTurn('user', reply || 'yes');
+            wsSend('send_text_command', { text: followUp });
+          }
+        } finally {
+          setPhase(saved);
+        }
+      },
+    });
+  }, [appendTurn, enqueueTTS, listenOnce, wsSend, sttSupported]);
+
   /* ── scheduleAlert — frontend-initiated, backend fires after delay ── */
   const scheduleAlert = useCallback((
     title: string,
@@ -993,6 +1033,7 @@ export function useOrchestratorRuntime(
     agentBootMessages,
     isAutoListening,
     pushNotification,
+    proactiveAsk,
     speak,
     pendingAlerts,
     clearPendingAlert,

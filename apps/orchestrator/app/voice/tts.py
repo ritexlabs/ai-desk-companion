@@ -41,10 +41,11 @@ class OpenAITTSProvider(TTSProvider):
     VOICES  = ('alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer')
     MODELS  = ('tts-1', 'tts-1-hd')
 
-    def __init__(self, api_key: str, voice: str = 'nova', model: str = 'tts-1') -> None:
+    def __init__(self, api_key: str, voice: str = 'nova', model: str = 'tts-1', speed: float = 1.05) -> None:
         self._api_key = api_key
         self._voice   = voice if voice in self.VOICES else 'nova'
         self._model   = model if model in self.MODELS else 'tts-1'
+        self._speed   = round(max(0.25, min(4.0, speed)), 2)
 
     @property
     def format(self) -> str:
@@ -61,6 +62,7 @@ class OpenAITTSProvider(TTSProvider):
                         'voice':           self._voice,
                         'input':           text,
                         'response_format': 'mp3',
+                        'speed':           self._speed,
                     },
                 )
                 return r.content if r.status_code == 200 else None

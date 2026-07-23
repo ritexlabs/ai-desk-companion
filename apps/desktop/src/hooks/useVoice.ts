@@ -64,7 +64,7 @@ function pickVoice(config: VoiceConfig): SpeechSynthesisVoice | null {
 
 /** Map speed setting → speech rate */
 function rateFor(speed: VoiceConfig['speed']): number {
-  return speed === 'slow' ? 0.78 : speed === 'fast' ? 1.02 : 0.87;
+  return speed === 'slow' ? 0.92 : speed === 'fast' ? 1.18 : 1.02;
 }
 
 /** Map gender → pitch (keeps voices sounding natural) */

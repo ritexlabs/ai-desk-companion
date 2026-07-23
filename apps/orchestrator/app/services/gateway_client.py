@@ -24,6 +24,16 @@ class GatewayClient:
         self._base    = base_url.rstrip('/')
         self._token   = api_token
         self._timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Return the shared persistent client, creating it on first use."""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=5.0, read=self._timeout, write=10.0, pool=5.0),
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return self._client
 
     def _headers(self) -> dict:
         if self._token:
@@ -31,17 +41,15 @@ class GatewayClient:
         return {}
 
     async def health(self) -> dict:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(f'{self._base}/health', headers=self._headers())
-            r.raise_for_status()
-            return r.json()
+        r = await self._get_client().get(f'{self._base}/health', headers=self._headers(), timeout=5.0)
+        r.raise_for_status()
+        return r.json()
 
     async def list_tools(self) -> list[dict]:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                r = await client.get(f'{self._base}/tools', headers=self._headers())
-                r.raise_for_status()
-                return r.json()
+            r = await self._get_client().get(f'{self._base}/tools', headers=self._headers())
+            r.raise_for_status()
+            return r.json()
         except Exception as exc:
             logger.warning('Gateway list_tools failed: %s', exc)
             return []
@@ -49,62 +57,57 @@ class GatewayClient:
     async def update_google_session(self, access_token: str, refresh_token: str = '') -> bool:
         """Push a per-session Google OAuth token to the gateway (in-memory only)."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/google',
-                    json={'access_token': access_token, 'refresh_token': refresh_token},
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/google',
+                json={'access_token': access_token, 'refresh_token': refresh_token},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
     async def update_smarthome_session(self, endpoint: str, token: str) -> bool:
         """Push per-session SmartHome credentials to the gateway (in-memory only)."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/smarthome',
-                    json={'endpoint': endpoint, 'token': token},
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/smarthome',
+                json={'endpoint': endpoint, 'token': token},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
     async def update_weather_session(self, api_key: str, default_city: str, provider: str) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/weather',
-                    json={'api_key': api_key, 'default_city': default_city, 'provider': provider},
-                    headers=self._headers(),
-                )
-                return r.is_success
+            r = await self._get_client().put(
+                f'{self._base}/session/weather',
+                json={'api_key': api_key, 'default_city': default_city, 'provider': provider},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success
         except Exception:
             return False
 
     async def update_github_session(self, token: str) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/github',
-                    json={'token': token},
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/github',
+                json={'token': token},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
     async def update_news_session(self, api_key: str, default_country: str) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/news',
-                    json={'api_key': api_key, 'default_country': default_country},
-                    headers=self._headers(),
-                )
-                return r.is_success
+            r = await self._get_client().put(
+                f'{self._base}/session/news',
+                json={'api_key': api_key, 'default_country': default_country},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success
         except Exception:
             return False
 
@@ -116,18 +119,17 @@ class GatewayClient:
         contacts: str,
     ) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/whatsapp',
-                    json={
-                        'phone_number_id':      phone_number_id,
-                        'access_token':         access_token,
-                        'webhook_verify_token': webhook_verify_token,
-                        'contacts':             contacts,
-                    },
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/whatsapp',
+                json={
+                    'phone_number_id':      phone_number_id,
+                    'access_token':         access_token,
+                    'webhook_verify_token': webhook_verify_token,
+                    'contacts':             contacts,
+                },
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
@@ -140,76 +142,71 @@ class GatewayClient:
         expires_at: int,
     ) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/portfolio',
-                    json={
-                        'client_id':     client_id,
-                        'client_secret': client_secret,
-                        'access_token':  access_token,
-                        'refresh_token': refresh_token,
-                        'expires_at':    expires_at,
-                    },
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/portfolio',
+                json={
+                    'client_id':     client_id,
+                    'client_secret': client_secret,
+                    'access_token':  access_token,
+                    'refresh_token': refresh_token,
+                    'expires_at':    expires_at,
+                },
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
     async def update_socialmedia_session(self, accounts_json: str) -> bool:
         """Push per-session social media accounts to the gateway (in-memory only)."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/socialmedia',
-                    json={'accounts': accounts_json},
-                    headers=self._headers(),
-                )
-                return r.is_success and r.json().get('configured', False)
+            r = await self._get_client().put(
+                f'{self._base}/session/socialmedia',
+                json={'accounts': accounts_json},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success and r.json().get('configured', False)
         except Exception:
             return False
 
     async def update_dhan_session(self, trade_enabled: bool = False) -> bool:
         """Push Dhan trade-mode flag to the gateway (OAuth token lives in gateway)."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/dhan',
-                    json={'trade_enabled': trade_enabled},
-                    headers=self._headers(),
-                )
-                return r.is_success
+            r = await self._get_client().put(
+                f'{self._base}/session/dhan',
+                json={'trade_enabled': trade_enabled},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success
         except Exception:
             return False
 
     async def update_zerodha_session(self, trade_enabled: bool = False) -> bool:
         """Push Zerodha trade-mode flag to the gateway (OAuth token lives in gateway)."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                r = await client.put(
-                    f'{self._base}/session/zerodha',
-                    json={'trade_enabled': trade_enabled},
-                    headers=self._headers(),
-                )
-                return r.is_success
+            r = await self._get_client().put(
+                f'{self._base}/session/zerodha',
+                json={'trade_enabled': trade_enabled},
+                headers=self._headers(), timeout=5.0,
+            )
+            return r.is_success
         except Exception:
             return False
 
     async def call_tool(self, tool_name: str, arguments: dict) -> Any:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            r = await client.post(
-                f'{self._base}/tools/{tool_name}',
-                json={'arguments': arguments},
-                headers=self._headers(),
-            )
-            if r.status_code == 401:
-                raise PermissionError(r.json().get('detail', 'Unauthorized'))
-            if r.status_code == 404:
-                raise ValueError(r.json().get('detail', f'Unknown tool: {tool_name}'))
-            if not r.is_success:
-                try:
-                    detail = r.json().get('detail', r.text[:300])
-                except Exception:
-                    detail = r.text[:300]
-                raise RuntimeError(detail)
-            return r.json().get('result')
+        r = await self._get_client().post(
+            f'{self._base}/tools/{tool_name}',
+            json={'arguments': arguments},
+            headers=self._headers(),
+        )
+        if r.status_code == 401:
+            raise PermissionError(r.json().get('detail', 'Unauthorized'))
+        if r.status_code == 404:
+            raise ValueError(r.json().get('detail', f'Unknown tool: {tool_name}'))
+        if not r.is_success:
+            try:
+                detail = r.json().get('detail', r.text[:300])
+            except Exception:
+                detail = r.text[:300]
+            raise RuntimeError(detail)
+        return r.json().get('result')

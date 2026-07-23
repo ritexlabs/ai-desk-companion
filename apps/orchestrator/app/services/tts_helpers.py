@@ -25,6 +25,37 @@ AGENT_VOICES: dict[str, str] = {
     'memory':     'shimmer',
     'briefing':   'nova',
     'general':    'nova',
+    'dhan':       'fable',
+    'zerodha':    'onyx',
+}
+
+# Per-agent default playback speed for OpenAI TTS (0.25–4.0; 1.0 = normal).
+# These apply when the frontend sends no per-agent speed override.
+_AGENT_SPEEDS: dict[str, float] = {
+    'system':     1.05,
+    'weather':    1.0,
+    'calendar':   1.15,
+    'email':      1.0,
+    'github':     1.15,
+    'stock':      1.15,
+    'news':       1.15,
+    'smarthome':  1.0,
+    'portfolio':  1.15,
+    'whatsapp':   1.0,
+    'websearch':  1.1,
+    'calculator': 1.1,
+    'memory':     1.0,
+    'briefing':   1.1,
+    'general':    1.05,
+    'dhan':       1.15,
+    'zerodha':    1.15,
+}
+
+# Map the frontend speed label to an OpenAI TTS speed float.
+_SPEED_TO_FLOAT: dict[str, float] = {
+    'slow':   0.9,
+    'normal': 1.05,
+    'fast':   1.2,
 }
 
 
@@ -37,21 +68,24 @@ def settings_label(provider: object) -> str:
 
 
 def agent_tts(base_tts: TTSProvider, agent_id: str, session_voices: dict | None = None) -> TTSProvider:
-    """Return a TTS provider with the per-agent voice when using OpenAI TTS.
+    """Return a TTS provider with the per-agent voice and speed when using OpenAI TTS.
 
     session_voices: optional dict from start_session payload —
-        { agent_id: { 'openai_voice': '<voice>' }, ... }
-    Session values override the hardcoded AGENT_VOICES defaults.
+        { agent_id: { 'openai_voice': '<voice>', 'speed': 'slow|normal|fast' }, ... }
+    Session values override the hardcoded defaults.
     """
     if not isinstance(base_tts, OpenAITTSProvider):
         return base_tts
     if session_voices and agent_id in session_voices:
-        voice = (session_voices[agent_id].get('openai_voice') or '').strip() or AGENT_VOICES.get(agent_id, 'alloy')
+        sv    = session_voices[agent_id]
+        voice = (sv.get('openai_voice') or '').strip() or AGENT_VOICES.get(agent_id, 'alloy')
+        speed = _SPEED_TO_FLOAT.get(sv.get('speed') or '', _AGENT_SPEEDS.get(agent_id, 1.05))
     else:
         voice = AGENT_VOICES.get(agent_id, 'alloy')
-    if base_tts._voice == voice:
+        speed = _AGENT_SPEEDS.get(agent_id, 1.05)
+    if base_tts._voice == voice and getattr(base_tts, '_speed', None) == speed:
         return base_tts
-    return OpenAITTSProvider(base_tts._api_key, voice, base_tts._model)
+    return OpenAITTSProvider(base_tts._api_key, voice, base_tts._model, speed)
 
 
 def build_session_providers(vc: dict) -> tuple[TTSProvider, STTProvider]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -208,13 +209,17 @@ def _snip_email(raw: str) -> str:
     return raw.split('.')[0][:55]
 
 def _snip_system(raw: str) -> str:
-    # Multi-line — extract CPU % and RAM %
-    cpu = re.search(r'CPU usage:\s*([\d.]+)%', raw)
-    ram = re.search(r'\((\d+)% used', raw)
+    cpu       = re.search(r'CPU usage:\s*([\d.]+)%', raw)
+    ram_used  = re.search(r'RAM:\s*([\d.]+ GB) used / ([\d.]+ GB) total \((\d+)%', raw)
+    load      = re.search(r'Load average:\s*([\d.]+)', raw)
     parts = []
-    if cpu: parts.append(f'CPU {cpu.group(1)}%')
-    if ram: parts.append(f'RAM {ram.group(1)}%')
-    return ' · '.join(parts) if parts else raw.split('\n')[0][:50]
+    if cpu:
+        parts.append(f'CPU {cpu.group(1)}%')
+    if ram_used:
+        parts.append(f'RAM {ram_used.group(1)} / {ram_used.group(2)} ({ram_used.group(3)}% used)')
+    if load:
+        parts.append(f'Load {load.group(1)}')
+    return ' · '.join(parts) if parts else raw.split('\n')[0][:60]
 
 _PNL_CANDIDATES = (
     'absoluteReturnsPercentage', 'totalReturnsPercent', 'total_returns_percent',
@@ -415,8 +420,7 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
         )
         if not raw:
             return True, ''
-        import json as _json
-        text = _json.dumps(raw) if isinstance(raw, (dict, list)) else str(raw)
+        text = json.dumps(raw) if isinstance(raw, (dict, list)) else str(raw)
         if is_agent_error(text):
             return False, ''
         fn = _GW_SNIP_FN.get(agent_id)
@@ -427,8 +431,44 @@ async def _fetch_boot_snippet(agent_id: str) -> tuple[bool, str]:
         return False, ''
 
 
-_HA_POLL_INTERVAL = 5.0   # seconds between retries during background polling
+_HA_POLL_INTERVAL = 5.0    # seconds between retries during background polling
 _HA_POLL_TIMEOUT  = 120.0  # give up after 2 minutes
+_GOOGLE_GROUP     = frozenset({'calendar', 'email'})
+
+
+async def _fetch_snippet_and_phrase(
+    agent_id: str, assistant_name: str
+) -> tuple[bool, str, str]:
+    """Fetch boot snippet then immediately generate the announcement phrase.
+
+    Both steps happen sequentially per agent, but all agents run concurrently
+    via asyncio.gather — so snippet+phrase cost only max(single_agent_time)
+    instead of sum(all_agents_time).
+    Returns (ok, snippet, pre_generated_phrase).
+    google-group agents return phrase='' (complex combined logic handled in loop).
+    """
+    ok, snippet = await _fetch_boot_snippet(agent_id)
+    phrase = ''
+    if agent_id == 'smarthome':
+        if ok:
+            phrase = await phrase_engine.generate('agent_online', {'label': _GATEWAY_LABELS['smarthome']})
+        elif snippet == '__auth__':
+            phrase = await phrase_engine.generate('smarthome_auth_error', {})
+        else:
+            phrase = await phrase_engine.generate('smarthome_starting', {})
+    elif agent_id not in _GOOGLE_GROUP:
+        if ok:
+            if agent_id in ('dhan', 'zerodha'):
+                broker = 'Dhan' if agent_id == 'dhan' else 'Zerodha'
+                phrase = await phrase_engine.generate(
+                    'broker_connected', {'broker': broker, 'assistant_name': assistant_name}
+                )
+            else:
+                label  = _GATEWAY_LABELS.get(agent_id, agent_id.title())
+                phrase = await phrase_engine.generate('agent_online', {'label': label})
+        elif agent_id == 'portfolio' and snippet == '__auth__':
+            phrase = await phrase_engine.generate('portfolio_auth_error', {})
+    return ok, snippet, phrase
 
 
 async def _poll_smarthome_until_online(
@@ -787,58 +827,69 @@ async def boot_sequence(
             gw_phrase = await phrase_engine.generate('gw_fail', {})
         await speak_fn('boot_status', gw_phrase, None, agent_tts(tts, 'general', agent_voices))
 
-    # Fetch live snippets (and per-agent success) in parallel
+    # Fetch live snippets AND pre-generate announcement phrases in parallel.
+    # Each _fetch_snippet_and_phrase coroutine fetches its snippet then immediately
+    # generates the matching LLM phrase — all agents run concurrently via gather.
+    # google_online / google_not_configured phrases are also pre-generated here.
+    pre_phrases:       dict[str, str] = {}
+    phrase_map:        dict[str, str] = {}
+    success_map:       dict[str, bool] = {}
+    snippet_map:       dict[str, str] = {}
+    google_detail_task = None
     if gw_ok and gateway_ids:
-        boot_results = await asyncio.gather(*[_fetch_boot_snippet(a) for a in gateway_ids])
-        success_map  = {a: ok   for a, (ok, _)   in zip(gateway_ids, boot_results)}
-        snippet_map  = {a: snip for a, (_, snip) in zip(gateway_ids, boot_results)}
-    else:
-        success_map = {}
-        snippet_map = {}
+        _has_google = any(a in _GOOGLE_GROUP for a in gateway_ids)
+        extra_keys  = ['google_online', 'google_not_configured'] if _has_google else []
+        extra_coros = (
+            [phrase_engine.generate('google_online', {}),
+             phrase_engine.generate('google_not_configured', {})]
+            if _has_google else []
+        )
+        all_results   = await asyncio.gather(
+            *[_fetch_snippet_and_phrase(a, assistant_name) for a in gateway_ids],
+            *extra_coros,
+        )
+        boot_results  = all_results[:len(gateway_ids)]
+        extra_results = all_results[len(gateway_ids):]
+        success_map = {a: ok   for a, (ok, _, _)  in zip(gateway_ids, boot_results)}
+        snippet_map  = {a: snip for a, (_, snip, _) in zip(gateway_ids, boot_results)}
+        phrase_map   = {a: ph   for a, (_, _, ph)  in zip(gateway_ids, boot_results)}
+        pre_phrases  = dict(zip(extra_keys, extra_results))
+        # Start google_connected phrase as background task — snippet data now available
+        if _has_google:
+            _cal_snip_pre   = snippet_map.get('calendar', '') if success_map.get('calendar') else ''
+            _email_snip_pre = snippet_map.get('email', '')   if success_map.get('email')    else ''
+            if _cal_snip_pre or _email_snip_pre:
+                _detail = (f'{_cal_snip_pre}, and {_email_snip_pre}'
+                           if _cal_snip_pre and _email_snip_pre
+                           else _cal_snip_pre or _email_snip_pre)
+                google_detail_task = asyncio.create_task(
+                    phrase_engine.generate('google_connected', {'detail': _detail})
+                )
 
-    _GOOGLE_GROUP = {'calendar', 'email'}
     google_announced = False
 
     for agent_id in gateway_ids:
-        # Gateway being up doesn't mean this specific integration is configured —
-        # use the per-agent success flag from the boot call.
         agent_ok = gw_ok and success_map.get(agent_id, False)
         status   = 'online' if agent_ok else 'degraded'
 
         if agent_id == 'smarthome':
+            snip = snippet_map.get(agent_id, '')
             if agent_ok:
-                # Responded within 5 s — announce immediately
                 gw_online += 1
-                label = _GATEWAY_LABELS['smarthome']
-                base  = await phrase_engine.generate('agent_online', {'label': label})
-                snip  = snippet_map.get(agent_id, '')
-                msg   = f'{base.rstrip(".")} — {snip}.' if snip else base
-                await speak_fn(
-                    'boot_status', msg,
-                    {'agent_id': agent_id, 'agent_status': 'online'},
-                    agent_tts(tts, agent_id, agent_voices),
+                base = phrase_map.get(agent_id) or await phrase_engine.generate(
+                    'agent_online', {'label': _GATEWAY_LABELS['smarthome']}
                 )
+                msg = f'{base.rstrip(".")} — {snip}.' if snip else base
+                await speak_fn('boot_status', msg, {'agent_id': agent_id, 'agent_status': 'online'}, agent_tts(tts, agent_id, agent_voices))
                 await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
-            elif snippet_map.get(agent_id) == '__auth__' or not gw_ok:
-                # Credentials missing — tell the user to configure
-                await speak_fn(
-                    'boot_status',
-                    await phrase_engine.generate('smarthome_auth_error', {}),
-                    {'agent_id': agent_id, 'agent_status': 'degraded'},
-                    agent_tts(tts, agent_id, agent_voices),
-                )
+            elif snip == '__auth__' or not gw_ok:
+                base = phrase_map.get(agent_id) or await phrase_engine.generate('smarthome_auth_error', {})
+                await speak_fn('boot_status', base, {'agent_id': agent_id, 'agent_status': 'degraded'}, agent_tts(tts, agent_id, agent_voices))
                 await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'degraded'})
             else:
-                # HA still booting — keep 'starting', poll in background
-                await speak_fn(
-                    'boot_status',
-                    await phrase_engine.generate('smarthome_starting', {}),
-                    {'agent_id': agent_id, 'agent_status': 'starting'},
-                    agent_tts(tts, agent_id, agent_voices),
-                )
-                asyncio.create_task(
-                    _poll_smarthome_until_online(send_fn, speak_fn, tts, agent_voices)
-                )
+                base = phrase_map.get(agent_id) or await phrase_engine.generate('smarthome_starting', {})
+                await speak_fn('boot_status', base, {'agent_id': agent_id, 'agent_status': 'starting'}, agent_tts(tts, agent_id, agent_voices))
+                asyncio.create_task(_poll_smarthome_until_online(send_fn, speak_fn, tts, agent_voices))
             continue
 
         if agent_id in _GOOGLE_GROUP:
@@ -850,17 +901,13 @@ async def boot_sequence(
                 if cal_ok or email_ok:
                     cal_snip   = snippet_map.get('calendar', '') if cal_ok else ''
                     email_snip = snippet_map.get('email', '') if email_ok else ''
-                    if cal_snip and email_snip:
-                        msg = await phrase_engine.generate('google_connected', {'detail': f'{cal_snip}, and {email_snip}'})
-                    elif cal_snip:
-                        msg = await phrase_engine.generate('google_connected', {'detail': cal_snip})
-                    elif email_snip:
-                        msg = await phrase_engine.generate('google_connected', {'detail': email_snip})
+                    if (cal_snip or email_snip) and google_detail_task:
+                        msg = await google_detail_task
                     else:
-                        msg = await phrase_engine.generate('google_online', {})
+                        msg = pre_phrases.get('google_online') or await phrase_engine.generate('google_online', {})
                     google_status = 'online'
                 else:
-                    msg = await phrase_engine.generate('google_not_configured', {})
+                    msg = pre_phrases.get('google_not_configured') or await phrase_engine.generate('google_not_configured', {})
                     google_status = 'degraded'
                 await speak_fn(
                     'boot_status', msg,
@@ -874,15 +921,10 @@ async def boot_sequence(
             if agent_ok:
                 gw_online += 1
                 snip = snippet_map.get(agent_id, '')
-                if agent_id in ('dhan', 'zerodha'):
-                    broker = 'Dhan' if agent_id == 'dhan' else 'Zerodha'
-                    base = await phrase_engine.generate(
-                        'broker_connected', {'broker': broker, 'assistant_name': assistant_name}
-                    )
-                else:
-                    label = _GATEWAY_LABELS.get(agent_id, agent_id.title())
-                    base  = await phrase_engine.generate('agent_online', {'label': label})
-                msg = f'{base.rstrip(".")} — {snip}.' if snip else base
+                base = phrase_map.get(agent_id) or await phrase_engine.generate(
+                    'agent_online', {'label': _GATEWAY_LABELS.get(agent_id, agent_id.title())}
+                )
+                msg  = f'{base.rstrip(".")} — {snip}.' if snip else base
                 await speak_fn(
                     'boot_status', msg,
                     {'agent_id': agent_id, 'agent_status': status},
@@ -891,7 +933,7 @@ async def boot_sequence(
             elif agent_id == 'portfolio' and snippet_map.get(agent_id) == '__auth__':
                 await speak_fn(
                     'boot_status',
-                    await phrase_engine.generate('portfolio_auth_error', {}),
+                    phrase_map.get(agent_id) or await phrase_engine.generate('portfolio_auth_error', {}),
                     {'agent_id': agent_id, 'agent_status': 'degraded'},
                     agent_tts(tts, agent_id, agent_voices),
                 )
@@ -902,10 +944,19 @@ async def boot_sequence(
         *[test_agent(agent_id) for agent_id in local_ids]
     )
 
-    local_online = 0
+    local_online = sum(1 for _, s, _ in results if s == 'online')
+
+    # Start boot_ready phrase in background so it overlaps with local announcements
+    total_online     = gw_online + local_online
+    total_configured = len(gateway_ids) + len(local_ids)
+    boot_ready_task  = asyncio.create_task(phrase_engine.generate('boot_ready', {
+        'total_online':   total_online,
+        'total':          total_configured,
+        'name':           calling_name,
+        'assistant_name': assistant_name,
+    }))
+
     for agent_id, status, msg in results:
-        if status == 'online':
-            local_online += 1
         await speak_fn(
             'boot_status', msg,
             {'agent_id': agent_id, 'agent_status': status},
@@ -917,17 +968,10 @@ async def boot_sequence(
     for agent_id in silent_skills:
         await send_fn('agent_status_changed', {'agent': agent_id, 'status': 'online'})
 
-    # Final ready announcement — all agents assembled, open for questions
-    total_online = gw_online + local_online
-    total_configured = len(gateway_ids) + len(local_ids)
+    # boot_ready phrase should already be resolved by now
     await speak_fn(
         'boot_status',
-        await phrase_engine.generate('boot_ready', {
-            'total_online':   total_online,
-            'total':          total_configured,
-            'name':           calling_name,
-            'assistant_name': assistant_name,
-        }),
+        await boot_ready_task,
         None,
         agent_tts(tts, 'general', agent_voices),
     )

@@ -647,7 +647,7 @@ export function useOrchestratorRuntime(
           ? Object.fromEntries(
               Object.entries(agentVoiceConfigRef.current).map(([id, v]) => [
                 id,
-                { openai_voice: v.openaiVoice },
+                { openai_voice: v.openaiVoice, speed: v.speed },
               ])
             )
           : {},

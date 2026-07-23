@@ -788,12 +788,14 @@ export function StocksPortfolio({
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState('');
   const [syncedAt, setSyncedAt] = useState('');
-  const [zerodhaError, setZerodhaError] = useState('');
+  const [zerodhaError, setZerodhaError]         = useState('');
+  const [zerodhaIsAuthError, setZerodhaIsAuthError] = useState(false);
 
   const fetchHoldings = useCallback(async () => {
     setLoading(true);
     setError('');
     setZerodhaError('');
+    setZerodhaIsAuthError(false);
     try {
       // Fetch sheet + Dhan + Zerodha holdings in parallel
       const sheetPromise = (async (): Promise<StockRow[]> => {
@@ -835,10 +837,13 @@ export function StocksPortfolio({
         const res = await fetch('http://localhost:8788/api/zerodha/holdings');
         const resp = await res.json();
         if (!resp.ok) {
-          const msg = resp.authRequired || /login|auth|session/i.test(resp.error ?? '')
-            ? 'Session expired — reconnect in Settings → Stock Market → Zerodha.'
-            : (resp.error ?? 'Failed to load Zerodha holdings');
-          setZerodhaError(msg);
+          const isAuth = resp.authRequired || /login|auth|session/i.test(resp.error ?? '');
+          setZerodhaIsAuthError(isAuth);
+          setZerodhaError(
+            isAuth
+              ? 'Reconnect in Settings → Stock Market → Zerodha, then click Retry.'
+              : (resp.error ?? 'Failed to load Zerodha holdings')
+          );
           return [];
         }
         const raw = resp.data;
@@ -1077,15 +1082,25 @@ export function StocksPortfolio({
               {!loading && !error && tab === 'zerodha' && (
                 <motion.div key="zerodha" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.12 }}>
                   {zerodhaError ? (
-                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                    <div className="flex flex-col items-center gap-4 py-8 text-center">
                       <div className="w-10 h-10 rounded-2xl flex items-center justify-center"
                         style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)' }}>
                         <AlertTriangle size={18} color="#f87171" />
                       </div>
                       <div>
-                        <p className="text-sm text-red-300 font-semibold font-mono">Zerodha session expired</p>
+                        <p className="text-sm text-red-300 font-semibold font-mono">
+                          {zerodhaIsAuthError ? 'Zerodha session expired' : 'Zerodha unavailable'}
+                        </p>
                         <p className="text-[11px] text-slate-500 mt-1 font-mono leading-relaxed max-w-xs">{zerodhaError}</p>
                       </div>
+                      <button
+                        onClick={fetchHoldings}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-mono font-medium transition-colors"
+                        style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }}
+                      >
+                        <RefreshCw size={11} />
+                        Retry
+                      </button>
                     </div>
                   ) : (
                     <HoldingsTab rows={rows} hidden={hidden} broker="zerodha" />

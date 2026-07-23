@@ -13,20 +13,20 @@ export type AgentVoiceMap = Record<string, AgentVoiceSetting>;
 export const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'nova', 'onyx', 'shimmer'] as const;
 
 const DEFAULT_AGENT_VOICES: AgentVoiceMap = {
-  system:    { gender: 'male',   speed: 'slow',   voiceName: '', openaiVoice: 'echo'    },
-  weather:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
-  calendar:  { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'shimmer' },
-  email:     { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
-  github:    { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'onyx'    },
-  stock:     { gender: 'male',   speed: 'slow',   voiceName: '', openaiVoice: 'fable'   },
-  news:      { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'echo'    },
+  system:     { gender: 'male',   speed: 'normal', voiceName: '', openaiVoice: 'echo'    },
+  weather:    { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
+  calendar:   { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'shimmer' },
+  email:      { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
+  github:     { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'onyx'    },
+  stock:      { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'fable'   },
+  news:       { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'echo'    },
   smarthome:  { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
-  portfolio:  { gender: 'male',   speed: 'slow',   voiceName: '', openaiVoice: 'fable'   },
+  portfolio:  { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'fable'   },
   whatsapp:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
-  websearch:  { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'alloy'   },
-  calculator: { gender: 'male',   speed: 'normal', voiceName: '', openaiVoice: 'echo'    },
+  websearch:  { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'alloy'   },
+  calculator: { gender: 'male',   speed: 'fast',   voiceName: '', openaiVoice: 'echo'    },
   memory:     { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'shimmer' },
-  briefing:   { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
+  briefing:   { gender: 'female', speed: 'fast',   voiceName: '', openaiVoice: 'nova'    },
   general:    { gender: 'female', speed: 'normal', voiceName: '', openaiVoice: 'nova'    },
 };
 

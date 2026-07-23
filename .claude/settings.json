@@ -11,7 +11,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173)",
       "Bash(python3 -m py_compile apps/orchestrator/app/voice/tts.py)",
       "Bash(python3 -m py_compile apps/orchestrator/app/services/tts_helpers.py)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(python3 -m py_compile apps/orchestrator/app/api/routes/notifications.py)"
     ],
     "additionalDirectories": []
   }

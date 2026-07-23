@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 
 from fastapi import APIRouter, Query
 
@@ -17,8 +19,31 @@ _POLL_MAP: dict[str, tuple[str, dict]] = {
     'news':      ('news__get_news',              {'query': 'top headlines'}),
     'portfolio': ('indmoney__query_portfolio',   {'query': 'portfolio summary'}),
     'system':    ('system__get_system_info',     {'query': 'cpu memory load'}),
-    'smarthome': ('smarthome__system_overview',  {}),
+    'smarthome': ('smarthome__list_entities',    {'domain': 'switch', 'detailed': False, 'limit': 50}),
 }
+
+
+def _extract_switch_states(raw: str) -> str:
+    """Reduce list_entities output to sorted 'entity_id:state' lines.
+
+    Strips timestamps/attributes so only an actual on/off flip triggers a diff.
+    """
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            pairs = sorted(
+                f"{e['entity_id']}:{e['state']}"
+                for e in data
+                if isinstance(e, dict) and 'entity_id' in e and 'state' in e
+            )
+            return '\n'.join(pairs) if pairs else raw[:300]
+    except Exception:
+        pass
+    # Fallback: regex for both single-quoted and double-quoted representations
+    pairs = re.findall(r"['\"]entity_id['\"]\s*:\s*['\"]([^'\"]+)['\"][^}]*['\"]state['\"]\s*:\s*['\"]([^'\"]+)['\"]", raw)
+    if pairs:
+        return '\n'.join(sorted(f"{eid}:{st}" for eid, st in pairs))
+    return raw[:300]
 
 
 @router.get('/api/notifications/poll')
@@ -36,7 +61,8 @@ async def notifications_poll(agents: str = Query('')) -> dict:
         tool, args = _POLL_MAP[aid]
         try:
             result = await gateway_client.call_tool(tool, args)
-            return aid, {'ok': True, 'summary': str(result)}
+            summary = _extract_switch_states(str(result)) if aid == 'smarthome' else str(result)
+            return aid, {'ok': True, 'summary': summary}
         except PermissionError:
             return aid, {'ok': False, 'summary': '__auth__'}
         except Exception as exc:

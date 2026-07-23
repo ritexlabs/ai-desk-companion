@@ -13,7 +13,7 @@ const INTERVALS: Record<string, number> = {
   news:      30 * 60_000,
   portfolio: 15 * 60_000,
   system:    5  * 60_000,
-  smarthome: 2  * 60_000,
+  smarthome: 30_000,
 };
 
 // What to say and what to ask the LLM when user says "yes"
@@ -25,7 +25,7 @@ const TEMPLATES: Record<string, { question: string; followUp: string }> = {
   weather:   { question: 'Master, the weather has changed. Would you like an update?',               followUp: 'What is the current weather?' },
   portfolio: { question: 'Master, your portfolio has a new update. Want me to read it?',             followUp: 'Give me my portfolio summary' },
   system:    { question: 'Master, your system resources are elevated. Want a full report?',          followUp: 'What is the current system status?' },
-  smarthome: { question: 'Master, there is a smart home update. Want the details?',                  followUp: 'What is the smart home status?' },
+  smarthome: { question: 'Master, a smart home switch just changed state. Want me to report it?',   followUp: 'Which smart home switches changed state and what are their current states?' },
 };
 
 function activeAgents(cfg: AgentConfig): string[] {
